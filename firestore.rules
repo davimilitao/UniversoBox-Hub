@@ -1,0 +1,80 @@
+rules_version = '2';
+
+// UniversoBox Hub — isolamento multi-tenant via custom claim `tenantId` + `role`.
+// O backend (Admin SDK) ignora estas regras; elas protegem acesso direto do cliente (Web/Mobile).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Auxiliar obrigatório: tenant do JWT deve coincidir com o path ─────────
+    // Por que: impede que um usuário autenticado leia/ escreva dados de outro tenant
+    // usando apenas o path da URL/SDK (sem confiar em tenantId vindo do body).
+    function belongsToTenant(tenantId) {
+      return request.auth != null
+        && request.auth.token.tenantId == tenantId;
+    }
+
+    // Admin da empresa: mesmo tenant + papel explícito no token (setCustomUserClaims)
+    function isAdminOfTenant(tenantId) {
+      return belongsToTenant(tenantId)
+        && request.auth.token.role == 'admin';
+    }
+
+    // ── 1) Metadados do tenant (dropdown pós-autenticação Firebase Auth) ─────
+    // Leitura: qualquer usuário já autenticado (ainda sem claim ou já provisionado).
+    // Por que o LoginPage precisa: lista tenants ativas após signIn, antes de /auth/provision.
+    // Escrita: bloqueada — criação/edição de tenant só via Admin SDK (console ou backend).
+    match /tenants/{tenantId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // ── 2) Membros: perfil próprio ou visão admin do mesmo tenant ─────────────
+    // Escrita: bloqueada — provisionamento de membros via processos server-side.
+    match /tenants/{tenantId}/members/{uid} {
+      allow read: if belongsToTenant(tenantId)
+        && (request.auth.uid == uid || request.auth.token.role == 'admin');
+      allow write: if false;
+    }
+
+    // ── 3) Produtos por tenant ─────────────────────────────────────────────────
+    // Por que validar tenantId no documento: defesa em profundidade se regras do path falharem.
+    match /tenants/{tenantId}/products/{sku} {
+      allow read: if belongsToTenant(tenantId);
+      allow create: if belongsToTenant(tenantId)
+        && request.resource.data.tenantId == tenantId;
+      allow update: if belongsToTenant(tenantId)
+        && request.resource.data.tenantId == tenantId
+        && request.resource.data.tenantId == resource.data.tenantId;
+      allow delete: if belongsToTenant(tenantId)
+        && resource.data.tenantId == tenantId;
+    }
+
+    // ── 4) Pedidos: operações típicas de operação + admin para exclusão ────────
+    match /tenants/{tenantId}/orders/{orderId} {
+      allow read: if belongsToTenant(tenantId);
+
+      allow create: if belongsToTenant(tenantId)
+        && request.resource.data.tenantId == tenantId;
+
+      // Update: não permite mudar tenantId (nem “pular” de tenant).
+      allow update: if belongsToTenant(tenantId)
+        && request.resource.data.tenantId == tenantId
+        && request.resource.data.tenantId == resource.data.tenantId;
+
+      allow delete: if isAdminOfTenant(tenantId);
+    }
+
+    // ── 5) Logs de auditoria: transparência só para admin; escrita só servidor ─
+    // Nome da subcoleção alinhado ao produto (Admin SDK grava sem passar por estas regras).
+    match /tenants/{tenantId}/audit_logs/{logId} {
+      allow read: if isAdminOfTenant(tenantId);
+      allow write: if false;
+    }
+
+    // ── 6) Catch-all: nega tudo que não foi explicitamente permitido ───────────
+    // Por que: reduz superfície de ataque (coleções legadas em /root ficam bloqueadas).
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
