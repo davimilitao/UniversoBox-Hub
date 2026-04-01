@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pedidos do Dia — Expedição Pro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/erp.css" />
+  <link rel="stylesheet" href="/erp-custom.css">
+  <style>
+    /* ── LAYOUT GERAL ── */
+    .orders-layout {
+      display: grid;
+      grid-template-columns: 290px 1fr;
+      flex: 1; overflow: hidden;
+      min-height: 0; height: 100%;
+    }
+    .orders-list-col {
+      border-right: 1px solid var(--border-subtle);
+      display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+    }
+    .orders-list-toolbar {
+      padding: 10px 12px; border-bottom: 1px solid var(--border-subtle);
+      display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
+    }
+    .orders-tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+    .otab {
+      padding: 6px 4px; background: var(--depth-4);
+      border: 1px solid var(--border-subtle); border-radius: var(--r-sm);
+      cursor: pointer; font-family: var(--font-body); font-size: 11px;
+      font-weight: 600; color: var(--text-secondary); text-align: center;
+      transition: all var(--transition-fast);
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+    }
+    .otab:hover { background: var(--depth-5); color: var(--text-primary); }
+    .otab.active { background: rgba(59,130,246,.12); color: var(--accent-blue); border-color: rgba(59,130,246,.25); }
+    .otab-count { font-family: 'Space Mono', monospace; font-size: 17px; font-weight: 700; line-height: 1; }
+    .otab.active .otab-count { color: var(--accent-blue); }
+    .orders-search input {
+      width: 100%; background: var(--depth-4); border: 1px solid var(--border-subtle);
+      border-radius: var(--r-sm); padding: 7px 10px; color: var(--text-primary);
+      font-family: var(--font-body); font-size: 12px; outline: none;
+    }
+    .orders-search input:focus { border-color: var(--accent-blue); }
+    .orders-list-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+    .orders-list-scroll::-webkit-scrollbar { width: 3px; }
+    .orders-list-scroll::-webkit-scrollbar-thumb { background: var(--depth-5); border-radius: 2px; }
+
+    /* ── ORDER CARD ── */
+    .order-card {
+      background: var(--depth-3); border: 1px solid var(--border-default);
+      border-left: 3px solid transparent; border-radius: var(--r-md);
+      padding: 10px 12px; cursor: pointer; transition: all var(--transition-fast);
+      margin-bottom: 6px; display: block; width: 100%; text-align: left;
+      color: inherit; font-family: var(--font-body);
+    }
+    .order-card:hover { background: var(--depth-4); border-color: var(--border-strong); }
+    .order-card.active { border-color: var(--accent-blue); border-left-color: var(--accent-blue); background: rgba(59,130,246,.07); }
+    .order-card.priority { border-left-color: var(--accent-yellow); }
+    .oc-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px; }
+    .oc-id { font-family: 'Space Mono', monospace; font-size: 12px; font-weight: 700; }
+    .oc-badges { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+    .oc-badge { font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: var(--r-full); }
+    .badge-ml    { background: rgba(245,200,66,.9); color: #000; }
+    .badge-shop  { background: rgba(249,115,22,.15); color: var(--accent-orange); border: 1px solid rgba(249,115,22,.25); }
+    .badge-flex  { background: var(--accent-yellow); color: #000; }
+    .badge-agency { background: rgba(249,115,22,.15); color: var(--accent-orange); border: 1px solid rgba(249,115,22,.25); font-size: 9px; }
+    .badge-other { background: var(--depth-5); color: var(--text-secondary); border: 1px solid var(--border-default); }
+    .oc-ratio { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--text-secondary); }
+    .oc-time  { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+    .oc-thumbs { display: flex; gap: 3px; margin-top: 6px; }
+    .oc-thumb { width: 26px; height: 26px; border-radius: 4px; object-fit: cover; border: 1px solid var(--border-subtle); background: var(--depth-4); }
+    .oc-thumb-more { width: 26px; height: 26px; border-radius: 4px; background: var(--depth-5); display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: var(--text-muted); border: 1px solid var(--border-default); }
+    .oc-progress { margin-top: 7px; }
+    .oc-bar-wrap { height: 3px; background: var(--depth-5); border-radius: var(--r-full); overflow: hidden; }
+    .oc-bar { height: 100%; border-radius: var(--r-full); background: var(--accent-blue); transition: width .3s; }
+    .oc-bar.full { background: var(--accent-green); }
+
+    /* ── TAGS ── */
+    .tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: var(--r-full); }
+    .tag-pending { background: rgba(249,115,22,.15); color: var(--accent-orange); border: 1px solid rgba(249,115,22,.25); }
+    .tag-picked  { background: rgba(59,130,246,.15);  color: var(--accent-blue);   border: 1px solid rgba(59,130,246,.25); }
+    .tag-packed  { background: rgba(16,185,129,.15);  color: var(--accent-green);  border: 1px solid rgba(16,185,129,.25); }
+
+    /* ── COLUNA DETALHE — SEPARAÇÃO ── */
+    .orders-detail-col { display: flex; flex-direction: column; overflow: hidden; }
+    .detail-header {
+      padding: 12px 18px; border-bottom: 1px solid var(--border-subtle);
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; flex-shrink: 0; background: var(--depth-3);
+    }
+    .detail-order-id { font-family: 'Space Mono', monospace; font-size: 16px; font-weight: 700; }
+    .detail-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 3px; }
+    .scanner-bar-wrap { padding: 8px 18px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+    .items-scroll {
+      flex: 1; overflow-y: auto; padding: 12px 18px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .items-scroll::-webkit-scrollbar { width: 4px; }
+    .items-scroll::-webkit-scrollbar-thumb { background: var(--depth-4); border-radius: 2px; }
+    .progress-footer-wrap {
+      padding: 10px 18px; border-top: 1px solid var(--border-subtle);
+      display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+      background: var(--depth-3);
+    }
+    .no-order {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 10px; color: var(--text-muted); text-align: center; padding: 40px;
+    }
+
+    /* ── ITEM ROW ── */
+    .item-row {
+      background: var(--depth-3); border: 1px solid var(--border-default);
+      border-radius: var(--r-md); overflow: clip; transition: border-color var(--transition-fast);
+      position: relative;
+    }
+    .item-row.checked { border-color: rgba(16,185,129,.25); background: rgba(16,185,129,.03); }
+    .item-row.checked::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+      width: 4px; background: var(--accent-green);
+    }
+    .item-top { display: grid; grid-template-columns: 80px 1fr 88px; min-height: 80px; }
+    .item-img-wrap { position: relative; cursor: pointer; }
+    .item-photo-img { width: 80px; height: 80px; object-fit: cover; display: block; background: var(--depth-4); }
+    .photo-hint { position: absolute; bottom: 4px; right: 4px; font-size: 11px; background: rgba(0,0,0,.55); border-radius: 4px; padding: 1px 4px; }
+    .item-info { padding: 9px 12px; display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; }
+    .item-name { font-weight: 700; font-size: 13px; line-height: 1.3; }
+    .item-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+    .itag { font-family: 'Space Mono', monospace; font-size: 9px; color: var(--text-muted); background: var(--depth-5); border: 1px solid var(--border-subtle); padding: 2px 5px; border-radius: 4px; }
+    .itag-bin { color: var(--accent-yellow); border-color: rgba(245,200,66,.2); background: rgba(245,200,66,.06); }
+    .item-notes { font-size: 11px; color: var(--accent-orange); background: rgba(249,115,22,.08); border: 1px solid rgba(249,115,22,.2); border-radius: var(--r-sm); padding: 3px 7px; }
+    .btn-expand { background: none; border: none; color: var(--accent-blue); font-size: 11px; font-weight: 700; cursor: pointer; padding: 0; text-align: left; font-family: var(--font-body); }
+    .btn-expand:hover { text-decoration: underline; }
+    .item-qty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 14px; gap: 5px; border-left: 1px solid var(--border-subtle); background: var(--depth-4); }
+    .qty-num { font-family: 'Space Mono', monospace; font-size: 26px; font-weight: 700; line-height: 1; color: var(--text-primary); }
+    .qty-num.full { color: var(--accent-green); }
+    .qty-of { font-size: 9px; color: var(--text-muted); }
+    .qty-btn { width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--depth-5); border: 1px solid var(--border-default); color: var(--text-primary); font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all var(--transition-fast); }
+    .qty-btn:hover:not(:disabled) { background: var(--accent-blue); border-color: transparent; color: #fff; }
+    .qty-btn:disabled { opacity: .25; cursor: not-allowed; }
+    .qty-btn.done { background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.3); color: var(--accent-green); }
+    .item-photos-panel { border-top: 1px solid var(--border-subtle); background: var(--depth-4); padding: 12px 14px; }
+    .item-photos-panel.hidden { display: none; }
+    .photos-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+    .photo-col { display: flex; flex-direction: column; gap: 5px; }
+    .photo-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; display: flex; justify-content: space-between; }
+    .photo-date { font-size: 9px; font-weight: 400; color: var(--text-muted); }
+    .photo-big { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--r-md); border: 1px solid var(--border-default); background: var(--depth-5); cursor: zoom-in; }
+    .photo-empty { width: 100%; aspect-ratio: 1; border-radius: var(--r-md); border: 1px dashed var(--border-default); background: var(--depth-5); display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; color: var(--text-muted); text-align: center; gap: 3px; }
+    .bin-label-big { margin-top: 10px; font-size: 12px; font-weight: 700; color: var(--accent-yellow); background: rgba(245,200,66,.07); border-radius: var(--r-sm); padding: 6px 10px; border: 1px solid rgba(245,200,66,.15); }
+
+    /* ── PAINEL DE EXPEDIÇÃO (aba Separado) ── */
+    .expedicao-panel {
+      flex: 1; overflow-y: auto; padding: 16px 20px;
+      display: block; /* block em vez de flex — evita compressão dos cards filhos */
+    }
+    .expedicao-panel .exp-card { margin-bottom: 12px; }
+    .expedicao-panel::-webkit-scrollbar { width: 4px; }
+    .expedicao-panel::-webkit-scrollbar-thumb { background: var(--depth-4); border-radius: 2px; }
+
+    /* Card de expedição — um card por pedido, layout visual limpo */
+    .exp-card {
+      background: var(--depth-3); border: 1px solid var(--border-default);
+      border-radius: var(--r-lg);
+      transition: border-color var(--transition-fast);
+      flex-shrink: 0; /* não deixa o card ser comprimido pelo flex pai */
+    }
+    .exp-card:hover { border-color: var(--border-strong); }
+
+    /* Cabeçalho do card de expedição */
+    .exp-card-header {
+      padding: 12px 16px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--depth-4);
+    }
+    .exp-card-id {
+      font-family: 'Space Mono', monospace; font-size: 13px; font-weight: 700;
+    }
+    .exp-card-badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+    /* Destaque de etiqueta — apelido ML ou código Shopee */
+    .exp-etiqueta-ml {
+      font-size: 18px; font-weight: 800; color: var(--accent-yellow);
+      background: rgba(245,200,66,.1); border: 1px solid rgba(245,200,66,.25);
+      border-radius: var(--r-md); padding: 10px 16px; margin: 12px 16px 0;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .exp-etiqueta-shop {
+      font-size: 16px; font-weight: 800; color: var(--accent-orange);
+      font-family: 'Space Mono', monospace;
+      background: rgba(249,115,22,.08); border: 1px solid rgba(249,115,22,.2);
+      border-radius: var(--r-md); padding: 10px 16px; margin: 12px 16px 0;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .exp-etiqueta-label {
+      font-size: 9px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: var(--text-muted); display: block; margin-bottom: 2px;
+    }
+
+    /* Lista de itens no card de expedição */
+    .exp-items { padding: 10px 16px; display: flex; flex-direction: column; gap: 6px; }
+    .exp-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 0; border-bottom: 1px solid var(--border-subtle);
+    }
+    .exp-item:last-child { border-bottom: none; }
+    .exp-item-img { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; flex-shrink: 0; background: var(--depth-5); }
+    .exp-item-info { flex: 1; min-width: 0; }
+    .exp-item-name { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .exp-item-sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+    .exp-item-qty { font-family: 'Space Mono', monospace; font-size: 18px; font-weight: 800; color: var(--accent-green); flex-shrink: 0; }
+
+    /* Footer do card de expedição */
+    .exp-card-footer {
+      padding: 10px 16px; border-top: 1px solid var(--border-subtle);
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      background: var(--depth-4);
+    }
+    .exp-card-time { font-size: 11px; color: var(--text-muted); }
+
+    /* Painel vazio */
+    .exp-empty {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 10px; color: var(--text-muted); text-align: center; padding: 60px;
+    }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 900px) {
+      .orders-layout { grid-template-columns: 1fr; grid-template-rows: 260px 1fr; height: 100%; }
+      .orders-list-col { height: 260px; border-right: none; border-bottom: 1px solid var(--border-subtle); }
+      .orders-detail-col { min-height: 0; overflow: hidden; }
+    }
+  </style>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+
+<div class="erp-layout">
+  <div id="sidebar-placeholder"></div>
+
+  <main class="erp-main" style="overflow:hidden;display:flex;flex-direction:column;height:calc(100vh - 0px);">
+
+    <div class="page-header" style="padding-bottom:12px;flex-shrink:0;">
+      <div>
+        <h1 class="page-title">📦 Pedidos do Dia</h1>
+        <p class="page-subtitle" id="pageSubtitle">Separação com scanner · bipe SKU ou EAN + Enter</p>
+      </div>
+      <div class="page-actions">
+        <div class="badge badge-muted font-mono" id="clock" style="padding:5px 10px;">--:--:--</div>
+        <button class="btn btn-ghost btn-sm" onclick="refreshAll()">⟳</button>
+        <a href="/manual" class="btn btn-primary btn-sm">+ Pedido</a>
+      </div>
+    </div>
+
+    <div class="orders-layout">
+
+      <!-- LISTA -->
+      <div class="orders-list-col">
+        <div class="orders-list-toolbar">
+          <div class="orders-tabs">
+            <button class="otab active" data-status="pending" onclick="switchTab('pending')">
+              <span class="otab-count" id="tc-p">0</span><span>Separar</span>
+            </button>
+            <button class="otab" data-status="picked" onclick="switchTab('picked')">
+              <span class="otab-count" id="tc-i">0</span><span>Expedir</span>
+            </button>
+            <button class="otab" data-status="packed" onclick="switchTab('packed')">
+              <span class="otab-count" id="tc-k">0</span><span>Expedido</span>
+            </button>
+          </div>
+          <div class="orders-search">
+            <input type="text" id="filterInput" placeholder="Filtrar pedidos…" oninput="renderList()" />
+          </div>
+        </div>
+        <div class="orders-list-scroll" id="orderList"></div>
+      </div>
+
+      <!-- DETALHE — muda conforme a aba ativa -->
+      <div class="orders-detail-col" id="detailCol">
+
+        <!-- VAZIO -->
+        <div class="no-order" id="noOrder">
+          <div style="font-size:44px;opacity:.1;">📦</div>
+          <div style="font-size:15px;color:var(--text-secondary);font-weight:600;">Selecione um pedido</div>
+          <div style="font-size:12px;max-width:240px;line-height:1.6;">Clique em um pedido para ver os itens e iniciar a separação.</div>
+        </div>
+
+        <!-- SEPARAÇÃO (aba pending) -->
+        <div id="orderView" style="display:none;flex-direction:column;height:100%;overflow:hidden;">
+          <div class="detail-header">
+            <div>
+              <div class="detail-order-id" id="viewId">—</div>
+              <div class="detail-meta" id="viewMeta"></div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm" onclick="refreshSelected()">⟳</button>
+              <button class="btn btn-primary btn-sm" id="btnPicked" disabled onclick="markPicked()">✓ Separado</button>
+            </div>
+          </div>
+          <div class="scanner-bar-wrap">
+            <div class="scanner-bar">
+              <div class="scanner-pulse"></div>
+              <span><strong>Scanner ativo</strong> — bipe SKU ou EAN + Enter</span>
+              <span class="scanner-status ready font-mono" id="scanStatus">● PRONTO</span>
+            </div>
+          </div>
+          <div class="items-scroll" id="itemsArea"></div>
+          <div class="progress-footer-wrap">
+            <span style="font-size:11px;color:var(--text-secondary);">Progresso</span>
+            <div class="progress-bar-wrap" style="flex:1;">
+              <div class="progress-bar-fill" id="pfBar" style="width:0%"></div>
+            </div>
+            <span class="font-mono" style="font-size:13px;font-weight:700;" id="pfPct">0 / 0</span>
+          </div>
+        </div>
+
+        <!-- EXPEDIÇÃO (aba picked) — todos os pedidos separados em cards -->
+        <div id="expedicaoView" style="display:none;flex-direction:column;height:100%;overflow:hidden;">
+          <div class="detail-header">
+            <div>
+              <div style="font-size:15px;font-weight:800;">🏷️ Pronto para Expedir</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Cole a etiqueta e confirme cada pedido</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="refreshAll()">⟳ Atualizar</button>
+          </div>
+          <div class="expedicao-panel" id="expedicaoPanel"></div>
+        </div>
+
+        <!-- EXPEDIDO (aba packed) — histórico simples -->
+        <div id="expedidoView" style="display:none;flex-direction:column;height:100%;overflow:hidden;">
+          <div class="detail-header">
+            <div>
+              <div style="font-size:15px;font-weight:800;">✅ Expedidos</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Pedidos finalizados hoje</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="refreshAll()">⟳</button>
+          </div>
+          <div class="expedicao-panel" id="expedidoPanel"></div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="scan-flash" id="scanFlash"></div>
+<input type="text" id="scannerInput" style="opacity:0;position:absolute;pointer-events:none;width:1px;height:1px;" autocomplete="off" />
+
+<script src="/menu.js"></script>
+<script>
+function tick(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('pt-BR');}
+setInterval(tick,1000);tick();
+</script>
+<script src="/pedidos.js"></script>
+</body>
+</html>
