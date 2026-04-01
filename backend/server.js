@@ -1613,7 +1613,7 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const SHEET_NAME = 'Despesas'; // Nome exato da aba na sua planilha
 
 // --- Rota GET: Ler despesas da planilha ---
-app.get('/api/despesas', async (req, res, next) => {
+app.get('/api/despesas', requireFirebaseAuth, async (req, res, next) => {
   try {
     if (!SPREADSHEET_ID) return res.status(500).json({ error: 'SPREADSHEET_ID não configurado' });
 
