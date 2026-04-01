@@ -57,11 +57,24 @@ setupTenantProvisioningRoutes(app, db);
 
 // ---------------- Static (public) ----------------
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const SPA_DIR = path.join(PUBLIC_DIR, 'spa');
-// SPA React (Vite build em /spa) — login e dashboard antes do static geral
+
+// SPA React — serve os assets buildados
 app.use('/spa', express.static(SPA_DIR));
-app.get('/login', (req, res) => res.sendFile(path.join(SPA_DIR, 'index.html')));
-app.get('/dashboard/:tenantId', (req, res) => res.sendFile(path.join(SPA_DIR, 'index.html')));
+
+// Rotas do SPA — qualquer path abaixo de /spa/* serve o index.html
+// O React Router cuida do roteamento no cliente
+app.get('/spa/*', (req, res) => res.sendFile(path.join(SPA_DIR, 'index.html')));
+
+// Atalhos sem /spa/ redirecionam para o caminho correto
+app.get('/login', (req, res) => res.redirect('/spa/login'));
+app.get('/dashboard/:tenantId', (req, res) =>
+  res.redirect(`/spa/dashboard/${req.params.tenantId}`)
+);
+//const SPA_DIR = path.join(PUBLIC_DIR, 'spa');
+// SPA React (Vite build em /spa) — login e dashboard antes do static geral
+//app.use('/spa', express.static(SPA_DIR));
+//app.get('/login', (req, res) => res.sendFile(path.join(SPA_DIR, 'index.html')));
+//app.get('/dashboard/:tenantId', (req, res) => res.sendFile(path.join(SPA_DIR, 'index.html')));
 app.use(express.static(PUBLIC_DIR));
 app.get('/', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 app.get('/manual', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manual.html')));
