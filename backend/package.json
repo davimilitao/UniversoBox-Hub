@@ -5,11 +5,10 @@
   "description": "Expedição Pro — Pedido Manual (MVP) backend Node/Express + Firestore (Admin SDK)",
   "main": "server.js",
   "scripts": {
-    "dev": "nodemon server.js",
-    "start": "node server.js",
-    "build": "cd ../frontend && npm install && npm run build",
-    "import:products": "node scripts/import_products_csv.js"
-  },
+  "dev": "nodemon server.js",
+  "start": "node server.js",
+  "import:products": "node scripts/import_products_csv.js"
+},
   "dependencies": {
     "cloudinary": "^2.9.0",
     "cors": "^2.8.5",
