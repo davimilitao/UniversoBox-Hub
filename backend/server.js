@@ -1751,7 +1751,7 @@ app.get('/api/margem', requireFirebaseAuth, async (req, res, next) => {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Margem!A4:Z',
+      range: 'Margem!A4:AD', // até coluna AD para garantir cobertura
     });
 
     const rows = response.data.values || [];
@@ -1760,15 +1760,26 @@ app.get('/api/margem', requireFirebaseAuth, async (req, res, next) => {
     // Linha 0 = cabeçalhos (linha 4 na planilha)
     const headers = rows[0].map(h => String(h || '').trim());
 
+    // Normaliza acentos para comparação robusta
+    function norm(s) {
+      return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    }
     function col(name) {
-      const idx = headers.findIndex(h => h.toLowerCase().includes(name.toLowerCase()));
+      const needle = norm(name);
+      const idx = headers.findIndex(h => norm(h).includes(needle));
       return idx >= 0 ? idx : -1;
     }
 
+    // Log de debug em desenvolvimento
+    console.log('[/api/margem] headers:', headers);
+
     function parseBRL(str) {
       if (str === undefined || str === null || str === '') return 0;
-      const cleaned = String(str).replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
-      return parseFloat(cleaned) || 0;
+      const s = String(str);
+      const neg = s.includes('-');
+      const cleaned = s.replace(/[R$\s\-]/g, '').replace(/\./g, '').replace(',', '.');
+      const val = parseFloat(cleaned) || 0;
+      return neg ? -val : val;
     }
 
     function parsePerc(str) {
