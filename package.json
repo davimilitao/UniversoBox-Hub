@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "cd frontend && npm ci && npm run build && mkdir -p ../backend/public/spa && cp -r dist/. ../backend/public/spa && cd ../backend && npm ci",
+    "build": "cd frontend && npm ci && npm run build && cd ../backend && npm ci",
     "start": "node backend/server.js"
   },
   "engines": {
