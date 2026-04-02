@@ -9,13 +9,15 @@
  * @author UniversoLab
  *
  * @changelog
+ *   2.0.0 — 2026-04-01 — Range de datas, Lucide icons, input date nativo.
  *   1.0.0 — 2026-04-01 — Criação inicial unificando financas.html + PainelFinanceiro.
  */
 
 import { useState, useMemo, useCallback } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
+import { TrendingUp } from 'lucide-react';
 import { auth } from '../../firebase';
-import { useDespesas, parseDataBR, labelMesAno } from '../../hooks/useDespesas';
+import { parseDataBR, labelMesAno } from '../../hooks/useDespesas';
 
 import { FiltrosBar }        from './components/FiltrosBar';
 import { ResumoCards }       from './components/ResumoCards';
@@ -25,8 +27,6 @@ import { FormLancarDespesa } from './components/FormLancarDespesa';
 import { TabelaDespesas }    from './components/TabelaDespesas';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-
-const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
 function Skeleton({ h = 'h-32' }) {
   return <div className={`rounded-xl bg-slate-800 border border-white/5 animate-pulse ${h}`} />;
@@ -94,6 +94,9 @@ export function GestaoDespesas() {
   const [mesAtivo,        setMesAtivo]        = useState('');
   const [categoriaAtiva,  setCategoriaAtiva]  = useState('all');
   const [statusAtivo,     setStatusAtivo]     = useState('all');
+  const [rangeInicio,     setRangeInicio]     = useState(null); // timestamp
+  const [rangeFim,        setRangeFim]        = useState(null); // timestamp
+  const modoRange = rangeInicio !== null || rangeFim !== null;
 
   // UI
   const [salvando,  setSalvando]  = useState(false);
@@ -110,12 +113,21 @@ export function GestaoDespesas() {
   const mesEfetivo = mesAtivo || meses[0]?.label || '';
 
   const despesasMes = useMemo(() => {
+    if (modoRange) {
+      // Modo período: filtra por timestamp
+      return despesas.filter(d => {
+        if (!d.timestamp) return false;
+        const passInicio = rangeInicio === null || d.timestamp >= rangeInicio;
+        const passFim    = rangeFim    === null || d.timestamp <= rangeFim + 86_399_999; // até fim do dia
+        return passInicio && passFim;
+      });
+    }
     if (!mesEfetivo) return [];
     return despesas.filter(d => {
       const p = parseDataBR(d.data);
       return p && labelMesAno(p) === mesEfetivo;
     });
-  }, [despesas, mesEfetivo]);
+  }, [despesas, mesEfetivo, modoRange, rangeInicio, rangeFim]);
 
   const despesasFiltradas = useMemo(() => {
     return despesasMes.filter(d => {
@@ -237,6 +249,7 @@ export function GestaoDespesas() {
               onCategoria={setCategoriaAtiva}
               statusAtivo={statusAtivo}
               onStatus={setStatusAtivo}
+              onRangeChange={(inicio, fim) => { setRangeInicio(inicio); setRangeFim(fim); }}
             />
           )}
 
