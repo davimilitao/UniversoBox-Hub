@@ -17,6 +17,7 @@ import { LoginPage }        from './pages/LoginPage';
 import { DashboardPage }    from './pages/DashboardPage';
 import { PainelFinanceiro } from './pages/financeiro/PainelFinanceiro';
 import { GestaoDespesas }   from './pages/financeiro/GestaoDespesas';
+import { GestaoMargem }    from './pages/financeiro/GestaoMargem';
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
       <Route path="/dashboard/:tenantId"    element={<DashboardPage />} />
       <Route path="/financeiro/painel"      element={<PainelFinanceiro />} />
       <Route path="/financeiro/despesas"    element={<GestaoDespesas />} />
+      <Route path="/financeiro/margem"      element={<GestaoMargem />} />
       <Route path="*"                       element={<Navigate to="/login" replace />} />
     </Routes>
   );
