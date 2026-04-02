@@ -1,6 +1,6 @@
 # railway.toml
-# Root directory deve ser "/" no painel do Railway (não /backend)
-# Railway vai ler este arquivo e usar os comandos abaixo.
+# Root directory deve ser "/" (vazio) no painel do Railway.
+# Atualizado: 2026-04-01
 
 [build]
 builder = "nixpacks"
