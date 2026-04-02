@@ -1,8 +1,7 @@
 /**
  * @file App.jsx
- * @description Rotas principais. Rotas /financeiro/* são envolvidas pelo AppShell
- *              (sidebar React com controle de perfil).
- * @version 2.0.0
+ * @description Rotas principais. Rotas dentro do AppShell têm sidebar React.
+ * @version 2.1.0
  * @date 2026-04-02
  */
 
@@ -12,6 +11,7 @@ import { DashboardPage }    from './pages/DashboardPage';
 import { PainelFinanceiro } from './pages/financeiro/PainelFinanceiro';
 import { GestaoDespesas }   from './pages/financeiro/GestaoDespesas';
 import { GestaoMargem }     from './pages/financeiro/GestaoMargem';
+import { BlingPedidos }     from './pages/expedicao/BlingPedidos';
 import { AppShell }         from './components/AppShell';
 
 export default function App() {
@@ -23,6 +23,10 @@ export default function App() {
 
       {/* Páginas com sidebar React */}
       <Route element={<AppShell />}>
+        {/* Expedição */}
+        <Route path="/expedicao/bling"     element={<BlingPedidos />} />
+
+        {/* Financeiro */}
         <Route path="/financeiro/despesas" element={<GestaoDespesas />} />
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />
         <Route path="/financeiro/painel"   element={<PainelFinanceiro />} />

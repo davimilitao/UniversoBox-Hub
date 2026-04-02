@@ -65,8 +65,9 @@ app.get('/login', (req, res) => res.redirect('/spa/login'));
 app.get('/dashboard/:tenantId', (req, res) =>
   res.redirect(`/spa/dashboard/${req.params.tenantId}`)
 );
-// Redireciona todas as rotas React do módulo financeiro para o SPA
+// Redireciona rotas React para o SPA
 app.get('/financeiro/*', (req, res) => res.redirect('/spa' + req.path));
+app.get('/expedicao/*',  (req, res) => res.redirect('/spa' + req.path));
 
 app.use(express.static(PUBLIC_DIR));
 app.get('/', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
