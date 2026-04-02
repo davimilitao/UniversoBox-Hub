@@ -28,7 +28,7 @@ const ROTAS = [
   { key: 'pedidos',        moduleId: 'pedidos',        label: 'Entregas do Dia',   secao: 'Expedição',  Icon: Package,          react: false, href: '/pedidos'              },
   { key: 'manual',         moduleId: 'manual',         label: 'Expedir Manual',    secao: 'Expedição',  Icon: ClipboardList,    react: false, href: '/manual'               },
   { key: 'ml-dashboard',   moduleId: 'ml-dashboard',   label: 'Dashboard Meli',    secao: 'Expedição',  Icon: BarChart2,        react: false, href: '/ml-dashboard'         },
-  { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,              react: false, href: '/bling'                },
+  { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,              react: true,  href: '/expedicao/bling'      },
   // ── Catálogo ─────────────────────────────────────────────────────────────
   { key: 'catalogo',       moduleId: 'catalogo',       label: 'Catálogo',          secao: 'Catálogo',   Icon: BookOpen,         react: false, href: '/catalogo'             },
   { key: 'admin',          moduleId: 'admin',          label: 'Admin Produtos',    secao: 'Catálogo',   Icon: Settings2,        react: false, href: '/admin'                },
