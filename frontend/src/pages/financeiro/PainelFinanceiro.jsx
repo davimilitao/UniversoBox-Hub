@@ -58,7 +58,7 @@ export function PainelFinanceiro() {
   }, [despesas, mesAtivo]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 px-4 py-8 max-w-7xl mx-auto">
+    <div className="text-slate-100 px-4 py-8 max-w-7xl mx-auto">
 
       {/* ── Cabeçalho ───────────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
