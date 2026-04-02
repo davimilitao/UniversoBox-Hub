@@ -18,7 +18,7 @@ import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename="/spa">
       <App />
     </BrowserRouter>
   </React.StrictMode>
