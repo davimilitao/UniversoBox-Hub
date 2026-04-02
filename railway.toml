@@ -1,0 +1,10 @@
+# railway.toml
+# Root directory deve ser "/" no painel do Railway (não /backend)
+# Railway vai ler este arquivo e usar os comandos abaixo.
+
+[build]
+builder = "nixpacks"
+buildCommand = "cd frontend && npm ci && npm run build && mkdir -p ../backend/public/spa && cp -r dist/. ../backend/public/spa && cd ../backend && npm ci"
+
+[deploy]
+startCommand = "node backend/server.js"
