@@ -1743,6 +1743,111 @@ app.delete('/api/despesas/:rowIndex', requireFirebaseAuth, requireFirebaseRole([
 });
 
 // ================================================================
+// MARGEM — lê aba "Margem" da planilha Controle Financeiro
+// ================================================================
+app.get('/api/margem', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    if (!SPREADSHEET_ID) return res.status(500).json({ error: 'SPREADSHEET_ID não configurado' });
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Margem!A4:Z',
+    });
+
+    const rows = response.data.values || [];
+    if (rows.length < 2) return res.json({ items: [], totais: null });
+
+    // Linha 0 = cabeçalhos (linha 4 na planilha)
+    const headers = rows[0].map(h => String(h || '').trim());
+
+    function col(name) {
+      const idx = headers.findIndex(h => h.toLowerCase().includes(name.toLowerCase()));
+      return idx >= 0 ? idx : -1;
+    }
+
+    function parseBRL(str) {
+      if (str === undefined || str === null || str === '') return 0;
+      const cleaned = String(str).replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
+      return parseFloat(cleaned) || 0;
+    }
+
+    function parsePerc(str) {
+      if (!str) return 0;
+      const n = parseFloat(String(str).replace('%', '').replace(',', '.'));
+      return isNaN(n) ? 0 : n / 100;
+    }
+
+    const iData       = col('Data');
+    const iRecLiq     = col('Receita Líquida');
+    const iRecBruta   = col('Receita Bruta');
+    const iCusto      = col('Custo Mercadoria');
+    const iLucroBruto = col('Soma de Lucro');
+    const iMargBruta  = col('Margem Bruta');
+    const iImposto    = col('Imposto');
+    const iBling      = col('Bling');
+    const iADS        = col('ADS');
+    const iCorola     = col('Corola');
+    const iFlex       = col('Flex');
+    const iContador   = col('Contador');
+    const iObras      = col('Obras');
+    const iEmbalagem  = col('Embalagem');
+    const iCelular    = col('Celular');
+    const iLogistica  = col('Logística');
+    const iOutros     = col('Outros');
+    const iDespTotal  = col('Despesas R');
+    const iDespPerc   = col('Despesas %');
+    const iLucroLiq   = col('Lucro Líquido');
+    const iMargLiq    = col('Margem Líquida');
+
+    const items = [];
+    let totais  = null;
+
+    for (let i = 1; i < rows.length; i++) {
+      const r    = rows[i];
+      const data = String(r[iData] || '').trim();
+      if (!data) continue;
+
+      const isTotal = data.toLowerCase().includes('total');
+
+      const obj = {
+        data,
+        isTotal,
+        receitaLiquida:  parseBRL(r[iRecLiq]),
+        receitaBruta:    parseBRL(r[iRecBruta]),
+        custoMercadoria: parseBRL(r[iCusto]),
+        lucroBruto:      parseBRL(r[iLucroBruto]),
+        margemBruta:     parsePerc(r[iMargBruta]),
+        imposto:         parseBRL(r[iImposto]),
+        despesas: {
+          bling:     parseBRL(r[iBling]),
+          ads:       parseBRL(r[iADS]),
+          corola:    parseBRL(r[iCorola]),
+          flex:      parseBRL(r[iFlex]),
+          contador:  parseBRL(r[iContador]),
+          obras:     parseBRL(r[iObras]),
+          embalagem: parseBRL(r[iEmbalagem]),
+          celular:   parseBRL(r[iCelular]),
+          logistica: parseBRL(r[iLogistica]),
+          outros:    parseBRL(r[iOutros]),
+        },
+        totalDespesas: parseBRL(r[iDespTotal]),
+        despesasPerc:  parsePerc(r[iDespPerc]),
+        lucroLiquido:  parseBRL(r[iLucroLiq]),
+        margemLiquida: parsePerc(r[iMargLiq]),
+      };
+
+      if (isTotal) totais = obj;
+      else         items.push(obj);
+    }
+
+    return res.json({ items, totais });
+  } catch (err) {
+    console.error('[GET /api/margem]', err);
+    return next(err);
+  }
+});
+
+// ================================================================
 // BLING INTEGRATION
 // ================================================================
 // ================================================================
