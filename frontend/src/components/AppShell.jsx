@@ -29,12 +29,16 @@ const ROTAS = [
   { key: 'manual',         moduleId: 'manual',         label: 'Expedir Manual',    secao: 'Expedição',  Icon: ClipboardList,    react: false, href: '/manual'               },
   { key: 'ml-dashboard',   moduleId: 'ml-dashboard',   label: 'Dashboard Meli',    secao: 'Expedição',  Icon: BarChart2,        react: false, href: '/ml-dashboard'         },
   { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,              react: true,  href: '/expedicao/bling'      },
+  { key: 'exp-insumos',    moduleId: 'insumos',        label: 'Insumos',           secao: 'Expedição',  Icon: Package,          react: true,  href: '/expedicao/insumos'    },
+    
   // ── Catálogo ─────────────────────────────────────────────────────────────
   { key: 'catalogo',       moduleId: 'catalogo',       label: 'Catálogo',          secao: 'Catálogo',   Icon: BookOpen,         react: false, href: '/catalogo'             },
   { key: 'admin',          moduleId: 'admin',          label: 'Admin Produtos',    secao: 'Catálogo',   Icon: Settings2,        react: false, href: '/admin'                },
   { key: 'embalagens',     moduleId: 'embalagens',     label: 'Embalagens',        secao: 'Catálogo',   Icon: Box,              react: false, href: '/embalagens'           },
   { key: 'cadastrar',      moduleId: 'cadastrar',      label: 'Cadastro Rápido',   secao: 'Catálogo',   Icon: PlusCircle,       react: false, href: '/cadastrar'            },
   { key: 'enriquecer-xml', moduleId: 'enriquecer-xml', label: 'Cadastro XML',      secao: 'Catálogo',   Icon: FileCode,         react: false, href: '/enriquecer-xml'       },
+  { key: 'cat-automacao', moduleId: 'automacao',    label: 'Cadastro Automático',  secao: 'Catálogo',    Icon: Package,          react: true,  href: '/catalogo/automacao'  },
+
   // ── Financeiro ───────────────────────────────────────────────────────────
   { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Receipt,          react: true,  href: '/financeiro/despesas'  },
   { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,       react: true,  href: '/financeiro/margem'    },

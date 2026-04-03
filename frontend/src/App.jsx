@@ -13,6 +13,8 @@ import { GestaoDespesas }   from './pages/financeiro/GestaoDespesas';
 import { GestaoMargem }     from './pages/financeiro/GestaoMargem';
 import { BlingPedidos }     from './pages/expedicao/BlingPedidos';
 import { AppShell }         from './components/AppShell';
+import GestaoInsumos from './pages/expedicao/GestaoInsumos';
+import AutomacaoCadastro from './pages/catalogo/AutomacaoCadastro';
 
 export default function App() {
   return (
@@ -25,7 +27,10 @@ export default function App() {
       <Route element={<AppShell />}>
         {/* Expedição */}
         <Route path="/expedicao/bling"     element={<BlingPedidos />} />
-
+        <Route path="/expedicao/insumos"    element={<GestaoInsumos />} />
+        {/* Catálogo */}
+        {/* Catálogo */}
+        <Route path="/catalogo/automacao" element={<AutomacaoCadastro />} />
         {/* Financeiro */}
         <Route path="/financeiro/despesas" element={<GestaoDespesas />} />
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />
