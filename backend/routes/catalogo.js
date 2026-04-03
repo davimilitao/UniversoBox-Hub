@@ -2,10 +2,20 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const cheerio = require('cheerio');
-const Anthropic = require('@anthropic-ai/sdk');
 const { db } = require('../config/firebase');
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Gera SKU semântico simples a partir do título — sem IA
+function gerarSku(titulo, ean) {
+  if (!titulo) return `SKU-${ean.slice(-5)}`;
+  const palavras = titulo
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter(p => p.length > 2)   // ignora artigos/preposições curtas
+    .slice(0, 3);                 // pega as 3 primeiras palavras relevantes
+  return palavras.length ? palavras.join('-').slice(0, 25) : `SKU-${ean.slice(-5)}`;
+}
 
 const BLING_API_BASE  = 'https://www.bling.com.br/Api/v3';
 const BLING_TOKEN_URL = 'https://www.bling.com.br/Api/v3/oauth/token';
@@ -62,9 +72,8 @@ router.post('/processar-ean', async (req, res) => {
   if (!ean) return res.status(400).json({ error: 'EAN obrigatório' });
 
   try {
-    // 1. Tenta scraping do Mercado Livre — falha silenciosa se bloqueado
-    let titulobruto = '';
-    let foto = '';
+    let titulo = '';
+    let foto   = '';
     try {
       const url = `https://lista.mercadolivre.com.br/${ean}`;
       const { data } = await axios.get(url, {
@@ -72,54 +81,31 @@ router.post('/processar-ean', async (req, res) => {
         timeout: 8000,
       });
       const $ = cheerio.load(data);
-      titulobruto = $('.ui-search-item__title').first().text().trim();
-      foto = $('.ui-search-result-image__element').first().attr('data-src')
-          || $('.ui-search-result-image__element').first().attr('src')
-          || '';
-    } catch (scrapeErr) {
-      console.warn('[processar-ean] scraping ML falhou:', scrapeErr.message);
+      titulo = $('.ui-search-item__title').first().text().trim();
+      foto   = $('.ui-search-result-image__element').first().attr('data-src')
+            || $('.ui-search-result-image__element').first().attr('src')
+            || '';
+    } catch (e) {
+      console.warn('[processar-ean] scraping ML falhou:', e.message);
     }
 
-    // 2. IA processa — mesmo sem título do ML, gera a partir do EAN
-    const prompt = titulobruto
-      ? `Título bruto do Mercado Livre: "${titulobruto}"\nEAN: ${ean}`
-      : `EAN: ${ean}\n(produto não encontrado no ML — gere dados genéricos baseados no EAN)`;
-
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
-      system: `Você é um especialista em cadastro de produtos para e-commerce brasileiro.
-Retorne APENAS um JSON válido com estes campos:
-- nome: título limpo e profissional em português (máx 120 chars)
-- sku: código semântico em maiúsculas (formato MARCA-MODELO-VARIANTE, máx 25 chars, sem acentos)
-- marca: nome da marca
-- ncm: código NCM de 8 dígitos mais provável para o produto
-- categoriaSugerida: nome da categoria (ex: "Cadeiras para Auto", "Berços", "Brinquedos")
-Retorne somente o JSON, sem markdown, sem explicações.`,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    let ia = {};
-    try { ia = JSON.parse(msg.content[0].text); } catch (_) {}
-
     res.json({
-      fNome:        ia.nome   || titulobruto || `Produto EAN ${ean}`,
-      fSku:         ia.sku    || `SKU-${ean.slice(-5)}`,
-      fEan:         ean,
-      fMarca:       ia.marca  || '',
-      fNcm:         ia.ncm    || '',
-      fPreco:       '0.00',
-      fPesoLiq:     '0.000',
-      fPesoBruto:   '0.000',
-      fAltura:      '0',
-      fLargura:     '0',
-      fProfundidade:'0',
-      categoriaSugerida: ia.categoriaSugerida || '',
+      fNome:         titulo || `Produto EAN ${ean}`,
+      fSku:          gerarSku(titulo, ean),
+      fEan:          ean,
+      fMarca:        '',
+      fNcm:          '',
+      fPreco:        '0.00',
+      fPesoLiq:      '0.000',
+      fPesoBruto:    '0.000',
+      fAltura:       '0',
+      fLargura:      '0',
+      fProfundidade: '0',
       imagens: foto ? [foto] : [],
     });
   } catch (error) {
-    console.error('[processar-ean] erro:', error.response?.data || error.message);
-    res.status(500).json({ error: error.message || 'Falha ao processar EAN' });
+    console.error('[processar-ean] erro:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
