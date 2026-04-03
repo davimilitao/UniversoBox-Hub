@@ -2331,52 +2331,50 @@ app.post('/bling/disconnect', async (req, res) => {
 
 // ── LISTAR NFs DO DIA ─────────────────────────────────────────────
 // GET /bling/pedidos?data=2026-03-18
-// Retorna resumo das NFs — itens são carregados sob demanda via /bling/pedidos/:id
+// Retorna resumo das NFs — suporta data única (?data=) ou range (?dataInicio=&dataFim=)
+// Itens são carregados sob demanda via /bling/pedidos/:id
 app.get('/bling/pedidos', async (req, res, next) => {
   try {
-    const dataSel = req.query.data || new Date().toISOString().split('T')[0];
-    const pagina  = Number(req.query.pagina || 1);
+    const hoje    = new Date().toISOString().split('T')[0];
+    // Suporte a range: dataInicio + dataFim  OU  data (legado, dia único)
+    const dataInicio = req.query.dataInicio || req.query.data || hoje;
+    const dataFim    = req.query.dataFim    || req.query.data || hoje;
+    const pagina     = Number(req.query.pagina || 1);
 
-    // A API Bling v3 /nfe ignora filtros de data na listagem.
-    // Buscamos tudo e filtramos pelo campo dataEmissao no backend.
-    const situacaoFiltro = req.query.situacao || '5'; // 5 = Autorizada Sem DANFE na API // danfe | all | autorizada
+    const situacaoFiltro = req.query.situacao || 'all';
     const params = new URLSearchParams({ pagina, limite: 100 });
 
     const resp  = await blingFetch(`/nfe?${params}`);
     const notas = resp.data || [];
 
-    // Filtrar por data
-    const notasDia = dataSel === 'all'
-      ? notas
-      : notas.filter(n => {
-          const d = (n.dataEmissao || n.data || '').split(' ')[0];
-          return d === dataSel;
-        });
+    // Filtrar por range de datas (ISO yyyy-mm-dd)
+    const notasRange = notas.filter(n => {
+      const d = (n.dataEmissao || n.data || '').split(' ')[0]; // "yyyy-mm-dd"
+      return d >= dataInicio && d <= dataFim;
+    });
 
     // Filtro por loja (marketplace) — aplicado localmente
     const lojaFiltro = (req.query.loja || 'all').toLowerCase();
+    const LOJAS = {
+      ml:     '205524457',
+      mlfull: '205920469',
+      shopee: '205547154',
+      magalu: '205744394',
+      tiktok: '205540309',
+      ddbaby: '205570762',
+      nuv:    '205530029',
+    };
     const matchLoja = (n) => {
       if (lojaFiltro === 'all') return true;
-      // IDs fixos das lojas no Bling
-      const LOJAS = {
-        ml:     '205524457',  // Mercado Livre
-        mlfull: '205920469',  // Mercado Livre Full
-        shopee: '205547154',  // Shopee
-        magalu: '205744394',  // Magalu
-        tiktok: '205540309',  // TikTok
-        ddbaby: '205570762',  // ddbaby
-        nuv:    '205530029',  // Nuvemshop
-      };
       const idLoja = String(n.loja?.id || '');
       if (LOJAS[lojaFiltro]) return idLoja === LOJAS[lojaFiltro];
       return idLoja === lojaFiltro;
     };
 
-    const notasFiltradas = notasDia.filter(n => matchLoja(n));
+    const notasFiltradas = notasRange.filter(n => matchLoja(n));
 
-    console.log(`[bling/pedidos] data=${dataSel} sit=${situacaoFiltro} | total=${notas.length} dia=${notasDia.length} filtrado=${notasFiltradas.length}`);
+    console.log(`[bling/pedidos] range=${dataInicio}→${dataFim} loja=${lojaFiltro} | total=${notas.length} range=${notasRange.length} filtrado=${notasFiltradas.length}`);
 
-    // Situações numéricas da API Bling v3 /nfe
     const SIT_MAP = {
       1: 'Pendente', 2: 'Emitida DANFE', 3: 'Cancelada',
       4: 'Denegada', 5: 'Autorizada Sem DANFE', 6: 'Inutilizada', 7: 'Emitida DANFE'
@@ -2391,14 +2389,12 @@ app.get('/bling/pedidos', async (req, res, next) => {
       cliente:      { nome: n.contato?.nome || '' },
       lojaId:       String(n.loja?.id || ''),
       marketplace:  detectarMktPorId(String(n.loja?.id || '')),
-      valorTotal:   null,   // não vem na listagem, carregado no detalhe
-      linkDanfe:    null,
-      linkPDF:      null,
+      valorTotal:   null,
       itens:        [],
       detalhado:    false,
-    }));;
+    }));
 
-    res.json({ items, total: items.length, data: dataSel, situacao: situacaoFiltro });
+    res.json({ items, total: items.length, dataInicio, dataFim });
   } catch(err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
     console.error('[GET /bling/pedidos]', err);
