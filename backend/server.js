@@ -18,6 +18,7 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 require('dotenv').config();
 const { setupTenantsPublicRoutes } = require('./routes/tenants');
 const { setupTenantProvisioningRoutes } = require('./routes/tenantProvisioning');
+const catalogoRouter = require('./routes/catalogo');
 const { requireFirebaseAuth, requireFirebaseRole } = require('./middleware/requireFirebaseAuth');
 const { db, serviceAccount } = require('./config/firebase');
 const fs = require('fs');
@@ -91,6 +92,7 @@ app.get('/produto-studio', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'pro
 const UPLOADS_DIR = path.join(PUBLIC_DIR, 'uploads');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 app.use('/uploads', express.static(UPLOADS_DIR));
+app.use('/api/catalogo', catalogoRouter);
 
 // ✅ fallback: placeholder 1x1 transparente se faltar arquivo
 app.get('/assets/placeholder.png', (req, res) => {
