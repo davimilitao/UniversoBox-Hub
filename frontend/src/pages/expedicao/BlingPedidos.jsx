@@ -70,15 +70,28 @@ function addClonado(id) {
   localStorage.setItem('bling_clonados', JSON.stringify([...s]));
 }
 
-// ─── Canais — match explícito: ML não captura ML Full ────────────────────────
+// ─── Canais ───────────────────────────────────────────────────────────────────
+// O backend retorna "MERCADO_LIVRE", "SHOPEE", etc. — checar por 'mercado' e 'full'
 const CANAIS = [
-  { id: 'all',    label: 'Todas',   cor: 'slate',  match: () => true },
-  { id: 'ml',     label: 'ML',      cor: 'yellow', match: m => { const l=(m||'').toLowerCase(); return l.includes('ml') && !l.includes('full'); } },
-  { id: 'mlfull', label: 'ML Full', cor: 'blue',   match: m => (m||'').toLowerCase().includes('full') },
-  { id: 'shopee', label: 'Shopee',  cor: 'orange', match: m => (m||'').toLowerCase().includes('shopee') },
-  { id: 'magalu', label: 'Magalu',  cor: 'purple', match: m => (m||'').toLowerCase().includes('magalu') },
-  { id: 'tiktok', label: 'TikTok',  cor: 'pink',   match: m => (m||'').toLowerCase().includes('tiktok') },
+  { id: 'all',    label: 'Todas',   cor: 'slate'  },
+  { id: 'ml',     label: 'ML',      cor: 'yellow' },
+  { id: 'mlfull', label: 'ML Full', cor: 'blue'   },
+  { id: 'shopee', label: 'Shopee',  cor: 'orange' },
+  { id: 'magalu', label: 'Magalu',  cor: 'purple' },
+  { id: 'tiktok', label: 'TikTok',  cor: 'pink'   },
 ];
+
+function matchCanal(canalId, mkt) {
+  const m = (mkt || '').toLowerCase();
+  switch (canalId) {
+    case 'ml':     return (m.includes('mercado') || m.includes('ml')) && !m.includes('full');
+    case 'mlfull': return m.includes('full');
+    case 'shopee': return m.includes('shopee');
+    case 'magalu': return m.includes('magalu');
+    case 'tiktok': return m.includes('tiktok');
+    default:       return true;
+  }
+}
 
 const COR_CANAL = {
   yellow: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
@@ -90,11 +103,11 @@ const COR_CANAL = {
 };
 function canalCor(mkt) {
   const m = (mkt || '').toLowerCase();
-  if (m.includes('full'))   return COR_CANAL.blue;
-  if (m.includes('ml'))     return COR_CANAL.yellow;
-  if (m.includes('shopee')) return COR_CANAL.orange;
-  if (m.includes('magalu')) return COR_CANAL.purple;
-  if (m.includes('tiktok')) return COR_CANAL.pink;
+  if (m.includes('full'))                          return COR_CANAL.blue;
+  if (m.includes('mercado') || m.includes('ml'))   return COR_CANAL.yellow;
+  if (m.includes('shopee'))                        return COR_CANAL.orange;
+  if (m.includes('magalu'))                        return COR_CANAL.purple;
+  if (m.includes('tiktok'))                        return COR_CANAL.pink;
   return COR_CANAL.slate;
 }
 
@@ -590,22 +603,10 @@ export function BlingPedidos() {
     setTimeout(() => setToast(null), 5000);
   }
 
-  // ── Contagem por canal (local, sem nova requisição) ───────────────
-  const contagemCanal = useMemo(() => {
-    const counts = {};
-    for (const c of CANAIS) {
-      counts[c.id] = c.id === 'all' ? nfs.length : nfs.filter(n => c.match(n.marketplace)).length;
-    }
-    return counts;
-  }, [nfs]);
-
-  // ── Filtro local — canal (match explícito) + DANFE (preciso) ──────
+  // ── Filtro local — canal + DANFE ─────────────────────────────────
   const nfsFiltradas = useMemo(() => {
     let lista = nfs;
-    if (canalSel !== 'all') {
-      const canal = CANAIS.find(c => c.id === canalSel);
-      if (canal) lista = lista.filter(n => canal.match(n.marketplace));
-    }
+    if (canalSel !== 'all')          lista = lista.filter(n => matchCanal(canalSel, n.marketplace));
     if (situacaoSel === 'sem_danfe') lista = lista.filter(n => isSemDanfe(n.situacao));
     if (situacaoSel === 'danfe')     lista = lista.filter(n => isComDanfe(n.situacao));
     return lista;
@@ -718,22 +719,15 @@ export function BlingPedidos() {
 
         {/* Linha 2: canais + situação */}
         <div className="flex items-center gap-2 flex-wrap">
-          {CANAIS.map(c => {
-            const count = contagemCanal[c.id] ?? 0;
-            if (c.id !== 'all' && count === 0) return null;
-            return (
-              <button key={c.id} onClick={() => setCanalSel(c.id)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors
-                  ${canalSel === c.id
-                    ? c.id === 'all' ? 'bg-slate-600 border-slate-500 text-white' : COR_CANAL[c.cor]
-                    : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
-                {c.label}
-                {count > 0 && (
-                  <span className="opacity-60 font-bold">{count}</span>
-                )}
-              </button>
-            );
-          })}
+          {CANAIS.map(c => (
+            <button key={c.id} onClick={() => setCanalSel(c.id)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
+                ${canalSel === c.id
+                  ? c.id === 'all' ? 'bg-slate-600 border-slate-500 text-white' : COR_CANAL[c.cor]
+                  : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
+              {c.label}
+            </button>
+          ))}
           <span className="w-px h-4 bg-white/10 mx-1"/>
           {[{id:'all',label:'Todas'},{id:'sem_danfe',label:'Sem DANFE'},{id:'danfe',label:'Com DANFE'}].map(s => (
             <button key={s.id} onClick={() => setSituacaoSel(s.id)}

@@ -10,6 +10,9 @@
     "import:products": "node scripts/import_products_csv.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "axios": "^1.14.0",
+    "cheerio": "^1.2.0",
     "cloudinary": "^2.9.0",
     "cors": "^2.8.5",
     "csv-parse": "^5.5.6",
