@@ -2,10 +2,10 @@
  * @file BlingPedidos.jsx
  * @module expedicao
  * @description Tela de Pedidos do Bling — NFs de saída autorizadas.
- *              Range picker com presets (igual ao Bling), default 3 dias,
- *              multicanal, cards de resumo, expansão com badge de SKU.
- * @version 2.0.0
- * @date 2026-04-02
+ *              Range picker com presets, default 3 dias, multicanal,
+ *              cards de resumo, toggle Flex, fluxo para Pedidos do Dia.
+ * @version 2.2.0
+ * @date 2026-04-03
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -13,7 +13,7 @@ import {
   Zap, CalendarDays, RefreshCw, Unplug, Plug,
   ChevronDown, ChevronUp, PackagePlus, CheckCircle2,
   AlertTriangle, Clock, XCircle, Loader2, Inbox,
-  Tag, Hash, ChevronLeft, ChevronRight,
+  Tag, Hash, ChevronLeft, ChevronRight, Flame, ExternalLink,
 } from 'lucide-react';
 
 // ─── helpers de data ──────────────────────────────────────────────────────────
@@ -48,6 +48,18 @@ function primeiroDiaSemana(ano, mes) {
   return new Date(ano, mes, 1).getDay(); // 0=dom
 }
 
+// ─── DANFE — funções precisas, mutuamente exclusivas ─────────────────────────
+// "Autorizada Sem DANFE" NÃO pode ser capturada pelo filtro "Com DANFE"
+function isSemDanfe(sit) {
+  const s = (sit || '').toLowerCase();
+  return s.includes('sem danfe');
+}
+function isComDanfe(sit) {
+  if (isSemDanfe(sit)) return false; // exclui sem_danfe primeiro
+  const s = (sit || '').toLowerCase();
+  return s.includes('emitida') || s.includes('danfe');
+}
+
 // ─── localStorage ─────────────────────────────────────────────────────────────
 function getClonados() {
   try { return new Set(JSON.parse(localStorage.getItem('bling_clonados') || '[]')); }
@@ -58,14 +70,14 @@ function addClonado(id) {
   localStorage.setItem('bling_clonados', JSON.stringify([...s]));
 }
 
-// ─── Canais ───────────────────────────────────────────────────────────────────
+// ─── Canais — match explícito: ML não captura ML Full ────────────────────────
 const CANAIS = [
-  { id: 'all',    label: 'Todas',   cor: 'slate'  },
-  { id: 'ml',     label: 'ML',      cor: 'yellow' },
-  { id: 'mlfull', label: 'ML Full', cor: 'blue'   },
-  { id: 'shopee', label: 'Shopee',  cor: 'orange' },
-  { id: 'magalu', label: 'Magalu',  cor: 'purple' },
-  { id: 'tiktok', label: 'TikTok',  cor: 'pink'   },
+  { id: 'all',    label: 'Todas',   cor: 'slate',  match: () => true },
+  { id: 'ml',     label: 'ML',      cor: 'yellow', match: m => { const l=(m||'').toLowerCase(); return l.includes('ml') && !l.includes('full'); } },
+  { id: 'mlfull', label: 'ML Full', cor: 'blue',   match: m => (m||'').toLowerCase().includes('full') },
+  { id: 'shopee', label: 'Shopee',  cor: 'orange', match: m => (m||'').toLowerCase().includes('shopee') },
+  { id: 'magalu', label: 'Magalu',  cor: 'purple', match: m => (m||'').toLowerCase().includes('magalu') },
+  { id: 'tiktok', label: 'TikTok',  cor: 'pink',   match: m => (m||'').toLowerCase().includes('tiktok') },
 ];
 
 const COR_CANAL = {
@@ -88,12 +100,11 @@ function canalCor(mkt) {
 
 // ─── Badge situação ───────────────────────────────────────────────────────────
 function SituacaoBadge({ sit }) {
-  const s = (sit || '').toLowerCase();
-  if (s.includes('sem danfe') || s.includes('autorizada sem'))
+  if (isSemDanfe(sit))
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/25 whitespace-nowrap"><Clock size={10}/> Sem DANFE</span>;
-  if (s.includes('emitida') || s.includes('danfe'))
+  if (isComDanfe(sit))
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 whitespace-nowrap"><CheckCircle2 size={10}/> DANFE Emitida</span>;
-  if (s.includes('cancelada'))
+  if ((sit||'').toLowerCase().includes('cancelada'))
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-500/10 text-red-400 border border-red-500/25 whitespace-nowrap"><XCircle size={10}/> Cancelada</span>;
   return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-700 text-slate-400 border border-slate-600 whitespace-nowrap">{sit||'—'}</span>;
 }
@@ -352,8 +363,9 @@ function ResumoCard({ label, valor, sub, cor = 'slate' }) {
 }
 
 // ─── Row NF ───────────────────────────────────────────────────────────────────
-function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandindo }) {
-  const jaCriado = clonados.has(String(nf.id));
+function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandindo, isFlex, onFlexToggle, clonando }) {
+  const jaCriado  = clonados.has(String(nf.id));
+  const eClonar   = clonando === nf.id;
 
   return (
     <div className={`rounded-xl border transition-colors ${expandido ? 'bg-slate-800 border-white/10' : 'bg-slate-800/50 border-white/5 hover:border-white/10'}`}>
@@ -402,21 +414,47 @@ function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandind
           ) : (
             <p className="text-sm text-slate-600 mb-4">Nenhum item encontrado nesta NF.</p>
           )}
+          {/* ── Flex toggle + ação ── */}
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <span className="text-sm font-semibold text-slate-200">
-              Total: {detalhe.valorTotal ? BRL.format(detalhe.valorTotal) : '—'}
-            </span>
-            {jaCriado ? (
-              <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <CheckCircle2 size={14}/> Pedido já criado no sistema
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-slate-200">
+                Total: {detalhe.valorTotal ? BRL.format(detalhe.valorTotal) : '—'}
               </span>
+              {/* Toggle Flex / Entrega Rápida */}
+              {!jaCriado && (
+                <button
+                  onClick={() => onFlexToggle(nf.id)}
+                  title="Marcar como Flex / Entrega Rápida — sobe para o topo na separação"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors
+                    ${isFlex
+                      ? 'bg-yellow-500/15 border-yellow-500/40 text-yellow-400'
+                      : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}
+                >
+                  <Flame size={12} className={isFlex ? 'text-yellow-400' : ''}/>
+                  {isFlex ? 'FLEX — Entrega Rápida' : 'Marcar Flex'}
+                </button>
+              )}
+            </div>
+
+            {jaCriado ? (
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <CheckCircle2 size={14}/> Pedido criado
+                </span>
+                <a href="/pedidos" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-slate-700 border border-white/10 text-slate-300 hover:text-white transition-colors">
+                  <ExternalLink size={13}/> Ver na expedição
+                </a>
+              </div>
             ) : (
               <button
                 onClick={() => onClonar(nf, detalhe)}
-                disabled={!detalhe.itens?.length}
+                disabled={!detalhe.itens?.length || eClonar}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors"
               >
-                <PackagePlus size={15}/> Criar Pedido na Expedição
+                {eClonar
+                  ? <><Loader2 size={15} className="animate-spin"/> Criando…</>
+                  : <><PackagePlus size={15}/> Criar Pedido na Expedição</>
+                }
               </button>
             )}
           </div>
@@ -444,6 +482,7 @@ export function BlingPedidos() {
   const [expandindo,   setExpandindo]   = useState(null);
   const [clonados,     setClonados]     = useState(getClonados);
   const [clonando,     setClonando]     = useState(null);
+  const [flexFlags,    setFlexFlags]    = useState({}); // nf.id → boolean
   const [toast,        setToast]        = useState(null);
   const pollingRef = useRef(null);
   const pickerRef  = useRef(null);
@@ -468,11 +507,11 @@ export function BlingPedidos() {
     return () => clearInterval(pollingRef.current);
   }, [fetchStatus]);
 
-  // ── Buscar NFs ────────────────────────────────────────────────────
+  // ── Buscar NFs — sempre loja=all, filtragem de canal é local ────────
   const fetchNFs = useCallback(async () => {
     setLoadingNfs(true); setErro(null);
     try {
-      const params = new URLSearchParams({ dataInicio: rangeIni, dataFim: rangeFim, loja: canalSel });
+      const params = new URLSearchParams({ dataInicio: rangeIni, dataFim: rangeFim, loja: 'all' });
       const res  = await fetch(`/bling/pedidos?${params}`);
       const data = await res.json();
       if (data.error === 'bling_not_authorized') {
@@ -485,7 +524,7 @@ export function BlingPedidos() {
     } finally {
       setLoadingNfs(false);
     }
-  }, [rangeIni, rangeFim, canalSel]);
+  }, [rangeIni, rangeFim]); // sem canalSel — troca de canal não dispara nova requisição
 
   useEffect(() => { fetchNFs(); }, [fetchNFs]);
 
@@ -507,10 +546,16 @@ export function BlingPedidos() {
     finally { setExpandindo(null); }
   }
 
-  // ── Clonar NF ─────────────────────────────────────────────────────
+  // ── Toggle Flex por NF ───────────────────────────────────────────
+  function handleFlexToggle(nfId) {
+    setFlexFlags(prev => ({ ...prev, [nfId]: !prev[nfId] }));
+  }
+
+  // ── Clonar NF → criar pedido na expedição ────────────────────────
   async function handleClonar(nf, detalhe) {
     setClonando(nf.id);
     try {
+      const logistica = flexFlags[nf.id] ? 'flex' : 'agency';
       const res  = await fetch('/bling/clonar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -520,14 +565,16 @@ export function BlingPedidos() {
           itens:        detalhe.itens,
           clienteNome:  nf.cliente?.nome || '',
           numeroPedido: detalhe.numeroPedido || '',
+          logistica,
         }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Falha');
       addClonado(nf.id); setClonados(getClonados());
-      let msg = `✅ Pedido ${data.orderId} criado!`;
+      const isFlex = logistica === 'flex';
+      let msg = `✅ Pedido ${data.orderId} criado${isFlex ? ' — 🔥 FLEX' : ''}!`;
       if (data.skusFaltando?.length) msg += ` ⚠️ SKUs: ${data.skusFaltando.join(', ')}`;
-      showToast(msg, 'ok');
+      showToast(msg, 'ok', data.orderId);
     } catch (e) { showToast(`Erro: ${e.message}`, 'err'); }
     finally { setClonando(null); }
   }
@@ -538,26 +585,36 @@ export function BlingPedidos() {
     fetchStatus();
   }
 
-  function showToast(msg, tipo = 'ok') {
-    setToast({ msg, tipo });
-    setTimeout(() => setToast(null), 4000);
+  function showToast(msg, tipo = 'ok', orderId = null) {
+    setToast({ msg, tipo, orderId });
+    setTimeout(() => setToast(null), 5000);
   }
 
-  // ── Filtro local situação ─────────────────────────────────────────
+  // ── Contagem por canal (local, sem nova requisição) ───────────────
+  const contagemCanal = useMemo(() => {
+    const counts = {};
+    for (const c of CANAIS) {
+      counts[c.id] = c.id === 'all' ? nfs.length : nfs.filter(n => c.match(n.marketplace)).length;
+    }
+    return counts;
+  }, [nfs]);
+
+  // ── Filtro local — canal (match explícito) + DANFE (preciso) ──────
   const nfsFiltradas = useMemo(() => {
-    if (situacaoSel === 'all') return nfs;
-    return nfs.filter(n => {
-      const s = (n.situacao || '').toLowerCase();
-      if (situacaoSel === 'sem_danfe') return s.includes('sem danfe') || s.includes('autorizada sem');
-      if (situacaoSel === 'danfe')     return s.includes('emitida') || s.includes('danfe');
-      return true;
-    });
-  }, [nfs, situacaoSel]);
+    let lista = nfs;
+    if (canalSel !== 'all') {
+      const canal = CANAIS.find(c => c.id === canalSel);
+      if (canal) lista = lista.filter(n => canal.match(n.marketplace));
+    }
+    if (situacaoSel === 'sem_danfe') lista = lista.filter(n => isSemDanfe(n.situacao));
+    if (situacaoSel === 'danfe')     lista = lista.filter(n => isComDanfe(n.situacao));
+    return lista;
+  }, [nfs, canalSel, situacaoSel]);
 
   // ── Resumo ────────────────────────────────────────────────────────
   const resumo = useMemo(() => {
-    const total     = nfs.length;
-    const semDanfe  = nfs.filter(n => { const s=(n.situacao||'').toLowerCase(); return s.includes('sem danfe')||s.includes('autorizada sem'); }).length;
+    const total      = nfs.length;
+    const semDanfe   = nfs.filter(n => isSemDanfe(n.situacao)).length;
     const importadas = nfs.filter(n => clonados.has(String(n.id))).length;
     return { total, semDanfe, importadas, pendentes: Math.max(0, semDanfe - importadas) };
   }, [nfs, clonados]);
@@ -574,7 +631,12 @@ export function BlingPedidos() {
       {toast && (
         <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl text-sm font-medium border max-w-sm
           ${toast.tipo==='ok' ? 'bg-emerald-900/90 border-emerald-600 text-emerald-300' : 'bg-red-900/90 border-red-600 text-red-300'}`}>
-          {toast.msg}
+          <p>{toast.msg}</p>
+          {toast.tipo === 'ok' && (
+            <a href="/pedidos" className="mt-2 flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 font-semibold text-xs underline">
+              <ExternalLink size={11}/> Ir para Pedidos do Dia
+            </a>
+          )}
         </div>
       )}
 
@@ -587,8 +649,15 @@ export function BlingPedidos() {
           <p className="text-sm text-slate-500 mt-0.5">NFs de saída autorizadas — importe para a fila de separação</p>
         </div>
 
-        {status && (
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Link rápido */}
+          <a href="/pedidos"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-slate-400 text-sm hover:text-slate-200 hover:border-white/20 transition-colors">
+            <ExternalLink size={13}/> Pedidos do Dia
+          </a>
+
+          {status && (
+            <>
             {status.authorized ? (
               <>
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm">
@@ -611,8 +680,9 @@ export function BlingPedidos() {
                 <Plug size={14}/> Conectar Bling
               </a>
             )}
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* ── Filtros ─────────────────────────────────────────────────── */}
@@ -648,15 +718,22 @@ export function BlingPedidos() {
 
         {/* Linha 2: canais + situação */}
         <div className="flex items-center gap-2 flex-wrap">
-          {CANAIS.map(c => (
-            <button key={c.id} onClick={() => setCanalSel(c.id)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
-                ${canalSel === c.id
-                  ? c.id === 'all' ? 'bg-slate-600 border-slate-500 text-white' : COR_CANAL[c.cor]
-                  : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
-              {c.label}
-            </button>
-          ))}
+          {CANAIS.map(c => {
+            const count = contagemCanal[c.id] ?? 0;
+            if (c.id !== 'all' && count === 0) return null;
+            return (
+              <button key={c.id} onClick={() => setCanalSel(c.id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors
+                  ${canalSel === c.id
+                    ? c.id === 'all' ? 'bg-slate-600 border-slate-500 text-white' : COR_CANAL[c.cor]
+                    : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
+                {c.label}
+                {count > 0 && (
+                  <span className="opacity-60 font-bold">{count}</span>
+                )}
+              </button>
+            );
+          })}
           <span className="w-px h-4 bg-white/10 mx-1"/>
           {[{id:'all',label:'Todas'},{id:'sem_danfe',label:'Sem DANFE'},{id:'danfe',label:'Com DANFE'}].map(s => (
             <button key={s.id} onClick={() => setSituacaoSel(s.id)}
@@ -716,7 +793,9 @@ export function BlingPedidos() {
               <NFRow key={nf.id} nf={nf} clonados={clonados}
                 onClonar={handleClonar} onExpand={handleExpand}
                 expandido={!!expandidos[nf.id]} detalhe={expandidos[nf.id]||null}
-                expandindo={expandindo===nf.id}/>
+                expandindo={expandindo===nf.id}
+                isFlex={!!flexFlags[nf.id]} onFlexToggle={handleFlexToggle}
+                clonando={clonando}/>
             ))}
             <p className="text-xs text-slate-700 text-center pt-2">
               {nfsFiltradas.length} NF{nfsFiltradas.length!==1?'s':''} exibida{nfsFiltradas.length!==1?'s':''}
