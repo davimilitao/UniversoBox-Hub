@@ -75,18 +75,17 @@ router.post('/processar-ean', async (req, res) => {
     let titulo = '';
     let foto   = '';
     try {
-      const url = `https://lista.mercadolivre.com.br/${ean}`;
-      const { data } = await axios.get(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      // API pública do ML — sem auth, sem scraping, sem bloqueio de IP
+      const { data } = await axios.get(`https://api.mercadolibre.com/sites/MLB/search?q=${ean}`, {
         timeout: 8000,
       });
-      const $ = cheerio.load(data);
-      titulo = $('.ui-search-item__title').first().text().trim();
-      foto   = $('.ui-search-result-image__element').first().attr('data-src')
-            || $('.ui-search-result-image__element').first().attr('src')
-            || '';
+      const item = data?.results?.[0];
+      if (item) {
+        titulo = item.title || '';
+        foto   = item.thumbnail?.replace('-I.jpg', '-O.jpg') || item.thumbnail || '';
+      }
     } catch (e) {
-      console.warn('[processar-ean] scraping ML falhou:', e.message);
+      console.warn('[processar-ean] ML API falhou:', e.message);
     }
 
     res.json({
