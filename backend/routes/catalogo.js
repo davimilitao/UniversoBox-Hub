@@ -62,51 +62,64 @@ router.post('/processar-ean', async (req, res) => {
   if (!ean) return res.status(400).json({ error: 'EAN obrigatório' });
 
   try {
-    // 1. Scraping do Mercado Livre
-    const url = `https://lista.mercadolivre.com.br/${ean}`;
-    const { data } = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    const $ = cheerio.load(data);
-    const titulobruto = $('.ui-search-item__title').first().text().trim() || 'Produto';
-    const foto = $('.ui-search-result-image__element').first().attr('src') || '';
+    // 1. Tenta scraping do Mercado Livre — falha silenciosa se bloqueado
+    let titulobruto = '';
+    let foto = '';
+    try {
+      const url = `https://lista.mercadolivre.com.br/${ean}`;
+      const { data } = await axios.get(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        timeout: 8000,
+      });
+      const $ = cheerio.load(data);
+      titulobruto = $('.ui-search-item__title').first().text().trim();
+      foto = $('.ui-search-result-image__element').first().attr('data-src')
+          || $('.ui-search-result-image__element').first().attr('src')
+          || '';
+    } catch (scrapeErr) {
+      console.warn('[processar-ean] scraping ML falhou:', scrapeErr.message);
+    }
 
-    // 2. IA processa o título bruto
+    // 2. IA processa — mesmo sem título do ML, gera a partir do EAN
+    const prompt = titulobruto
+      ? `Título bruto do Mercado Livre: "${titulobruto}"\nEAN: ${ean}`
+      : `EAN: ${ean}\n(produto não encontrado no ML — gere dados genéricos baseados no EAN)`;
+
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 400,
       system: `Você é um especialista em cadastro de produtos para e-commerce brasileiro.
-Dado um título bruto de produto do Mercado Livre, retorne APENAS um JSON válido com estes campos:
+Retorne APENAS um JSON válido com estes campos:
 - nome: título limpo e profissional em português (máx 120 chars)
 - sku: código semântico em maiúsculas (formato MARCA-MODELO-VARIANTE, máx 25 chars, sem acentos)
 - marca: nome da marca
 - ncm: código NCM de 8 dígitos mais provável para o produto
-- categoriaSugerida: nome da categoria de produto (ex: "Cadeiras para Auto", "Berços e Cercados", "Brinquedos")
-Retorne somente o JSON, sem markdown.`,
-      messages: [{ role: 'user', content: `Título bruto: "${titulobruto}"\nEAN: ${ean}` }]
+- categoriaSugerida: nome da categoria (ex: "Cadeiras para Auto", "Berços", "Brinquedos")
+Retorne somente o JSON, sem markdown, sem explicações.`,
+      messages: [{ role: 'user', content: prompt }],
     });
 
     let ia = {};
-    try {
-      ia = JSON.parse(msg.content[0].text);
-    } catch (_) {
-      ia = { nome: titulobruto, sku: `SKU-${ean.slice(-5)}`, marca: '', ncm: '', categoriaSugerida: '' };
-    }
+    try { ia = JSON.parse(msg.content[0].text); } catch (_) {}
 
     res.json({
-      fNome:    ia.nome   || titulobruto,
-      fSku:     ia.sku    || `SKU-${ean.slice(-5)}`,
-      fEan:     ean,
-      fMarca:   ia.marca  || '',
-      fNcm:     ia.ncm    || '',
-      fPreco:   '0.00',
-      fPesoLiq: '0.000',
-      fPesoBruto: '0.000',
-      fAltura: '0', fLargura: '0', fProfundidade: '0',
+      fNome:        ia.nome   || titulobruto || `Produto EAN ${ean}`,
+      fSku:         ia.sku    || `SKU-${ean.slice(-5)}`,
+      fEan:         ean,
+      fMarca:       ia.marca  || '',
+      fNcm:         ia.ncm    || '',
+      fPreco:       '0.00',
+      fPesoLiq:     '0.000',
+      fPesoBruto:   '0.000',
+      fAltura:      '0',
+      fLargura:     '0',
+      fProfundidade:'0',
       categoriaSugerida: ia.categoriaSugerida || '',
       imagens: foto ? [foto] : [],
     });
   } catch (error) {
-    console.error('Erro processar-ean:', error.message);
-    res.status(500).json({ error: 'Falha ao processar EAN' });
+    console.error('[processar-ean] erro:', error.response?.data || error.message);
+    res.status(500).json({ error: error.message || 'Falha ao processar EAN' });
   }
 });
 
