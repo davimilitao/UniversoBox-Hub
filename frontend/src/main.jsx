@@ -18,7 +18,7 @@ import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter basename="/spa">
+    <BrowserRouter basename={import.meta.env.DEV ? '/' : '/spa'}>
       <App />
     </BrowserRouter>
   </React.StrictMode>
