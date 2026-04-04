@@ -51,8 +51,12 @@ function normalizarProduto(p) {
     altura:       String(p.dimensoes?.altura      || p.altura      || '0'),
     largura:      String(p.dimensoes?.largura     || p.largura     || '0'),
     profundidade: String(p.dimensoes?.profundidade|| p.profundidade|| '0'),
-    categoria:    p.categoria ? { id: p.categoria.id, nome: p.categoria.descricao || '' } : null,
-    imagens:      (p.midia || []).filter(m => m.tipo === 'imagens').map(m => m.link),
+    categoria:    p.categoria ? { id: p.categoria.id, nome: p.categoria.descricao || p.categoria.nome || '' } : null,
+    imagens:      Array.isArray(p.midia)
+                    ? p.midia.filter(m => m.tipo === 'imagens').map(m => m.link)
+                    : Array.isArray(p.imagens)
+                      ? p.imagens.map(i => i.link || i).filter(Boolean)
+                      : [],
   };
 }
 
@@ -127,7 +131,9 @@ router.get('/buscar', async (req, res) => {
       headers: { Authorization: `Bearer ${token}` }
     });
 
-    res.json(normalizarProduto(det?.data || produto));
+    const raw = det?.data || produto;
+    console.log('[GET /buscar] midia:', JSON.stringify(raw.midia), '| imagens:', JSON.stringify(raw.imagens));
+    res.json(normalizarProduto(raw));
   } catch (e) {
     console.error('[GET /buscar]', e.response?.data || e.message);
     res.status(500).json({ error: e.message });
