@@ -25,7 +25,7 @@ import {
 // react     → true = Link interno; false = <a href> (página HTML legada)
 const ROTAS = [
   // ── Expedição ────────────────────────────────────────────────────────────
-  { key: 'pedidos',        moduleId: 'pedidos',        label: 'Entregas do Dia',   secao: 'Expedição',  Icon: Package,          react: false, href: '/pedidos'              },
+  { key: 'pedidos',        moduleId: 'pedidos',        label: 'Entregas do Dia',   secao: 'Expedição',  Icon: Package,          react: true,  href: '/expedicao/pedidos'    },
   { key: 'manual',         moduleId: 'manual',         label: 'Expedir Manual',    secao: 'Expedição',  Icon: ClipboardList,    react: false, href: '/manual'               },
   { key: 'ml-dashboard',   moduleId: 'ml-dashboard',   label: 'Dashboard Meli',    secao: 'Expedição',  Icon: BarChart2,        react: false, href: '/ml-dashboard'         },
   { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,              react: true,  href: '/expedicao/bling'      },
@@ -300,8 +300,8 @@ export function AppShell() {
           <span className="text-sm font-semibold text-slate-200">UniversoBox</span>
         </header>
 
-        {/* Páginas React via Outlet */}
-        <main className="flex-1 overflow-y-auto">
+        {/* Páginas React via Outlet — overflow-hidden: cada tela controla seu próprio scroll */}
+        <main className="flex-1 overflow-hidden flex flex-col">
           <Outlet />
         </main>
       </div>

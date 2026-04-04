@@ -653,7 +653,7 @@ export function BlingPedidos() {
     : `${fmtBR(rangeIni)} → ${fmtBR(rangeFim)}`;
 
   return (
-    <div className="text-slate-100 px-4 py-8 max-w-6xl mx-auto">
+    <div className="text-slate-100 px-4 py-8 max-w-6xl mx-auto overflow-y-auto flex-1">
 
       {/* Toast */}
       {toast && (
