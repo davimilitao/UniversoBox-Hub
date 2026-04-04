@@ -16,6 +16,7 @@ import { AppShell }         from './components/AppShell';
 import GestaoInsumos from './pages/expedicao/GestaoInsumos';
 import PedidosDoDia from './pages/expedicao/PedidosDoDia';
 import AutomacaoCadastro from './pages/catalogo/AutomacaoCadastro';
+import CatalogoPro       from './pages/catalogo/CatalogoPro';
 
 export default function App() {
   return (
@@ -31,7 +32,7 @@ export default function App() {
         <Route path="/expedicao/pedidos"   element={<PedidosDoDia />} />
         <Route path="/expedicao/insumos"   element={<GestaoInsumos />} />
         {/* Catálogo */}
-        {/* Catálogo */}
+        <Route path="/catalogo/produtos"  element={<CatalogoPro />} />
         <Route path="/catalogo/automacao" element={<AutomacaoCadastro />} />
         {/* Financeiro */}
         <Route path="/financeiro/despesas" element={<GestaoDespesas />} />
