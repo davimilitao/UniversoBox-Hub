@@ -644,7 +644,7 @@ export default function CatalogoPro() {
             onClick={() => setFiltersOpen(f => !f)}
             className={[
               'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors',
-              filtersAtivos > 0
+              filtrosAtivos > 0
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                 : 'bg-slate-800 text-slate-400 border-white/[0.07] hover:border-slate-600',
             ].join(' ')}
