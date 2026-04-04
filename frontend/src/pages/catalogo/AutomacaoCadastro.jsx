@@ -120,6 +120,13 @@ export default function AutomacaoCadastro() {
         </button>
       </div>
 
+      {produto?.jaExiste && (
+        <div className="flex items-center gap-3 bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-4 text-yellow-400">
+          <AlertCircle size={18}/>
+          <span className="text-sm font-bold">Produto já existe no Bling — campos pré-preenchidos. Você pode atualizar os dados e exportar novamente.</span>
+        </div>
+      )}
+
       {exportError && (
         <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-2xl p-4 text-red-400">
           <AlertCircle size={18}/>

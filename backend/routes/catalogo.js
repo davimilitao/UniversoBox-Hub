@@ -72,35 +72,43 @@ router.post('/processar-ean', async (req, res) => {
   if (!ean) return res.status(400).json({ error: 'EAN obrigatório' });
 
   try {
-    let titulo = '';
-    let foto   = '';
+    // Busca no Bling por GTIN — se já existe, pré-preenche o form
+    let titulo = '', foto = '', marca = '', ncm = '', sku = '', preco = '0.00';
+    let jaExiste = false;
     try {
-      // API pública do ML — sem auth, sem scraping, sem bloqueio de IP
-      const { data } = await axios.get(`https://api.mercadolibre.com/sites/MLB/search?q=${ean}`, {
+      const token = await blingEnsureToken();
+      const { data } = await axios.get(`${BLING_API_BASE}/produtos?gtin=${ean}&limit=1`, {
+        headers: { Authorization: `Bearer ${token}` },
         timeout: 8000,
       });
-      const item = data?.results?.[0];
-      if (item) {
-        titulo = item.title || '';
-        foto   = item.thumbnail?.replace('-I.jpg', '-O.jpg') || item.thumbnail || '';
+      const prod = data?.data?.[0];
+      if (prod) {
+        jaExiste = true;
+        sku    = prod.codigo       || '';
+        titulo = prod.nome         || '';
+        marca  = prod.marca        || '';
+        ncm    = prod.ncm          || '';
+        preco  = String(prod.preco || '0.00');
+        foto   = prod.imagemURL    || prod.midia?.[0]?.link || '';
       }
     } catch (e) {
-      console.warn('[processar-ean] ML API falhou:', e.message);
+      console.warn('[processar-ean] busca Bling falhou:', e.message);
     }
 
     res.json({
-      fNome:         titulo || `Produto EAN ${ean}`,
-      fSku:          gerarSku(titulo, ean),
+      fNome:         titulo || '',
+      fSku:          sku    || gerarSku(titulo, ean),
       fEan:          ean,
-      fMarca:        '',
-      fNcm:          '',
-      fPreco:        '0.00',
+      fMarca:        marca,
+      fNcm:          ncm,
+      fPreco:        preco,
       fPesoLiq:      '0.000',
       fPesoBruto:    '0.000',
       fAltura:       '0',
       fLargura:      '0',
       fProfundidade: '0',
-      imagens: foto ? [foto] : [],
+      imagens:       foto ? [foto] : [],
+      jaExiste,      // frontend pode avisar "produto já cadastrado"
     });
   } catch (error) {
     console.error('[processar-ean] erro:', error.message);
