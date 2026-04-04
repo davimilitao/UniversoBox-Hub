@@ -109,19 +109,33 @@ router.get('/buscar', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.status(400).json({ error: 'Parâmetro q obrigatório' });
 
+  // Validação básica: mínimo 3 chars
+  if (q.length < 3) return res.status(400).json({ error: 'Busca muito curta — use o SKU ou EAN completo' });
+
   try {
     const token = await blingEnsureToken();
 
-    // Tenta por GTIN primeiro (EAN), depois por código (SKU)
-    const tentativas = [
-      `${BLING_API_BASE}/produtos?gtin=${encodeURIComponent(q)}&limit=5`,
-      `${BLING_API_BASE}/produtos?codigo=${encodeURIComponent(q)}&limit=5`,
-    ];
+    // GTIN (EAN) só se for numérico puro com 8-14 dígitos
+    const pareceEAN = /^\d{8,14}$/.test(q);
+
+    const tentativas = [];
+    if (pareceEAN) tentativas.push({ url: `${BLING_API_BASE}/produtos?gtin=${encodeURIComponent(q)}&limit=5`,   campo: 'gtin'   });
+    tentativas.push(            { url: `${BLING_API_BASE}/produtos?codigo=${encodeURIComponent(q)}&limit=5`, campo: 'codigo' });
 
     let produto = null;
-    for (const url of tentativas) {
+    for (const { url, campo } of tentativas) {
       const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
-      if (data?.data?.length) { produto = data.data[0]; break; }
+      if (!data?.data?.length) continue;
+
+      // Verifica se o produto retornado realmente bate com a query
+      // (Bling pode ignorar o filtro e retornar todos quando o valor é inválido)
+      const match = data.data.find(p => {
+        const gtin   = (p.gtin   || '').toLowerCase();
+        const codigo = (p.codigo || '').toLowerCase();
+        const ql     = q.toLowerCase();
+        return gtin === ql || codigo === ql;
+      });
+      if (match) { produto = match; break; }
     }
 
     if (!produto) return res.status(404).json({ error: 'Produto não encontrado no Bling' });
@@ -132,7 +146,6 @@ router.get('/buscar', async (req, res) => {
     });
 
     const raw = det?.data || produto;
-    console.log('[GET /buscar] midia:', JSON.stringify(raw.midia), '| imagens:', JSON.stringify(raw.imagens));
     res.json(normalizarProduto(raw));
   } catch (e) {
     console.error('[GET /buscar]', e.response?.data || e.message);
