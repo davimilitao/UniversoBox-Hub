@@ -300,8 +300,8 @@ export function AppShell() {
           <span className="text-sm font-semibold text-slate-200">UniversoBox</span>
         </header>
 
-        {/* Páginas React via Outlet — overflow-hidden: cada tela controla seu próprio scroll */}
-        <main className="flex-1 overflow-hidden flex flex-col">
+        {/* Páginas React via Outlet */}
+        <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <Outlet />
         </main>
       </div>

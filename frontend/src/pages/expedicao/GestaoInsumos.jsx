@@ -107,7 +107,7 @@ export default function GestaoInsumos() {
   const custoUnitarioExibicao = calcularCustoUnitario();
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-6 max-w-7xl mx-auto flex-1 overflow-y-auto">
       {/* HEADER */}
       <div className="flex justify-between items-center mb-8">
         <div>

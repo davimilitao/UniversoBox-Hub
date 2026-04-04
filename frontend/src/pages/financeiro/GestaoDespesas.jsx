@@ -206,7 +206,7 @@ export function GestaoDespesas() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="text-slate-100 px-4 py-8 max-w-7xl mx-auto">
+    <div className="text-slate-100 px-4 py-8 max-w-7xl mx-auto flex-1 overflow-y-auto">
       <Toast msg={toast.msg} tipo={toast.tipo} />
 
       {/* Cabeçalho */}
