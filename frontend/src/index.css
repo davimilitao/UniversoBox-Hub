@@ -1,3 +1,160 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   UNIVERSBOX HUB — Global Design Tokens
+   Inspiração: Linear, Vercel, Raycast, Superhuman
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── 1. Color scheme: native elements (date inputs, selects, scrollbars) ── */
+:root {
+  color-scheme: dark;
+}
+
+/* ── 2. Full-height SPA shell — impede scrollbar no body ────────────────── */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── 3. Scrollbar global — thin overlay style (Vercel/Linear pattern) ───── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+/* ── 4. Text rendering e antialiasing ───────────────────────────────────── */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── 5. Seleção de texto — cor da marca ─────────────────────────────────── */
+::selection {
+  background: rgba(16, 185, 129, 0.25);
+  color: #ecfdf5;
+}
+
+/* ── 6. Focus visible — acessibilidade com estilo ───────────────────────── */
+:focus-visible {
+  outline: 2px solid rgba(16, 185, 129, 0.6);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Remove outline padrão (apenas quando não é teclado) */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ── 7. Transições suaves para mudanças de tema ─────────────────────────── */
+* {
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 0ms; /* padrão 0 — componentes definem seus próprios */
+}
+
+/* ── 8. Input search — remove ícone nativo do webkit ───────────────────── */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+}
+
+/* ── 9. Animações utilitárias ────────────────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+
+@keyframes slide-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+
+.animate-fade-in       { animation: fade-in       0.18s ease both; }
+.animate-slide-in-right{ animation: slide-in-right 0.2s  ease both; }
+.animate-slide-in-up   { animation: slide-in-up   0.18s ease both; }
+.animate-scale-in      { animation: scale-in      0.15s ease both; }
+
+/* ── 10. Utilitários de scrollbar por elemento ──────────────────────────── */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── 11. Glass morphism (modais, tooltips) ──────────────────────────────── */
+.glass {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ── 12. Gradient text utilitário ───────────────────────────────────────── */
+.text-gradient {
+  background: linear-gradient(135deg, #10b981, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── 13. Tabela / lista — linha hover pattern (Superhuman) ──────────────── */
+.row-hover {
+  transition: background-color 80ms ease;
+}
+.row-hover:hover {
+  background-color: rgba(255, 255, 255, 0.025);
+}
+
+/* ── 14. Keyboard shortcut badge ────────────────────────────────────────── */
+kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.6;
+}
