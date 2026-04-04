@@ -104,18 +104,25 @@ app.post('/bling/disconnect', async (req, res) => {
   res.json({ ok: true });
 });
 
-// ── LISTAR NFs DO DIA ─────────────────────────────────────────────
-// GET /bling/pedidos?data=2026-03-18
+// ── Hoje no Brasil (Railway roda em UTC, Bling usa horário de Brasília) ────────
+function hojeNoBrasil() {
+  return new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+    .split('/').reverse().join('-'); // dd/mm/yyyy → yyyy-mm-dd
+}
+
+// ── LISTAR NFs — suporte a range ──────────────────────────────────────────────
+// GET /bling/pedidos?dataInicio=2026-04-01&dataFim=2026-04-03&loja=all
 // Retorna resumo das NFs — itens são carregados sob demanda via /bling/pedidos/:id
 app.get('/bling/pedidos', async (req, res, next) => {
   try {
-    const data   = req.query.data || new Date().toISOString().split('T')[0];
-    const pagina = Number(req.query.pagina || 1);
+    // Suporte a range (dataInicio/dataFim) e retrocompatibilidade (?data=)
+    const dataInicio = req.query.dataInicio || req.query.data || hojeNoBrasil();
+    const dataFim    = req.query.dataFim    || dataInicio;
+    const pagina     = Number(req.query.pagina || 1);
 
-    // situacao=100 = Autorizada | 101 = Cancelada | omitir para todas
     const params = new URLSearchParams({
-      dataEmissaoInicial: data,
-      dataEmissaoFinal:   data,
+      dataEmissaoInicial: dataInicio,
+      dataEmissaoFinal:   dataFim,
       pagina,
       limite: 100,
     });
@@ -128,7 +135,7 @@ app.get('/bling/pedidos', async (req, res, next) => {
       numero:      n.numero,
       numeroPedido: null,           // carregado sob demanda
       dataEmissao: n.dataEmissao,
-      situacao:    n.situacao?.descricao || '',
+      situacao:    (typeof n.situacao === 'object' ? n.situacao?.descricao : n.situacao) || '',
       cliente:     { nome: n.contato?.nome || '' },
       marketplace: detectarMkt(n),
       valorTotal:  n.valorTotal || 0,
@@ -136,7 +143,7 @@ app.get('/bling/pedidos', async (req, res, next) => {
       detalhado:   false,
     }));
 
-    res.json({ items, total: items.length, data });
+    res.json({ items, total: items.length, dataInicio, dataFim });
   } catch(err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
     console.error('[GET /bling/pedidos]', err);
