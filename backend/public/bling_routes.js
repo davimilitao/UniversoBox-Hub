@@ -163,10 +163,11 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
       detalhado:    true,
       itens: (n.itens || []).map(it => ({
         // Bling v3 NF: campos diretos no item
-        sku:   safeTrim(it.codigo || it.produto?.codigo || ''),
-        nome:  safeTrim(it.descricao || it.produto?.descricao || ''),
-        qty:   Number(it.quantidade ?? it.qty ?? 1),
-        preco: Number(it.valor ?? it.valorUnitario ?? 0),
+        sku:       safeTrim(it.codigo || it.produto?.codigo || ''),
+        nome:      safeTrim(it.descricao || it.produto?.descricao || ''),
+        qty:       Number(it.quantidade ?? it.qty ?? 1),
+        preco:     Number(it.valor ?? it.valorUnitario ?? 0),
+        produtoId: it.produto?.id || null,   // usado pelo front para lazy-load da foto
       })),
     };
 
