@@ -767,7 +767,7 @@ export default function PedidosDoDia() {
   ];
 
   return (
-    <div className="flex flex-col h-full overflow-hidden text-slate-100">
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden text-slate-100">
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 flex-shrink-0 bg-slate-900">
@@ -793,7 +793,7 @@ export default function PedidosDoDia() {
       </div>
 
       {/* ── Layout principal ── */}
-      <div className="flex-1 overflow-hidden grid" style={{ gridTemplateColumns: '290px 1fr' }}>
+      <div className="flex-1 min-h-0 grid overflow-hidden" style={{ gridTemplateColumns: '290px 1fr' }}>
 
         {/* ── Coluna esquerda: lista ── */}
         <div className="border-r border-white/5 flex flex-col overflow-hidden">
@@ -848,7 +848,7 @@ export default function PedidosDoDia() {
           {/* ── ABA SEPARAR ── */}
           {tab === 'pending' && (
             selOrder ? (
-              <div className="flex flex-col h-full overflow-hidden">
+              <div className="flex flex-col min-h-0 overflow-hidden">
 
                 {/* Header do pedido */}
                 <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-white/5 bg-slate-900 flex-shrink-0">

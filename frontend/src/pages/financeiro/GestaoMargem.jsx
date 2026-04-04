@@ -344,7 +344,7 @@ export function GestaoMargem() {
   }, [items, totais]);
 
   return (
-    <div className="text-slate-100 px-4 py-8 max-w-7xl mx-auto">
+    <div className="text-slate-100 px-4 py-8 max-w-7xl mx-auto flex-1 overflow-y-auto">
 
       {/* Header */}
       <div className="mb-6">
