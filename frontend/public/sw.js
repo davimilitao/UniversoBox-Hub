@@ -21,6 +21,8 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
+  // Ignora schemes não-http (chrome-extension, etc.)
+  if (!url.protocol.startsWith('http')) return;
   // API e Firebase: sempre network
   if (url.pathname.startsWith('/orders') ||
       url.pathname.startsWith('/bling')  ||

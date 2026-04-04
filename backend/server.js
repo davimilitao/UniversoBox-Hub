@@ -2450,6 +2450,56 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
 });
 
 
+// ── DANFE PDF (proxy → QZ Tray) ──────────────────────────────────
+// GET /bling/danfe/:id  → { ok, pdf: base64 }
+app.get('/bling/danfe/:id', async (req, res, next) => {
+  try {
+    const token = await blingEnsureToken();
+    const resp = await fetch(`${BLING_API_BASE}/nfe/${req.params.id}/danfe`, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/pdf' },
+    });
+    if (resp.status === 401) throw new Error('bling_not_authorized');
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error(`Bling DANFE ${resp.status}: ${txt.slice(0, 120)}`);
+    }
+    const buffer = await resp.arrayBuffer();
+    const b64 = Buffer.from(buffer).toString('base64');
+    res.json({ ok: true, pdf: b64, nfId: req.params.id });
+  } catch(err) {
+    if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    console.error('[GET /bling/danfe/:id]', err.message);
+    next(err);
+  }
+});
+
+// ── ZPL Etiqueta de Prateleira (bin label) → QZ Tray ─────────────
+// POST /orders/:id/etiqueta-bin  body: { sku, nome, bin, ean }
+app.post('/orders/:id/etiqueta-bin', async (req, res) => {
+  try {
+    const { sku = '', nome = '', bin = '', ean = '' } = req.body || {};
+    const trunc = (s, n) => String(s || '').slice(0, n).replace(/[^\x20-\x7E]/g, '?');
+    const eanZpl = ean.replace(/\D/g, '').slice(0, 13);
+    const zpl = [
+      '^XA',
+      '^MMT^PW640^LL320^LS0',
+      '^FO20,15^A0N,22,22^FDUniversoBox^FS',
+      '^FO20,15^GB600,1,2^FS',
+      `^FO20,42^A0N,26,26^FB590,2,0,L^FD${trunc(nome,38)}^FS`,
+      `^FO20,102^GB180,36,36^FR^FS`,
+      `^FO28,108^A0N,24,24^FDSKU ${trunc(sku,24)}^FS`,
+      bin ? `^FO220,92^A0N,18,18^FDLocalização^FS\n^FO220,114^A0N,44,44^FD${trunc(bin,20)}^FS` : '',
+      eanZpl.length >= 8 ? `^FO20,148^BY2,3,60^BE^FD${eanZpl}^FS\n^FO20,215^A0N,20,20^FD${eanZpl}^FS` : '',
+      `^FO400,270^A0N,18,18^FD${trunc(req.params.id,22)}^FS`,
+      '^XZ',
+    ].filter(Boolean).join('\n');
+    res.json({ ok: true, zpl });
+  } catch(e) {
+    console.error('[POST /orders/:id/etiqueta-bin]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── DEBUG: ver resposta bruta da API do Bling ────────────────────
 // GET /bling/debug/nfe/:id  (usar id interno do Bling, não o numero da NF)
 // GET /bling/debug/lista?data=2026-03-17  (ver listagem com IDs reais)
