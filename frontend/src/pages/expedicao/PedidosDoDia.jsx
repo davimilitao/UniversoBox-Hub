@@ -548,10 +548,64 @@ function ExpedicaoCard({ o, onConfirmar, confirmando }) {
   );
 }
 
+// ─── QZ Tray: imprime DANFE via impressora local ──────────────────────────────
+// Reusa o QZ Tray já instalado pelo Bling ("Impressão automática")
+async function printDanfe(blingNfId, onStatus) {
+  const qz = window.qz;
+  if (!qz) throw new Error('QZ Tray não encontrado. Instale em qz.io/download e reinicie o navegador.');
+
+  // Modo unsigned — funciona se QZ Tray estiver configurado para aceitar (como o Bling faz)
+  if (!qz.websocket.isActive()) {
+    try {
+      qz.security.setCertificatePromise(resolve => resolve(null));
+      qz.security.setSignatureAlgorithm('SHA512');
+      qz.security.setSignaturePromise(() => resolve => resolve(null));
+    } catch {}
+    onStatus?.('Conectando ao QZ Tray…');
+    await qz.websocket.connect({ retries: 3, delay: 1 });
+  }
+
+  onStatus?.('Buscando DANFE no Bling…');
+  const token = localStorage.getItem('expedicao_token') || '';
+  const res = await fetch(`/bling/danfe/${encodeURIComponent(blingNfId)}`, {
+    headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || `Erro ao buscar DANFE (HTTP ${res.status})`);
+  }
+  const data = await res.json();
+  if (!data?.pdf) throw new Error('Bling não retornou o PDF da DANFE para esta NF.');
+
+  onStatus?.('Enviando para impressora…');
+  const printer = await qz.printers.getDefault();
+  const config = qz.configs.create(printer, {
+    scaleContent: true,
+    colorType: 'blackwhite',
+    orientation: 'portrait',
+  });
+  await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: data.pdf }]);
+}
+
 // ─── Modal de confirmação de separação ────────────────────────────────────────
 function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
   if (!order) return null;
   const its = Array.isArray(order.items) ? order.items : [];
+  const [printStatus, setPrintStatus] = useState(null); // null | 'loading' | 'ok' | 'err'
+  const [printMsg,    setPrintMsg]    = useState('');
+  const temDanfe = !!order.blingNfId;
+
+  async function handlePrint() {
+    if (!temDanfe) return;
+    setPrintStatus('loading'); setPrintMsg('Conectando…');
+    try {
+      await printDanfe(order.blingNfId, msg => setPrintMsg(msg));
+      setPrintStatus('ok'); setPrintMsg('DANFE enviada para impressão! ✓');
+      setTimeout(() => { setPrintStatus(null); setPrintMsg(''); }, 4000);
+    } catch (e) {
+      setPrintStatus('err'); setPrintMsg(e.message);
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
@@ -614,6 +668,36 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
             </div>
           )}
         </div>
+
+        {/* Botão DANFE — só aparece se o pedido veio do Bling */}
+        {temDanfe && (
+          <div className="px-4 pb-2">
+            <button
+              onClick={handlePrint}
+              disabled={printStatus === 'loading'}
+              className={`w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl border-2 text-sm font-extrabold transition-all
+                ${printStatus === 'loading' ? 'border-slate-600 bg-slate-800/60 text-slate-500 cursor-wait' :
+                  printStatus === 'ok'      ? 'border-emerald-500/50 bg-emerald-950/40 text-emerald-400' :
+                  printStatus === 'err'     ? 'border-red-500/40 bg-red-950/30 text-red-400' :
+                  'border-dashed border-slate-600 bg-slate-800/30 text-slate-400 hover:border-slate-500 hover:text-slate-200'}`}
+            >
+              {printStatus === 'loading' ? (
+                <><Loader2 size={15} className="animate-spin"/> {printMsg}</>
+              ) : printStatus === 'ok' ? (
+                <><CircleCheck size={15}/> {printMsg}</>
+              ) : printStatus === 'err' ? (
+                <><span className="text-base">⚠️</span> <span className="text-xs font-normal line-clamp-2">{printMsg}</span></>
+              ) : (
+                <><span className="text-base">🖨️</span> Imprimir DANFE Simplificado</>
+              )}
+            </button>
+            {printStatus === 'err' && (
+              <p className="text-[10px] text-slate-600 text-center mt-1.5 leading-relaxed">
+                QZ Tray precisa estar rodando · Acesse qz.io/download se necessário
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex gap-2 p-4 border-t border-white/5">
