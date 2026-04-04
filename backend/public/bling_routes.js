@@ -211,6 +211,56 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
   }
 });
 
+// ── ZPL: Etiqueta de Prateleira (bin label) ──────────────────────
+// POST /orders/:id/etiqueta-bin  body: { sku, nome, bin, ean }
+// Retorna { ok, zpl } — QZ Tray imprime via raw ZPL na L42 Pro
+app.post('/orders/:id/etiqueta-bin', async (req, res) => {
+  try {
+    const { sku = '', nome = '', bin = '', ean = '' } = req.body || {};
+    const orderId = req.params.id;
+
+    // Sanitiza: máx 38 chars por linha no ZPL 203dpi / 4"
+    const trunc = (s, n) => String(s || '').slice(0, n).replace(/[^\x20-\x7E]/g, '?');
+    const nomeZpl = trunc(nome, 38);
+    const skuZpl  = trunc(sku,  24);
+    const binZpl  = trunc(bin,  20);
+    const eanZpl  = ean.replace(/\D/g, '').slice(0, 13);
+
+    // ZPL para L42 Pro (203 dpi, 108mm = ~860 dots — usamos 800)
+    // Formato: 80mm × 40mm (~640 × 320 dots a 203dpi)
+    const zpl = [
+      '^XA',
+      '^MMT^PW640^LL320^LS0',
+      // Logo / empresa
+      '^FO20,15^A0N,22,22^FDUniversoBox^FS',
+      '^FO20,15^GB600,1,2^FS',
+      // Nome do produto
+      `^FO20,42^A0N,26,26^FB590,2,0,L^FD${nomeZpl}^FS`,
+      // SKU badge
+      `^FO20,102^GB180,36,36^FR^FS`,
+      `^FO28,108^A0N,24,24^FDSKU ${skuZpl}^FS`,
+      // BIN (localização) — destaque grande
+      bin ? [
+        '^FO220,92^A0N,18,18^FDLocalização^FS',
+        `^FO220,114^A0N,44,44^FD${binZpl}^FS`,
+      ].join('\n') : '',
+      // EAN barcode (se disponível)
+      eanZpl.length >= 8 ? [
+        `^FO20,148^BY2,3,60^BE^FD${eanZpl}^FS`,
+        `^FO20,215^A0N,20,20^FD${eanZpl}^FS`,
+      ].join('\n') : '',
+      // Ordem de origem
+      `^FO400,270^A0N,18,18^FD${trunc(orderId, 22)}^FS`,
+      '^XZ',
+    ].filter(Boolean).join('\n');
+
+    res.json({ ok: true, zpl });
+  } catch(e) {
+    console.error('[POST /orders/:id/etiqueta-bin]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── DEBUG: ver resposta bruta da API do Bling ────────────────────
 // GET /bling/debug/nfe/:id  — remover em produção após diagnóstico
 app.get('/bling/debug/nfe/:id', async (req, res, next) => {

@@ -1,20 +1,25 @@
 /**
  * @file PedidosDoDia.jsx
  * @module expedicao
- * @description Separação + Expedição com scanner — v3.0
- *              Aba Expedir com mesmo fluxo modal/scanner da Separação.
- *              Logos reais de marketplace, identidade visual forte.
- * @version 3.0.0
+ * @description Separação + Expedição com scanner — v4.0
+ *              + Notificações de novo pedido (polling 30s)
+ *              + Câmera como scanner (ZXing)
+ *              + Relatório do dia (aba Expedido)
+ *              + Etiqueta de prateleira (ZPL via QZ Tray)
+ *              + Logos reais de marketplace
+ * @version 4.0.0
  * @date 2026-04-04
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  RefreshCw, Plus, Loader2, ChevronRight,
-  User, MapPin, X, ScanLine, Printer,
-  PackageCheck, SendHorizonal, CircleCheck,
-  BoxesIcon, Truck, ClipboardCheck,
+  RefreshCw, Plus, Loader2, ChevronRight, User, MapPin, X,
+  ScanLine, Printer, PackageCheck, SendHorizonal, CircleCheck,
+  BoxesIcon, Truck, ClipboardCheck, Camera, CameraOff,
+  BarChart2, Tag, Bell, BellOff, ChevronDown, ChevronUp,
 } from 'lucide-react';
+import { useOrderNotifier }  from '../../hooks/useOrderNotifier';
+import { useBarcodeCamera }  from '../../hooks/useBarcodeCamera';
 
 // ─── Terminal & Auth ──────────────────────────────────────────────────────────
 function getTerminalId() {
@@ -42,15 +47,10 @@ async function api(path, opts = {}) {
 }
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
-function fmtTime(ms) {
-  if (!ms) return '—';
-  return new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-}
-function isToday(ms) {
-  if (!ms) return false;
-  const d = new Date(Number(ms)), n = new Date();
-  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
-}
+function fmtTime(ms)  { if (!ms) return '—'; return new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
+function fmtDur(ms)   { if (!ms) return '—'; const m = Math.round(ms / 60000); return m < 60 ? `${m}min` : `${Math.floor(m/60)}h${String(m%60).padStart(2,'0')}`; }
+function isToday(ms)  { if (!ms) return false; const d = new Date(Number(ms)), n = new Date(); return d.getFullYear()===n.getFullYear()&&d.getMonth()===n.getMonth()&&d.getDate()===n.getDate(); }
+
 function sortOrders(arr) {
   return [...arr].sort((a, b) => {
     const aF = a.logistica === 'flex' || !!a.isPriority;
@@ -61,10 +61,7 @@ function sortOrders(arr) {
 }
 function getEtiquetaInfo(o) {
   const nome = o.clienteNome || '';
-  if (o.marketplace === 'MERCADO_LIVRE') {
-    const m = nome.match(/\(([^)]+)\)/);
-    return { tipo: 'ml', valor: m ? m[1] : nome };
-  }
+  if (o.marketplace === 'MERCADO_LIVRE') { const m = nome.match(/\(([^)]+)\)/); return { tipo: 'ml', valor: m ? m[1] : nome }; }
   if (o.marketplace === 'SHOPEE') return { tipo: 'shop', valor: o.numeroPedido || '' };
   return null;
 }
@@ -99,19 +96,19 @@ function beep(ok = true) {
   } catch {}
 }
 
-// ─── QZ Tray: DANFE ───────────────────────────────────────────────────────────
-async function printDanfe(blingNfId, onStatus) {
+// ─── QZ Tray helpers ──────────────────────────────────────────────────────────
+async function qzConnect() {
   const qz = window.qz;
   if (!qz) throw new Error('QZ Tray não encontrado. Instale em qz.io/download');
   if (!qz.websocket.isActive()) {
-    try {
-      qz.security.setCertificatePromise(r => r(null));
-      qz.security.setSignatureAlgorithm('SHA512');
-      qz.security.setSignaturePromise(() => r => r(null));
-    } catch {}
-    onStatus?.('Conectando ao QZ Tray…');
+    try { qz.security.setCertificatePromise(r => r(null)); qz.security.setSignatureAlgorithm('SHA512'); qz.security.setSignaturePromise(() => r => r(null)); } catch {}
     await qz.websocket.connect({ retries: 3, delay: 1 });
   }
+  return qz;
+}
+
+async function printDanfe(blingNfId, onStatus) {
+  const qz = await qzConnect();
   onStatus?.('Buscando DANFE no Bling…');
   const token = localStorage.getItem('expedicao_token') || '';
   const res = await fetch(`/bling/danfe/${encodeURIComponent(blingNfId)}`, {
@@ -126,49 +123,49 @@ async function printDanfe(blingNfId, onStatus) {
   await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: data.pdf }]);
 }
 
+async function printBinLabel(orderId, item, onStatus) {
+  const qz = await qzConnect();
+  onStatus?.('Gerando etiqueta ZPL…');
+  const r = await api(`/orders/${encodeURIComponent(orderId)}/etiqueta-bin`, {
+    method: 'POST',
+    body: JSON.stringify({ sku: item.sku, nome: item.nameShort || item.name || '', bin: item.customBin || item.bin || '', ean: item.ean || '' }),
+  });
+  if (!r?.zpl) throw new Error('Falha ao gerar ZPL');
+  onStatus?.('Imprimindo etiqueta…');
+  const printer = await qz.printers.getDefault();
+  const config = qz.configs.create(printer, { language: { type: 'ZPL' } });
+  await qz.print(config, [{ type: 'raw', format: 'plain', data: r.zpl }]);
+}
+
 // ─── Marketplace Logos ────────────────────────────────────────────────────────
-// Logos com identidade visual real dos canais
 function MktLogo({ mkt, size = 'sm' }) {
+  const lg = size === 'lg';
+  const base = `inline-flex items-center gap-1 font-black rounded-lg leading-none select-none ${lg ? 'px-3 py-1.5 text-sm gap-1.5' : 'px-2 py-1 text-[10px]'}`;
+
   if (mkt === 'MERCADO_LIVRE') {
-    const isLg = size === 'lg';
     return (
-      <span
-        title="Mercado Livre"
-        className={`inline-flex items-center gap-1 font-black rounded-lg leading-none
-          ${isLg ? 'px-3 py-1.5 text-sm gap-1.5' : 'px-2 py-1 text-[10px]'}`}
-        style={{ background: '#FFE600', color: '#2D3277' }}
-      >
-        {/* Shopping bag icon */}
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
-          width={isLg ? 14 : 10} height={isLg ? 14 : 10}>
-          <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zm1 14a1 1 0 0 1-2 0V9a1 1 0 0 1 2 0zm4 0a1 1 0 0 1-2 0V9a1 1 0 0 1 2 0zm4 0a1 1 0 0 1-2 0V9a1 1 0 0 1 2 0z"/>
+      <span title="Mercado Livre" className={base} style={{ background: '#FFE600', color: '#1a2060' }}>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width={lg?14:10} height={lg?14:10}>
+          <path d="M12 1C5.925 1 1 5.925 1 12s4.925 11 11 11 11-4.925 11-11S18.075 1 12 1zm-1 6h2v2h-2V7zm0 4h2v6h-2v-6z"/>
         </svg>
         <span>Mercado Livre</span>
       </span>
     );
   }
   if (mkt === 'SHOPEE') {
-    const isLg = size === 'lg';
     return (
-      <span
-        title="Shopee"
-        className={`inline-flex items-center gap-1 font-black rounded-lg leading-none text-white
-          ${isLg ? 'px-3 py-1.5 text-sm gap-1.5' : 'px-2 py-1 text-[10px]'}`}
-        style={{ background: '#EE4D2D' }}
-      >
-        {/* Shopee S bag icon approximation */}
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"
-          width={isLg ? 14 : 10} height={isLg ? 14 : 10}>
-          <path d="M12 2a5 5 0 0 0-5 5H5l-1 15h16L19 7h-2a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3H9a3 3 0 0 1 3-3zm0 6c2 0 3.5 1 3.5 2.5S13.5 15 12 15c-.8 0-1.5.3-1.5.8s.7.7 1.5.7c2.5 0 4-1.2 4-3S14.5 11 12 11c-.7 0-1.3-.2-1.3-.8s.6-.7 1.3-.7c1 0 1.8.4 1.8.4l.8-1.6S13.8 8 12 8C9.8 8 8.5 9.2 8.5 11S10 13.5 12 13.5c.8 0 1.5.2 1.5.75s-.7.75-1.5.75c-1.2 0-2.2-.5-2.2-.5L9 16s1.2.6 3 .6c2.3 0 3.8-1.2 3.8-3.1S13.8 11 12 11z"/>
+      <span title="Shopee" className={base} style={{ background: '#EE4D2D', color: '#fff' }}>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width={lg?14:10} height={lg?14:10}>
+          <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zm6 3a3 3 0 0 1 3 3H9a3 3 0 0 1 3-3z"/>
         </svg>
         <span>Shopee</span>
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-lg bg-slate-700 border border-slate-600 text-slate-300 leading-none">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width={10} height={10}>
-        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+    <span className={`${base} bg-slate-700 border border-slate-600 text-slate-300`}>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width={lg?14:10} height={lg?14:10}>
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
       </svg>
       {mkt || 'OUTROS'}
     </span>
@@ -176,11 +173,7 @@ function MktLogo({ mkt, size = 'sm' }) {
 }
 
 function FlexBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-amber-400 text-black leading-none animate-pulse">
-      ⚡ FLEX
-    </span>
-  );
+  return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-amber-400 text-black leading-none animate-pulse">⚡ FLEX</span>;
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -190,12 +183,11 @@ function Toast({ items }) {
     <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none" style={{ minWidth: 300 }}>
       {items.map(t => (
         <div key={t.id} className={`flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold border backdrop-blur-sm
-          ${t.tipo === 'ok'  ? 'bg-emerald-950/95 border-emerald-500/40 text-emerald-200' :
-            t.tipo === 'err' ? 'bg-red-950/95 border-red-500/40 text-red-200' :
-                               'bg-slate-900/95 border-white/15 text-slate-200'}`}>
-          <span className="text-lg leading-none shrink-0">
-            {t.tipo === 'ok' ? '✓' : t.tipo === 'err' ? '✕' : 'ℹ'}
-          </span>
+          ${t.tipo === 'ok'    ? 'bg-emerald-950/95 border-emerald-500/40 text-emerald-200' :
+            t.tipo === 'err'   ? 'bg-red-950/95 border-red-500/40 text-red-200' :
+            t.tipo === 'new'   ? 'bg-blue-950/95 border-blue-500/40 text-blue-200' :
+                                 'bg-slate-900/95 border-white/15 text-slate-200'}`}>
+          <span className="text-lg shrink-0">{t.tipo==='ok'?'✓':t.tipo==='err'?'✕':t.tipo==='new'?'📦':'ℹ'}</span>
           {t.msg}
         </div>
       ))}
@@ -205,13 +197,12 @@ function Toast({ items }) {
 
 function ScanFlash({ tipo }) {
   if (!tipo) return null;
-  return <div className={`fixed inset-0 pointer-events-none z-40 ${tipo === 'ok' ? 'bg-emerald-400/8' : 'bg-red-400/12'}`} />;
+  return <div className={`fixed inset-0 pointer-events-none z-40 ${tipo==='ok'?'bg-emerald-400/8':'bg-red-400/12'}`} />;
 }
 
 // ─── Progress Ring ────────────────────────────────────────────────────────────
 function ProgressRing({ pct, size = 40, stroke = 3.5 }) {
-  const r = (size - stroke * 2) / 2;
-  const circ = 2 * Math.PI * r;
+  const r = (size - stroke * 2) / 2, circ = 2 * Math.PI * r;
   const offset = circ - (pct / 100) * circ;
   const color = pct >= 100 ? '#34d399' : pct > 0 ? '#60a5fa' : '#1e293b';
   return (
@@ -221,15 +212,94 @@ function ProgressRing({ pct, size = 40, stroke = 3.5 }) {
         strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
         style={{ transition: 'stroke-dashoffset 0.4s, stroke 0.3s' }} />
       <text x={size/2} y={size/2} textAnchor="middle" dominantBaseline="middle"
-        style={{ transform: `rotate(90deg)`, transformOrigin: `${size/2}px ${size/2}px`,
-          fill: pct >= 100 ? '#34d399' : '#64748b', fontSize: 9, fontWeight: 700, fontFamily: 'monospace' }}>
+        style={{ transform:`rotate(90deg)`, transformOrigin:`${size/2}px ${size/2}px`,
+          fill: pct>=100?'#34d399':'#64748b', fontSize:9, fontWeight:700, fontFamily:'monospace' }}>
         {pct}%
       </text>
     </svg>
   );
 }
 
-// ─── Order Card (lista esquerda) ──────────────────────────────────────────────
+// ─── Camera Overlay ───────────────────────────────────────────────────────────
+function CameraOverlay({ onScan, onClose }) {
+  const [err, setErr] = useState('');
+  const lastScan = useRef('');
+  const camera = useBarcodeCamera({
+    onScan: code => {
+      if (code === lastScan.current) return; // debounce
+      lastScan.current = code;
+      setTimeout(() => { lastScan.current = ''; }, 2000);
+      beep(true);
+      onScan(code);
+    },
+    onError: msg => setErr(msg),
+  });
+
+  useEffect(() => {
+    camera.start();
+    return () => camera.stop();
+  }, []); // eslint-disable-line
+
+  return (
+    <div className="fixed inset-0 bg-black z-[60] flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-black/80 z-10">
+        <div className="flex items-center gap-2">
+          <Camera size={18} className="text-emerald-400" />
+          <span className="font-bold text-white text-sm">Scanner de Câmera</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {camera.cameras.length > 1 && (
+            <button onClick={() => { const next = (camera.camIdx + 1) % camera.cameras.length; camera.setCamIdx(next); camera.stop(); setTimeout(() => camera.start(camera.cameras[next]?.deviceId), 200); }}
+              className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs font-bold">
+              🔄 Virar câmera
+            </button>
+          )}
+          <button onClick={onClose} className="p-2 rounded-xl bg-white/10 text-white"><X size={18}/></button>
+        </div>
+      </div>
+
+      {/* Vídeo */}
+      <div className="flex-1 relative overflow-hidden">
+        <video ref={camera.videoRef} autoPlay playsInline muted
+          className="w-full h-full object-cover" />
+        {/* Mira de leitura */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="relative w-64 h-40">
+            <div className="absolute inset-0 border-2 border-emerald-400/60 rounded-xl" />
+            {/* Cantos destacados */}
+            {[['top-0 left-0','border-t-2 border-l-2'],['top-0 right-0','border-t-2 border-r-2'],
+              ['bottom-0 left-0','border-b-2 border-l-2'],['bottom-0 right-0','border-b-2 border-r-2']
+            ].map(([pos, cls], i) => (
+              <div key={i} className={`absolute w-6 h-6 ${pos} ${cls} border-emerald-400 rounded-sm`} />
+            ))}
+            {/* Linha de scan animada */}
+            <div className="absolute left-1 right-1 h-0.5 bg-emerald-400/80 animate-bounce" style={{ top: '50%' }} />
+          </div>
+        </div>
+        {camera.loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 size={32} className="text-emerald-400 animate-spin" />
+              <span className="text-white text-sm">Abrindo câmera…</span>
+            </div>
+          </div>
+        )}
+        {err && (
+          <div className="absolute bottom-4 left-4 right-4 bg-red-900/90 border border-red-500/40 rounded-xl p-3 text-red-200 text-sm text-center">
+            ⚠️ {err}
+          </div>
+        )}
+      </div>
+
+      <div className="px-4 py-3 bg-black/80 text-center">
+        <p className="text-slate-400 text-xs">Aponte para um código de barras ou QR Code</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Order Card ───────────────────────────────────────────────────────────────
 function OrderCard({ o, tab, active, onClick }) {
   const its     = Array.isArray(o.items) ? o.items : [];
   const total   = its.reduce((a, it) => a + Number(it.qty || 0), 0);
@@ -245,31 +315,25 @@ function OrderCard({ o, tab, active, onClick }) {
         ${active
           ? 'border-blue-500/50 bg-blue-500/8 ring-1 ring-blue-500/20 shadow-lg shadow-blue-900/20'
           : isFlex
-          ? 'border-l-[3px] border-l-amber-400 border-r-white/5 border-t-white/5 border-b-white/5 bg-slate-800/70 hover:bg-slate-800'
+          ? 'border-l-[3px] border-l-amber-400 border-t-white/5 border-r-white/5 border-b-white/5 bg-slate-800/70 hover:bg-slate-800'
           : 'border-white/6 bg-slate-800/50 hover:bg-slate-800 hover:border-white/12'}`}>
-
       {isFlex && (
         <div className="bg-amber-400/10 border-b border-amber-400/20 px-3 py-1">
           <span className="text-[9px] font-black text-amber-400 uppercase tracking-wider">⚡ Prioridade Flex</span>
         </div>
       )}
-
       <div className="p-3">
-        {/* Topo: marketplace logo + ID */}
         <div className="flex items-center justify-between gap-2 mb-2">
           <MktLogo mkt={o.marketplace} />
           <span className="font-mono text-[10px] text-slate-500 truncate">{o.id}</span>
         </div>
-
-        {/* Etiqueta ML/Shopee */}
         {etiq?.valor && (
           <div className={`text-[11px] font-bold mb-2.5 truncate px-2 py-1 rounded-lg
-            ${etiq.tipo === 'ml' ? 'text-amber-400 bg-amber-400/8 border border-amber-400/15' : 'text-orange-300 bg-orange-500/8 border border-orange-500/15 font-mono'}`}>
+            ${etiq.tipo === 'ml' ? 'text-amber-400 bg-amber-400/8 border border-amber-400/15'
+                                 : 'text-orange-300 bg-orange-500/8 border border-orange-500/15 font-mono'}`}>
             {etiq.tipo === 'ml' ? '🏷️ ' : '📦 '}{etiq.valor}
           </div>
         )}
-
-        {/* Thumbs + progresso */}
         <div className="flex items-center gap-2">
           <div className="flex gap-1 flex-1">
             {thumbs.map((it, i) => (
@@ -278,28 +342,20 @@ function OrderCard({ o, tab, active, onClick }) {
                   onError={e => { e.target.src = '/assets/placeholder.png'; }}
                   className="w-9 h-9 rounded-lg object-cover border border-white/10 bg-slate-700" alt="" />
                 {Number(it.qty) > 1 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-slate-900 border border-white/10 text-[8px] font-black text-slate-300 flex items-center justify-center">
-                    {it.qty}
-                  </span>
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-slate-900 border border-white/10 text-[8px] font-black text-slate-300 flex items-center justify-center">{it.qty}</span>
                 )}
               </div>
             ))}
             {its.length > 3 && (
-              <div className="w-9 h-9 rounded-lg bg-slate-700 border border-white/10 flex items-center justify-center text-[9px] font-bold text-slate-400">
-                +{its.length - 3}
-              </div>
+              <div className="w-9 h-9 rounded-lg bg-slate-700 border border-white/10 flex items-center justify-center text-[9px] font-bold text-slate-400">+{its.length-3}</div>
             )}
           </div>
           {tab === 'pending' && <ProgressRing pct={pct} size={36} />}
         </div>
-
-        {/* Rodapé */}
         <div className="flex items-center justify-between gap-2 mt-2">
-          {o.clienteNome ? (
-            <span className="text-[10px] text-slate-500 truncate flex items-center gap-1">
-              <User size={9}/>{o.clienteNome.split(' ').slice(0, 2).join(' ')}
-            </span>
-          ) : <span />}
+          {o.clienteNome
+            ? <span className="text-[10px] text-slate-500 truncate flex items-center gap-1"><User size={9}/>{o.clienteNome.split(' ').slice(0,2).join(' ')}</span>
+            : <span/>}
           <span className="text-[10px] text-slate-600 font-mono shrink-0">{fmtTime(o.createdAtMs)}</span>
         </div>
       </div>
@@ -308,13 +364,12 @@ function OrderCard({ o, tab, active, onClick }) {
 }
 
 // ─── Scanner Zone ─────────────────────────────────────────────────────────────
-function ScannerZone({ status, hint, inputRef, onManualScan }) {
+function ScannerZone({ status, hint, inputRef, onManualScan, onCameraToggle, cameraActive }) {
   const isBusy = status === 'busy';
   return (
     <div className={`mx-4 my-3 rounded-2xl border-2 overflow-hidden transition-all duration-300
-      ${isBusy
-        ? 'border-amber-400/60 bg-amber-400/5 shadow-lg shadow-amber-900/20'
-        : 'border-emerald-500/40 bg-emerald-950/30 shadow-lg shadow-emerald-900/15'}`}>
+      ${isBusy ? 'border-amber-400/60 bg-amber-400/5 shadow-lg shadow-amber-900/20'
+               : 'border-emerald-500/40 bg-emerald-950/30 shadow-lg shadow-emerald-900/15'}`}>
       <div className={`flex items-center gap-2.5 px-4 py-2 border-b
         ${isBusy ? 'border-amber-400/20 bg-amber-400/8' : 'border-emerald-500/15 bg-emerald-950/30'}`}>
         <div className={`w-2 h-2 rounded-full shrink-0 ${isBusy ? 'bg-amber-400 animate-ping' : 'bg-emerald-400 animate-pulse'}`} />
@@ -322,41 +377,45 @@ function ScannerZone({ status, hint, inputRef, onManualScan }) {
         <span className={`text-xs font-black uppercase tracking-widest ${isBusy ? 'text-amber-400' : 'text-emerald-400'}`}>
           {isBusy ? 'Lendo…' : 'Scanner Ativo'}
         </span>
-        {hint && <span className="ml-auto text-[10px] text-slate-600 font-normal">{hint}</span>}
+        {hint && <span className="text-[10px] text-slate-600 font-normal ml-1 hidden sm:inline">{hint}</span>}
+        {/* Botão câmera */}
+        <button onClick={onCameraToggle} title={cameraActive ? 'Fechar câmera' : 'Usar câmera'}
+          className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all
+            ${cameraActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                           : 'bg-slate-700 text-slate-400 border border-white/8 hover:text-slate-200 hover:bg-slate-600'}`}>
+          {cameraActive ? <CameraOff size={13}/> : <Camera size={13}/>}
+          <span className="hidden sm:inline">{cameraActive ? 'Câmera' : 'Câmera'}</span>
+        </button>
       </div>
       <div className="px-4 py-3">
-        <input
-          ref={inputRef}
-          id="scannerInput"
-          type="text"
-          autoComplete="off"
-          autoCorrect="off"
-          spellCheck={false}
+        <input ref={inputRef} id="scannerInput" type="text" autoComplete="off" autoCorrect="off" spellCheck={false}
           placeholder="Bipe o código ou digite + Enter…"
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              const v = e.target.value.trim();
-              e.target.value = '';
-              if (v) onManualScan(v);
-            }
-          }}
+          onKeyDown={e => { if (e.key === 'Enter') { const v = e.target.value.trim(); e.target.value = ''; if (v) onManualScan(v); } }}
           className={`w-full font-mono text-sm font-bold rounded-xl border px-4 py-2.5 outline-none transition-all
             bg-slate-950/60 text-slate-100 placeholder:text-slate-600
-            ${isBusy
-              ? 'border-amber-400/40 focus:border-amber-400'
-              : 'border-emerald-500/30 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/15'}`}
-        />
+            ${isBusy ? 'border-amber-400/40 focus:border-amber-400'
+                     : 'border-emerald-500/30 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/15'}`} />
       </div>
     </div>
   );
 }
 
 // ─── Item Row (separação) ─────────────────────────────────────────────────────
-function ItemRow({ it, onCheck }) {
+function ItemRow({ it, onCheck, orderId, showToast }) {
   const qty = Number(it.qty || 0), chk = Number(it.checkedQty || 0);
   const ok  = chk >= qty;
   const foto = it.stockPhotos?.[0] || it.image || null;
   const bin  = it.customBin || it.bin || '';
+  const [printing, setPrinting] = useState(false);
+
+  async function handlePrintBin() {
+    setPrinting(true);
+    try {
+      await printBinLabel(orderId, it, msg => showToast(msg, 'info'));
+      showToast('Etiqueta impressa ✓', 'ok');
+    } catch(e) { showToast(e.message, 'err'); }
+    finally { setPrinting(false); }
+  }
 
   return (
     <div className={`rounded-2xl border overflow-hidden transition-all duration-300
@@ -379,8 +438,8 @@ function ItemRow({ it, onCheck }) {
             {it.nameShort || it.name || '—'}
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {it.sku && <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-700/80 border border-white/8 text-slate-400">SKU {it.sku}</span>}
-            {it.ean && <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-700/80 border border-white/8 text-slate-400">EAN {it.ean}</span>}
+            {it.sku    && <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-700/80 border border-white/8 text-slate-400">SKU {it.sku}</span>}
+            {it.ean    && <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-700/80 border border-white/8 text-slate-400">EAN {it.ean}</span>}
             {it.eanBox && <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-500/20 text-blue-400">CX {it.eanBox}</span>}
           </div>
           {it.notes && <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1">⚠️ {it.notes}</p>}
@@ -403,14 +462,22 @@ function ItemRow({ it, onCheck }) {
           </button>
         </div>
       </div>
-      {/* Localização */}
+
+      {/* Localização + botão etiqueta */}
       {bin && (
         <div className="flex items-center gap-2 px-3 py-2 bg-amber-400/6 border-t border-amber-400/15">
           <MapPin size={12} className="text-amber-400 shrink-0" />
           <span className="text-xs font-black text-amber-300">Localização:</span>
-          <span className="font-mono text-sm font-black text-amber-400">{bin}</span>
+          <span className="font-mono text-sm font-black text-amber-400 flex-1">{bin}</span>
+          <button onClick={handlePrintBin} disabled={printing}
+            title="Imprimir etiqueta de prateleira"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-400/10 border border-amber-400/20 text-amber-400 text-[10px] font-bold hover:bg-amber-400/20 transition-colors disabled:opacity-50">
+            {printing ? <Loader2 size={11} className="animate-spin"/> : <Tag size={11}/>}
+            <span className="hidden sm:inline">Etiqueta</span>
+          </button>
         </div>
       )}
+
       {/* Fotos extras */}
       {(it.boxPhotos?.[0] || it.binPhoto) && (
         <div className={`grid gap-2 p-3 border-t border-white/5 bg-slate-900/50
@@ -418,14 +485,14 @@ function ItemRow({ it, onCheck }) {
           {it.boxPhotos?.[0] && (
             <div>
               <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Embalado</p>
-              <img src={it.boxPhotos[0]} onError={e => { e.target.src = '/assets/placeholder.png'; }}
+              <img src={it.boxPhotos[0]} onError={e=>{e.target.src='/assets/placeholder.png';}}
                 className="w-full aspect-square object-cover rounded-xl border border-white/8 bg-slate-800" alt="" />
             </div>
           )}
           {it.binPhoto && (
             <div>
               <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Prateleira</p>
-              <img src={it.binPhoto} onError={e => { e.target.src = '/assets/placeholder.png'; }}
+              <img src={it.binPhoto} onError={e=>{e.target.src='/assets/placeholder.png';}}
                 className="w-full aspect-square object-cover rounded-xl border border-white/8 bg-slate-800" alt="" />
             </div>
           )}
@@ -435,16 +502,13 @@ function ItemRow({ it, onCheck }) {
   );
 }
 
-// ─── Etiqueta destaque (expedição) ────────────────────────────────────────────
+// ─── Etiqueta destaque ────────────────────────────────────────────────────────
 function EtiquetaDestaque({ o, large = false }) {
   const info = getEtiquetaInfo(o);
   if (!info?.valor) return null;
   const isMl = info.tipo === 'ml';
-
-  function copiar() { navigator.clipboard.writeText(info.valor).catch(() => {}); }
-
   return (
-    <div onClick={copiar} title="Clique para copiar"
+    <div onClick={() => navigator.clipboard.writeText(info.valor).catch(()=>{})} title="Clique para copiar"
       className={`flex items-center gap-4 cursor-pointer transition-all rounded-2xl border-2
         ${isMl ? 'bg-amber-400/8 border-amber-400/30 hover:bg-amber-400/12 hover:border-amber-400/50'
                : 'bg-orange-500/8 border-orange-500/25 hover:bg-orange-500/12 hover:border-orange-500/40'}
@@ -463,29 +527,44 @@ function EtiquetaDestaque({ o, large = false }) {
   );
 }
 
-// ─── Modal de confirmação de SEPARAÇÃO ────────────────────────────────────────
+// ─── Botão DANFE reutilizável ─────────────────────────────────────────────────
+function DanfeButton({ blingNfId }) {
+  const [st, setSt] = useState(null);
+  const [msg, setMsg] = useState('');
+  if (!blingNfId) return null;
+
+  async function handle() {
+    setSt('loading'); setMsg('Conectando…');
+    try {
+      await printDanfe(blingNfId, m => setMsg(m));
+      setSt('ok'); setMsg('Impresso ✓');
+      setTimeout(()=>{setSt(null);setMsg('');}, 4000);
+    } catch(e) { setSt('err'); setMsg(e.message); }
+  }
+
+  return (
+    <button onClick={handle} disabled={st==='loading'}
+      className={`w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl border-2 text-sm font-extrabold transition-all
+        ${st==='loading' ? 'border-slate-600 bg-slate-800/60 text-slate-500 cursor-wait' :
+          st==='ok'      ? 'border-emerald-500/50 bg-emerald-950/40 text-emerald-400' :
+          st==='err'     ? 'border-red-500/40 bg-red-950/30 text-red-400' :
+          'border-dashed border-slate-600 bg-slate-800/30 text-slate-400 hover:border-slate-400 hover:text-slate-200'}`}>
+      {st==='loading' ? <><Loader2 size={15} className="animate-spin"/>{msg}</> :
+       st==='ok'      ? <><CircleCheck size={15}/>{msg}</> :
+       st==='err'     ? <><span>⚠️</span><span className="text-xs font-normal">{msg}</span></> :
+       <><Printer size={15}/> Imprimir DANFE Simplificado</>}
+    </button>
+  );
+}
+
+// ─── Modal Separação ──────────────────────────────────────────────────────────
 function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
   if (!order) return null;
   const its = Array.isArray(order.items) ? order.items : [];
-  const [printStatus, setPrintStatus] = useState(null);
-  const [printMsg,    setPrintMsg]    = useState('');
-  const temDanfe = !!order.blingNfId;
-
-  async function handlePrint() {
-    if (!temDanfe) return;
-    setPrintStatus('loading'); setPrintMsg('Conectando…');
-    try {
-      await printDanfe(order.blingNfId, msg => setPrintMsg(msg));
-      setPrintStatus('ok'); setPrintMsg('DANFE enviada para impressão ✓');
-      setTimeout(() => { setPrintStatus(null); setPrintMsg(''); }, 4000);
-    } catch(e) { setPrintStatus('err'); setPrintMsg(e.message); }
-  }
-
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
       onClick={e => e.target === e.currentTarget && onFechar()}>
       <div className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
-        {/* Header */}
         <div className="flex items-start justify-between gap-3 p-5 border-b border-white/5">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -496,23 +575,19 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
           </div>
           <div className="flex items-center gap-2">
             <MktLogo mkt={order.marketplace} />
-            <button onClick={onFechar} className="text-slate-500 hover:text-slate-300 transition-colors">
-              <X size={18}/>
-            </button>
+            <button onClick={onFechar} className="text-slate-500 hover:text-slate-300"><X size={18}/></button>
           </div>
         </div>
-
-        {/* Itens */}
         <div className="p-4 space-y-0">
           {its.map((it, i) => {
             const foto = it.stockPhotos?.[0] || it.image || '/assets/placeholder.png';
             return (
               <div key={i} className="flex items-center gap-3 py-3 border-b border-white/5 last:border-0">
-                <img src={foto} onError={e => { e.target.src = '/assets/placeholder.png'; }}
+                <img src={foto} onError={e=>{e.target.src='/assets/placeholder.png';}}
                   className="w-12 h-12 rounded-xl object-cover bg-slate-800 border border-white/8 shrink-0" alt="" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-slate-200 truncate">{it.nameShort || it.name || ''}</p>
-                  <p className="font-mono text-[10px] text-slate-500">{it.sku}{(it.customBin || it.bin) ? ` · 📍 ${it.customBin || it.bin}` : ''}</p>
+                  <p className="font-mono text-[10px] text-slate-500">{it.sku}{(it.customBin||it.bin) ? ` · 📍 ${it.customBin||it.bin}` : ''}</p>
                 </div>
                 <div className="w-12 h-12 rounded-xl bg-emerald-950/60 border border-emerald-500/30 flex items-center justify-center shrink-0">
                   <span className="font-mono text-lg font-black text-emerald-400">×{it.qty}</span>
@@ -521,8 +596,6 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
             );
           })}
         </div>
-
-        {/* Próximo */}
         <div className="px-4 pb-3">
           {proximo ? (
             <div className="p-3.5 rounded-2xl bg-blue-500/8 border border-blue-500/20 flex items-center gap-3">
@@ -530,10 +603,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
               <div>
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Próximo na fila</p>
                 <p className="font-bold text-sm text-blue-400">{proximo.id}</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <MktLogo mkt={proximo.marketplace} />
-                  <span className="text-[10px] text-slate-500">{(proximo.items || []).length} item(s)</span>
-                </div>
+                <div className="flex items-center gap-2 mt-0.5"><MktLogo mkt={proximo.marketplace} /><span className="text-[10px] text-slate-500">{(proximo.items||[]).length} item(s)</span></div>
               </div>
             </div>
           ) : (
@@ -542,36 +612,13 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
             </div>
           )}
         </div>
-
-        {/* Botão DANFE */}
-        {temDanfe && (
-          <div className="px-4 pb-3">
-            <button onClick={handlePrint} disabled={printStatus === 'loading'}
-              className={`w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl border-2 text-sm font-extrabold transition-all
-                ${printStatus === 'loading' ? 'border-slate-600 bg-slate-800/60 text-slate-500 cursor-wait' :
-                  printStatus === 'ok'      ? 'border-emerald-500/50 bg-emerald-950/40 text-emerald-400' :
-                  printStatus === 'err'     ? 'border-red-500/40 bg-red-950/30 text-red-400' :
-                  'border-dashed border-slate-600 bg-slate-800/30 text-slate-400 hover:border-slate-400 hover:text-slate-200'}`}>
-              {printStatus === 'loading' ? <><Loader2 size={15} className="animate-spin"/>{printMsg}</> :
-               printStatus === 'ok'      ? <><CircleCheck size={15}/>{printMsg}</> :
-               printStatus === 'err'     ? <><span>⚠️</span><span className="text-xs font-normal line-clamp-2">{printMsg}</span></> :
-               <><Printer size={15}/> Imprimir DANFE Simplificado</>}
-            </button>
-            {printStatus === 'err' && <p className="text-[10px] text-slate-600 text-center mt-1.5">QZ Tray precisa estar rodando · qz.io/download</p>}
-          </div>
-        )}
-
-        {/* Footer */}
+        <div className="px-4 pb-3"><DanfeButton blingNfId={order.blingNfId} /></div>
         <div className="flex gap-2 p-4 border-t border-white/5">
-          <button onClick={onFechar}
-            className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">
-            Cancelar
-          </button>
+          <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>
           <button onClick={() => onConfirmar(proximo?.id || '')} disabled={confirmando}
             className="flex-[2] py-2.5 rounded-xl text-sm font-extrabold bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white transition-all shadow-lg shadow-blue-900/30">
-            {confirmando
-              ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/>Confirmando…</span>
-              : proximo ? '✓ Confirmar e ir ao próximo' : '✓ Confirmar separação'}
+            {confirmando ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/>Confirmando…</span>
+                         : proximo ? '✓ Confirmar e ir ao próximo' : '✓ Confirmar separação'}
           </button>
         </div>
       </div>
@@ -579,60 +626,31 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
   );
 }
 
-// ─── Modal de confirmação de EXPEDIÇÃO ────────────────────────────────────────
+// ─── Modal Expedição ──────────────────────────────────────────────────────────
 function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) {
   if (!order) return null;
   const its = Array.isArray(order.items) ? order.items : [];
-  const [printStatus, setPrintStatus] = useState(null);
-  const [printMsg,    setPrintMsg]    = useState('');
-  const temDanfe = !!order.blingNfId;
-
-  async function handlePrint() {
-    if (!temDanfe) return;
-    setPrintStatus('loading'); setPrintMsg('Conectando…');
-    try {
-      await printDanfe(order.blingNfId, msg => setPrintMsg(msg));
-      setPrintStatus('ok'); setPrintMsg('Impresso ✓');
-      setTimeout(() => { setPrintStatus(null); setPrintMsg(''); }, 4000);
-    } catch(e) { setPrintStatus('err'); setPrintMsg(e.message); }
-  }
-
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
       onClick={e => e.target === e.currentTarget && onFechar()}>
       <div className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
-        {/* Header */}
         <div className="flex items-start justify-between gap-3 p-5 border-b border-white/5">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Truck size={20} className="text-emerald-400" />
-              <p className="font-black text-base text-slate-100">Confirmar Expedição</p>
-            </div>
+            <div className="flex items-center gap-2 mb-1"><Truck size={20} className="text-emerald-400"/><p className="font-black text-base text-slate-100">Confirmar Expedição</p></div>
             <p className="font-mono text-xs text-slate-500">{order.id}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <MktLogo mkt={order.marketplace} />
-            <button onClick={onFechar} className="text-slate-500 hover:text-slate-300 transition-colors">
-              <X size={18}/>
-            </button>
-          </div>
+          <div className="flex items-center gap-2"><MktLogo mkt={order.marketplace}/><button onClick={onFechar} className="text-slate-500 hover:text-slate-300"><X size={18}/></button></div>
         </div>
-
-        {/* Etiqueta destaque */}
-        <div className="px-4 pt-4">
-          <EtiquetaDestaque o={order} large />
-        </div>
-
-        {/* Itens */}
+        <div className="px-4 pt-4"><EtiquetaDestaque o={order} large /></div>
         <div className="p-4 space-y-0">
           {its.map((it, i) => {
             const foto = it.stockPhotos?.[0] || it.image || '/assets/placeholder.png';
             return (
               <div key={i} className="flex items-center gap-3 py-3 border-b border-white/5 last:border-0">
-                <img src={foto} onError={e => { e.target.src = '/assets/placeholder.png'; }}
+                <img src={foto} onError={e=>{e.target.src='/assets/placeholder.png';}}
                   className="w-12 h-12 rounded-xl object-cover bg-slate-800 border border-white/8 shrink-0" alt="" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-slate-200 truncate">{it.nameShort || it.name || ''}</p>
+                  <p className="text-sm font-bold text-slate-200 truncate">{it.nameShort||it.name||''}</p>
                   <p className="font-mono text-[10px] text-slate-500">{it.sku}</p>
                 </div>
                 <div className="w-12 h-12 rounded-xl bg-blue-950/40 border border-blue-500/20 flex items-center justify-center shrink-0">
@@ -642,12 +660,10 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
             );
           })}
         </div>
-
-        {/* Próximo */}
         {proximo && (
           <div className="px-4 pb-3">
             <div className="p-3.5 rounded-2xl bg-blue-500/8 border border-blue-500/20 flex items-center gap-3">
-              <ChevronRight size={18} className="text-blue-400 shrink-0" />
+              <ChevronRight size={18} className="text-blue-400 shrink-0"/>
               <div>
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Próximo para expedir</p>
                 <p className="font-bold text-sm text-blue-400">{proximo.id}</p>
@@ -656,38 +672,104 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
             </div>
           </div>
         )}
-
-        {/* Botão DANFE */}
-        {temDanfe && (
-          <div className="px-4 pb-3">
-            <button onClick={handlePrint} disabled={printStatus === 'loading'}
-              className={`w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl border-2 text-sm font-extrabold transition-all
-                ${printStatus === 'loading' ? 'border-slate-600 bg-slate-800/60 text-slate-500 cursor-wait' :
-                  printStatus === 'ok'      ? 'border-emerald-500/50 bg-emerald-950/40 text-emerald-400' :
-                  printStatus === 'err'     ? 'border-red-500/40 bg-red-950/30 text-red-400' :
-                  'border-dashed border-slate-600 bg-slate-800/30 text-slate-400 hover:border-slate-400 hover:text-slate-200'}`}>
-              {printStatus === 'loading' ? <><Loader2 size={15} className="animate-spin"/>{printMsg}</> :
-               printStatus === 'ok'      ? <><CircleCheck size={15}/>{printMsg}</> :
-               printStatus === 'err'     ? <><span>⚠️</span><span className="text-xs">{printMsg}</span></> :
-               <><Printer size={15}/> Imprimir DANFE Simplificado</>}
-            </button>
-          </div>
-        )}
-
-        {/* Footer */}
+        <div className="px-4 pb-3"><DanfeButton blingNfId={order.blingNfId} /></div>
         <div className="flex gap-2 p-4 border-t border-white/5">
-          <button onClick={onFechar}
-            className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">
-            Cancelar
-          </button>
+          <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>
           <button onClick={() => onConfirmar(proximo?.id || '')} disabled={confirmando}
             className="flex-[2] py-2.5 rounded-xl text-sm font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-all shadow-lg shadow-emerald-900/30">
-            {confirmando
-              ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/>Confirmando…</span>
-              : <><Truck size={14} className="inline mr-1.5"/>Confirmar Expedição</>}
+            {confirmando ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/>Confirmando…</span>
+                         : <><Truck size={14} className="inline mr-1.5"/>Confirmar Expedição</>}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Relatório do Dia ─────────────────────────────────────────────────────────
+function RelatorioDia({ orders }) {
+  const [open, setOpen] = useState(true);
+  const packed = orders.packed;
+
+  const stats = useMemo(() => {
+    const byMkt = {};
+    let totalItens = 0, totalTempo = 0, countTempo = 0;
+    packed.forEach(o => {
+      const m = o.marketplace || 'OUTROS';
+      byMkt[m] = (byMkt[m] || 0) + 1;
+      totalItens += (Array.isArray(o.items) ? o.items : []).reduce((a, it) => a + Number(it.qty||0), 0);
+      if (o.createdAtMs && o.updatedAtMs) {
+        totalTempo += Number(o.updatedAtMs) - Number(o.createdAtMs);
+        countTempo++;
+      }
+    });
+    const tempoMedio = countTempo > 0 ? fmtDur(totalTempo / countTempo) : '—';
+    const horaPico = (() => {
+      const horas = {};
+      packed.forEach(o => {
+        if (!o.updatedAtMs) return;
+        const h = new Date(Number(o.updatedAtMs)).getHours();
+        horas[h] = (horas[h] || 0) + 1;
+      });
+      const top = Object.entries(horas).sort((a,b)=>b[1]-a[1])[0];
+      return top ? `${String(top[0]).padStart(2,'0')}h` : '—';
+    })();
+    return { byMkt, totalItens, tempoMedio, horaPico, total: packed.length };
+  }, [packed]);
+
+  if (packed.length === 0) return null;
+
+  const mktOrder = ['MERCADO_LIVRE', 'SHOPEE', 'OUTROS'];
+
+  return (
+    <div className="mx-4 mb-3 rounded-2xl border border-white/8 overflow-hidden bg-slate-900/60 flex-shrink-0">
+      <button onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-white/3 transition-colors">
+        <div className="flex items-center gap-2">
+          <BarChart2 size={15} className="text-blue-400" />
+          <span className="text-sm font-black text-slate-200">Relatório do Dia</span>
+          <span className="font-mono text-xs text-slate-500">{stats.total} expedidos</span>
+        </div>
+        {open ? <ChevronUp size={14} className="text-slate-600"/> : <ChevronDown size={14} className="text-slate-600"/>}
+      </button>
+      {open && (
+        <div className="border-t border-white/5 p-4 space-y-3">
+          {/* Cards de métrica */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: 'Pedidos',       value: stats.total,       color: 'text-emerald-400' },
+              { label: 'Itens totais',  value: stats.totalItens,  color: 'text-blue-400'    },
+              { label: 'Tempo médio',   value: stats.tempoMedio,  color: 'text-amber-400'   },
+            ].map((m, i) => (
+              <div key={i} className="flex flex-col items-center gap-0.5 p-2.5 rounded-xl bg-slate-800/60 border border-white/5">
+                <span className={`font-black text-xl leading-none ${m.color}`}>{m.value}</span>
+                <span className="text-[10px] text-slate-600 font-medium text-center leading-tight">{m.label}</span>
+              </div>
+            ))}
+          </div>
+          {/* Por marketplace */}
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Por canal</p>
+            {mktOrder.filter(m => stats.byMkt[m]).map(m => {
+              const n = stats.byMkt[m];
+              const pct = Math.round((n / stats.total) * 100);
+              return (
+                <div key={m} className="flex items-center gap-3">
+                  <div className="w-24 shrink-0"><MktLogo mkt={m} /></div>
+                  <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all"
+                      style={{ width: `${pct}%`, background: m==='MERCADO_LIVRE'?'#ca8a04':m==='SHOPEE'?'#ea580c':'#475569' }} />
+                  </div>
+                  <span className="font-mono text-xs font-bold text-slate-400 w-8 text-right">{n}</span>
+                </div>
+              );
+            })}
+          </div>
+          {stats.horaPico !== '—' && (
+            <p className="text-[11px] text-slate-500">⏰ Horário de pico: <strong className="text-slate-300">{stats.horaPico}</strong></p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -705,26 +787,29 @@ function Vazio({ icon, titulo, sub }) {
 
 // ─── Página principal ──────────────────────────────────────────────────────────
 export default function PedidosDoDia() {
-  const [tab,         setTab]         = useState('pending');
-  const [orders,      setOrders]      = useState({ pending: [], picked: [], packed: [] });
-  const [loading,     setLoading]     = useState(false);
-  const [selOrder,    setSelOrder]    = useState(null);
-  const [filter,      setFilter]      = useState('');
-  const [flash,       setFlash]       = useState(null);
-  const [toasts,      setToasts]      = useState([]);
-  const [modalSep,    setModalSep]    = useState(false);
-  const [modalExp,    setModalExp]    = useState(false);
-  const [confirmando, setConfirmando] = useState(null);
-  const [scanStatus,  setScanStatus]  = useState('ready');
-  const [clock,       setClock]       = useState('');
+  const [tab,          setTab]         = useState('pending');
+  const [orders,       setOrders]      = useState({ pending: [], picked: [], packed: [] });
+  const [loading,      setLoading]     = useState(false);
+  const [selOrder,     setSelOrder]    = useState(null);
+  const [filter,       setFilter]      = useState('');
+  const [flash,        setFlash]       = useState(null);
+  const [toasts,       setToasts]      = useState([]);
+  const [modalSep,     setModalSep]    = useState(false);
+  const [modalExp,     setModalExp]    = useState(false);
+  const [confirmando,  setConfirmando] = useState(null);
+  const [scanStatus,   setScanStatus]  = useState('ready');
+  const [clock,        setClock]       = useState('');
+  const [cameraOpen,   setCameraOpen]  = useState(false);
+  const [notifEnabled, setNotifEnabled] = useState(true);
+  const [newBadge,     setNewBadge]    = useState(0); // badge de novos pedidos
 
-  const scanBuf     = useRef('');
-  const scanTimer   = useRef(null);
+  const scanBuf      = useRef('');
+  const scanTimer    = useRef(null);
   const scanInputRef = useRef(null);
 
   // Relógio
   useEffect(() => {
-    const tick = () => setClock(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    const tick = () => setClock(new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit' }));
     tick(); const t = setInterval(tick, 1000); return () => clearInterval(t);
   }, []);
 
@@ -732,13 +817,20 @@ export default function PedidosDoDia() {
   const showToast = useCallback((msg, tipo = 'info') => {
     const id = Date.now() + Math.random();
     setToasts(p => [...p.slice(-2), { id, msg, tipo }]);
-    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3000);
+    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3200);
   }, []);
 
-  const doFlash = useCallback(ok => {
-    setFlash(ok ? 'ok' : 'err');
-    setTimeout(() => setFlash(null), 160);
-  }, []);
+  const doFlash = useCallback(ok => { setFlash(ok ? 'ok' : 'err'); setTimeout(() => setFlash(null), 160); }, []);
+
+  // Notificador de novos pedidos
+  useOrderNotifier({
+    enabled: notifEnabled,
+    intervalMs: 30_000,
+    onNewOrders: (diff) => {
+      showToast(`📦 ${diff} novo(s) pedido(s) chegaram!`, 'new');
+      setNewBadge(v => v + diff);
+    },
+  });
 
   // Refresh
   const refreshAll = useCallback(async () => {
@@ -753,7 +845,7 @@ export default function PedidosDoDia() {
       const novo = {
         pending: sortOrders(p.items  || []),
         picked:  sortOrders(pi.items || []),
-        packed:  sortOrders((pk.items || []).filter(o => isToday(o.updatedAtMs || o.createdAtMs))),
+        packed:  sortOrders((pk.items||[]).filter(o => isToday(o.updatedAtMs || o.createdAtMs))),
       };
       setOrders(novo);
       setSelOrder(prev => {
@@ -766,10 +858,9 @@ export default function PedidosDoDia() {
 
   useEffect(() => { refreshAll(); }, [refreshAll]);
 
-  // Selecionar pedido
   async function selectOrder(o) {
     setSelOrder(o);
-    try { await api(`/orders/${encodeURIComponent(o.id)}/lock`, { method: 'POST', body: '{}' }); } catch {}
+    try { await api(`/orders/${encodeURIComponent(o.id)}/lock`, { method:'POST', body:'{}' }); } catch {}
     setTimeout(() => scanInputRef.current?.focus(), 100);
   }
 
@@ -780,7 +871,7 @@ export default function PedidosDoDia() {
     setScanStatus('busy');
     try {
       const r = await api(`/orders/${encodeURIComponent(selOrder.id)}/check`, {
-        method: 'POST', body: JSON.stringify({ code }),
+        method:'POST', body: JSON.stringify({ code }),
       });
       if (r?.ok) {
         beep(true); doFlash(true);
@@ -788,67 +879,48 @@ export default function PedidosDoDia() {
         setSelOrder(prev => {
           if (!prev || !Array.isArray(prev.items)) return prev;
           const items = prev.items.map(it => it.sku === r.sku ? { ...it, checkedQty: Number(r.checkedQty) } : it);
-          const total   = items.reduce((a, i) => a + Number(i.qty || 0), 0);
-          const checked = items.reduce((a, i) => a + Number(i.checkedQty || 0), 0);
+          const total   = items.reduce((a, i) => a + Number(i.qty||0), 0);
+          const checked = items.reduce((a, i) => a + Number(i.checkedQty||0), 0);
           if (total > 0 && checked >= total) setTimeout(() => setModalSep(true), 600);
           return { ...prev, items };
         });
-        refreshAll().catch(() => {});
+        refreshAll().catch(()=>{});
       } else if (r) {
         beep(false); doFlash(false);
-        const msgs = {
-          item_not_found: `Código não encontrado: ${code}`,
-          already_fully_checked: 'Item já conferido por completo',
-          locked_by_other_terminal: 'Pedido em uso em outro terminal',
-        };
+        const msgs = { item_not_found:`Código não encontrado: ${code}`, already_fully_checked:'Item já conferido', locked_by_other_terminal:'Pedido em uso em outro terminal' };
         showToast(msgs[r.error] || r.error || 'Erro desconhecido', 'err');
       }
     } catch(e) { beep(false); doFlash(false); showToast(`Erro: ${e.message}`, 'err'); }
     finally { setScanStatus('ready'); scanInputRef.current?.focus(); }
   }
 
-  // ── Scan EXPEDIÇÃO — bipe da DANFE ou apelido identifica e confirma ──
+  // ── Scan EXPEDIÇÃO ──
   async function onScanExpedicao(code) {
     if (tab !== 'picked') return;
     setScanStatus('busy');
     try {
       const match = matchOrderByScan(code, orders.picked);
-
-      if (!match) {
-        beep(false); doFlash(false);
-        showToast(`Código não encontrado nos pedidos para expedir`, 'err');
-        return;
-      }
-
+      if (!match) { beep(false); doFlash(false); showToast(`Código não encontrado nos pedidos para expedir`, 'err'); return; }
       if (selOrder && selOrder.id === match.id) {
-        // Segundo bipe no mesmo pedido → confirmar expedição direto
         beep(true); doFlash(true);
-        showToast(`Expedindo ${match.id}…`, 'ok');
         setModalExp(true);
       } else {
-        // Primeiro bipe → identificar pedido
         beep(true); doFlash(true);
         setSelOrder(match);
         showToast(`✓ Pedido identificado — bipe novamente para expedir`, 'ok');
       }
-    } finally {
-      setScanStatus('ready');
-      scanInputRef.current?.focus();
-    }
+    } finally { setScanStatus('ready'); scanInputRef.current?.focus(); }
   }
 
-  // ── Scanner global (leitor físico) ──
+  // Scanner global (leitor físico)
   useEffect(() => {
     function handler(e) {
       const active = document.activeElement;
-      if (active?.id === 'filterInput') return;
-      if (active?.id === 'scannerInput') return;
+      if (active?.id === 'filterInput' || active?.id === 'scannerInput') return;
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
       if (tab !== 'pending' && tab !== 'picked') return;
-
       if (e.key === 'Enter') {
-        const code = scanBuf.current.trim();
-        scanBuf.current = ''; clearTimeout(scanTimer.current);
+        const code = scanBuf.current.trim(); scanBuf.current = ''; clearTimeout(scanTimer.current);
         if (code) (tab === 'pending' ? onScan : onScanExpedicao)(code);
         return;
       }
@@ -862,42 +934,28 @@ export default function PedidosDoDia() {
     return () => window.removeEventListener('keydown', handler);
   }, [tab, selOrder, orders.picked]); // eslint-disable-line
 
-  // ── Confirmar separação ──
   async function confirmarSeparado(proximoId) {
     setConfirmando(selOrder?.id);
     try {
-      const r = await api(`/orders/${encodeURIComponent(selOrder.id)}/status`, {
-        method: 'POST', body: JSON.stringify({ status: 'picked' }),
-      });
+      const r = await api(`/orders/${encodeURIComponent(selOrder.id)}/status`, { method:'POST', body: JSON.stringify({ status:'picked' }) });
       if (r?.ok) {
-        beep(true); setModalSep(false);
-        await refreshAll();
-        if (proximoId) {
-          const prox = orders.pending.find(x => x.id === proximoId);
-          if (prox) { selectOrder(prox); showToast(`✓ Separado! Próximo: ${proximoId}`, 'ok'); }
-          else showToast('Pedido separado ✓', 'ok');
-        } else { setSelOrder(null); showToast('🎉 Todos separados!', 'ok'); }
+        beep(true); setModalSep(false); await refreshAll();
+        if (proximoId) { const prox = orders.pending.find(x => x.id === proximoId); if (prox) { selectOrder(prox); showToast(`✓ Separado! Próximo: ${proximoId}`, 'ok'); } else showToast('Pedido separado ✓', 'ok'); }
+        else { setSelOrder(null); showToast('🎉 Todos separados!', 'ok'); }
       } else if (r) showToast(r.error || 'Falha', 'err');
     } catch(e) { showToast(e.message, 'err'); }
     finally { setConfirmando(null); }
   }
 
-  // ── Confirmar expedição ──
   async function confirmarExpedicao(proximoId) {
     if (!selOrder) return;
     setConfirmando(selOrder.id);
     try {
-      const r = await api(`/orders/${encodeURIComponent(selOrder.id)}/status`, {
-        method: 'POST', body: JSON.stringify({ status: 'packed' }),
-      });
+      const r = await api(`/orders/${encodeURIComponent(selOrder.id)}/status`, { method:'POST', body: JSON.stringify({ status:'packed' }) });
       if (r?.ok) {
-        beep(true); setModalExp(false);
-        await refreshAll();
-        if (proximoId) {
-          const prox = orders.picked.find(x => x.id === proximoId);
-          if (prox) { selectOrder(prox); showToast(`✓ Expedido! Próximo: ${proximoId}`, 'ok'); }
-          else { setSelOrder(null); showToast('Pedido EXPEDIDO ✅', 'ok'); }
-        } else { setSelOrder(null); showToast('🎉 Todos expedidos!', 'ok'); }
+        beep(true); setModalExp(false); await refreshAll();
+        if (proximoId) { const prox = orders.picked.find(x => x.id === proximoId); if (prox) { selectOrder(prox); showToast(`✓ Expedido! Próximo: ${proximoId}`, 'ok'); } else { setSelOrder(null); showToast('Pedido EXPEDIDO ✅', 'ok'); } }
+        else { setSelOrder(null); showToast('🎉 Todos expedidos!', 'ok'); }
       } else if (r) showToast(r.error || 'Falha ao expedir', 'err');
     } catch(e) { showToast(e.message, 'err'); }
     finally { setConfirmando(null); }
@@ -905,7 +963,7 @@ export default function PedidosDoDia() {
 
   async function switchTab(t) {
     setTab(t); setSelOrder(null);
-    if (t !== 'pending') setModalSep(false);
+    if (t === 'pending') setNewBadge(0);
     setTimeout(() => scanInputRef.current?.focus(), 150);
     await refreshAll();
   }
@@ -916,29 +974,25 @@ export default function PedidosDoDia() {
     const q = filter.toLowerCase().trim();
     const lista = orders[tab] || [];
     if (!q) return lista;
-    return lista.filter(o =>
-      (o.id || '').toLowerCase().includes(q) ||
-      (o.clienteNome || '').toLowerCase().includes(q)
-    );
+    return lista.filter(o => (o.id||'').toLowerCase().includes(q) || (o.clienteNome||'').toLowerCase().includes(q));
   }, [orders, tab, filter]);
 
   const progress = useMemo(() => {
     const its = Array.isArray(selOrder?.items) ? selOrder.items : [];
-    const total   = its.reduce((a, i) => a + Number(i.qty || 0), 0);
-    const checked = its.reduce((a, i) => a + Number(i.checkedQty || 0), 0);
-    return { total, checked, pct: total > 0 ? Math.round((checked / total) * 100) : 0, allOk: total > 0 && checked >= total };
+    const total   = its.reduce((a, i) => a + Number(i.qty||0), 0);
+    const checked = its.reduce((a, i) => a + Number(i.checkedQty||0), 0);
+    return { total, checked, pct: total > 0 ? Math.round((checked/total)*100) : 0, allOk: total > 0 && checked >= total };
   }, [selOrder]);
 
   const proximoPedido = useMemo(() => {
     if (!selOrder) return null;
-    const lista = orders[tab] || [];
-    return lista.find(x => x.id !== selOrder.id) || null;
+    return (orders[tab] || []).find(x => x.id !== selOrder.id) || null;
   }, [orders, tab, selOrder]);
 
   const TABS = [
-    { id: 'pending', label: 'Separar',  count: counts.pending, icon: PackageCheck,  color: 'amber'  },
-    { id: 'picked',  label: 'Expedir',  count: counts.picked,  icon: SendHorizonal, color: 'blue'   },
-    { id: 'packed',  label: 'Expedido', count: counts.packed,  icon: CircleCheck,   color: 'emerald', sub: 'hoje' },
+    { id:'pending', label:'Separar',  count:counts.pending, icon:PackageCheck,  color:'amber'  },
+    { id:'picked',  label:'Expedir',  count:counts.picked,  icon:SendHorizonal, color:'blue'   },
+    { id:'packed',  label:'Expedido', count:counts.packed,  icon:CircleCheck,   color:'emerald', sub:'hoje' },
   ];
 
   return (
@@ -954,8 +1008,20 @@ export default function PedidosDoDia() {
             <h1 className="font-black text-base text-slate-100 leading-none">Expedição do Dia</h1>
             <p className="text-[10px] text-slate-600 mt-0.5 font-mono">{clock}</p>
           </div>
+          {/* Badge de novos pedidos */}
+          {newBadge > 0 && tab !== 'pending' && (
+            <button onClick={() => switchTab('pending')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-400/15 border border-amber-400/30 text-amber-400 text-[11px] font-bold animate-bounce">
+              📦 +{newBadge} novo(s)
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Toggle notificações */}
+          <button onClick={() => setNotifEnabled(v => !v)} title={notifEnabled ? 'Desativar alertas' : 'Ativar alertas'}
+            className={`p-2 rounded-xl border transition-colors ${notifEnabled ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-slate-800 border-white/8 text-slate-600'}`}>
+            {notifEnabled ? <Bell size={14}/> : <BellOff size={14}/>}
+          </button>
           <button onClick={refreshAll} disabled={loading}
             className="p-2 rounded-xl bg-slate-800 border border-white/8 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -972,22 +1038,19 @@ export default function PedidosDoDia() {
 
         {/* ── Coluna esquerda ── */}
         <div className="border-r border-white/5 flex flex-col overflow-hidden bg-slate-900/30">
-
           {/* Tabs */}
           <div className="grid grid-cols-3 gap-1.5 p-3 border-b border-white/5 flex-shrink-0">
             {TABS.map(t => {
-              const Icon = t.icon;
-              const isActive = tab === t.id;
-              const dotColor = { amber: 'bg-amber-400', blue: 'bg-blue-400', emerald: 'bg-emerald-400' }[t.color];
-              const textColor = { amber: 'text-amber-400', blue: 'text-blue-400', emerald: 'text-emerald-400' }[t.color];
+              const Icon = t.icon, isActive = tab === t.id;
+              const textColor = { amber:'text-amber-400', blue:'text-blue-400', emerald:'text-emerald-400' }[t.color];
               return (
                 <button key={t.id} onClick={() => switchTab(t.id)}
-                  className={`flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl border transition-all
+                  className={`relative flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl border transition-all
                     ${isActive ? 'bg-slate-800 border-white/12 shadow-sm' : 'bg-transparent border-transparent text-slate-600 hover:text-slate-400'}`}>
-                  <div className="flex items-center gap-1.5">
-                    {t.count > 0 && isActive && <div className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />}
-                    <span className={`font-black text-2xl leading-none tabular-nums ${isActive ? textColor : ''}`}>{t.count}</span>
-                  </div>
+                  {t.id === 'pending' && newBadge > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-400 text-black text-[8px] font-black flex items-center justify-center">{newBadge > 9 ? '9+' : newBadge}</span>
+                  )}
+                  <span className={`font-black text-2xl leading-none tabular-nums ${isActive ? textColor : ''}`}>{t.count}</span>
                   <div className="flex items-center gap-1">
                     <Icon size={10} className={isActive ? textColor : 'text-slate-600'} />
                     <span className={`text-[10px] font-bold ${isActive ? 'text-slate-300' : 'text-slate-600'}`}>{t.label}</span>
@@ -997,31 +1060,24 @@ export default function PedidosDoDia() {
               );
             })}
           </div>
-
           {/* Search */}
           <div className="px-3 py-2 border-b border-white/5 flex-shrink-0">
             <input id="filterInput" value={filter} onChange={e => setFilter(e.target.value)}
               placeholder="🔍  Filtrar pedidos…"
               className="w-full bg-slate-800/60 border border-white/5 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none focus:border-white/20 transition-colors placeholder:text-slate-600" />
           </div>
-
           {/* Lista */}
           <div className="flex-1 overflow-y-auto p-2.5 scrollbar-thin scrollbar-thumb-slate-700/50">
             {loading && orders[tab].length === 0 ? (
-              <div className="space-y-2 pt-1">
-                {[...Array(4)].map((_, i) => <div key={i} className="h-28 rounded-2xl bg-slate-800/60 animate-pulse" />)}
-              </div>
+              <div className="space-y-2 pt-1">{[...Array(4)].map((_, i) => <div key={i} className="h-28 rounded-2xl bg-slate-800/60 animate-pulse" />)}</div>
             ) : listaFiltrada.length === 0 ? (
               <div className="text-center text-slate-600 text-xs py-12">
-                {orders[tab]?.length === 0
-                  ? tab === 'pending' ? '📭 Sem pedidos para separar'
-                    : tab === 'picked' ? '📭 Sem pedidos para expedir'
-                    : '📭 Nenhum expedido hoje'
+                {orders[tab]?.length===0
+                  ? tab==='pending' ? '📭 Sem pedidos para separar' : tab==='picked' ? '📭 Sem pedidos para expedir' : '📭 Nenhum expedido hoje'
                   : '🔍 Sem resultados'}
               </div>
             ) : listaFiltrada.map(o => (
-              <OrderCard key={o.id} o={o} tab={tab} active={selOrder?.id === o.id}
-                onClick={() => selectOrder(o)} />
+              <OrderCard key={o.id} o={o} tab={tab} active={selOrder?.id===o.id} onClick={() => selectOrder(o)} />
             ))}
           </div>
         </div>
@@ -1029,61 +1085,49 @@ export default function PedidosDoDia() {
         {/* ── Coluna direita ── */}
         <div className="flex flex-col overflow-hidden">
 
-          {/* ════ ABA SEPARAR ════ */}
+          {/* ════ SEPARAR ════ */}
           {tab === 'pending' && (selOrder ? (
             <div className="flex flex-col min-h-0 overflow-hidden">
-              {/* Header do pedido */}
               <div className="flex items-center justify-between gap-4 px-5 py-3 border-b border-white/5 bg-slate-900/60 flex-shrink-0">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <MktLogo mkt={selOrder.marketplace} />
                     <span className="font-mono font-black text-sm text-slate-300">{selOrder.id}</span>
-                    {(selOrder.logistica === 'flex' || selOrder.isPriority) && <FlexBadge />}
+                    {(selOrder.logistica==='flex'||selOrder.isPriority) && <FlexBadge />}
                   </div>
-                  {(() => {
-                    const info = getEtiquetaInfo(selOrder);
-                    if (!info?.valor) return null;
-                    return (
-                      <span className={`inline-flex items-center gap-1 mt-1.5 text-xs font-bold px-2 py-0.5 rounded-full border
-                        ${info.tipo === 'ml' ? 'bg-amber-400/12 text-amber-400 border-amber-400/25' : 'bg-orange-500/10 text-orange-400 border-orange-500/20 font-mono'}`}>
-                        {info.tipo === 'ml' ? '🏷️' : '📦'} {info.valor}
-                      </span>
-                    );
-                  })()}
-                  {selOrder.clienteNome && (
-                    <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1"><User size={10}/>{selOrder.clienteNome}</p>
-                  )}
+                  {(() => { const info = getEtiquetaInfo(selOrder); if (!info?.valor) return null; return (
+                    <span className={`inline-flex items-center gap-1 mt-1.5 text-xs font-bold px-2 py-0.5 rounded-full border
+                      ${info.tipo==='ml' ? 'bg-amber-400/12 text-amber-400 border-amber-400/25' : 'bg-orange-500/10 text-orange-400 border-orange-500/20 font-mono'}`}>
+                      {info.tipo==='ml'?'🏷️':'📦'} {info.valor}
+                    </span>
+                  ); })()}
+                  {selOrder.clienteNome && <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1"><User size={10}/>{selOrder.clienteNome}</p>}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <ProgressRing pct={progress.pct} size={46} stroke={4} />
-                  <button onClick={() => setModalSep(true)}
-                    disabled={!progress.allOk || selOrder.status !== 'pending'}
+                  <button onClick={() => setModalSep(true)} disabled={!progress.allOk || selOrder.status !== 'pending'}
                     className="px-4 py-2 rounded-xl text-sm font-extrabold bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-900/30">
                     ✓ Separado
                   </button>
                 </div>
               </div>
-              {/* Scanner */}
               <div className="flex-shrink-0">
-                <ScannerZone status={scanStatus} hint="bipe SKU ou EAN + Enter" inputRef={scanInputRef} onManualScan={onScan} />
+                <ScannerZone status={scanStatus} hint="bipe SKU ou EAN + Enter" inputRef={scanInputRef}
+                  onManualScan={onScan} onCameraToggle={() => setCameraOpen(true)} cameraActive={cameraOpen} />
               </div>
-              {/* Itens */}
               <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2.5 scrollbar-thin scrollbar-thumb-slate-700/50">
-                {(selOrder.items || []).length === 0
+                {(selOrder.items||[]).length === 0
                   ? <Vazio icon="📦" titulo="Sem itens" sub="Este pedido não possui itens cadastrados." />
-                  : (selOrder.items || []).map((it, i) => <ItemRow key={i} it={it} onCheck={onScan} />)
+                  : (selOrder.items||[]).map((it, i) => <ItemRow key={i} it={it} onCheck={onScan} orderId={selOrder.id} showToast={showToast} />)
                 }
               </div>
-              {/* Footer progresso */}
               <div className="flex items-center gap-3 px-5 py-3 border-t border-white/5 bg-slate-900/60 flex-shrink-0">
                 <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Progresso</span>
                 <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full transition-all duration-500 ${progress.pct >= 100 ? 'bg-emerald-400' : 'bg-blue-400'}`}
                     style={{ width: `${progress.pct}%` }} />
                 </div>
-                <span className={`font-mono text-sm font-black ${progress.allOk ? 'text-emerald-400' : 'text-slate-300'}`}>
-                  {progress.checked} / {progress.total}
-                </span>
+                <span className={`font-mono text-sm font-black ${progress.allOk ? 'text-emerald-400' : 'text-slate-300'}`}>{progress.checked} / {progress.total}</span>
               </div>
             </div>
           ) : (
@@ -1093,9 +1137,7 @@ export default function PedidosDoDia() {
               </div>
               <div className="text-center">
                 <p className="font-black text-lg text-slate-300">Selecione um pedido</p>
-                <p className="text-slate-600 text-sm mt-2 max-w-xs leading-relaxed">
-                  Escolha um pedido na lista para iniciar a separação com o scanner
-                </p>
+                <p className="text-slate-600 text-sm mt-2 max-w-xs leading-relaxed">Escolha um pedido na lista para iniciar a separação com o scanner</p>
               </div>
               {counts.pending === 0 && (
                 <div className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-emerald-500/8 border border-emerald-500/15">
@@ -1106,62 +1148,46 @@ export default function PedidosDoDia() {
             </div>
           ))}
 
-          {/* ════ ABA EXPEDIR ════ */}
+          {/* ════ EXPEDIR ════ */}
           {tab === 'picked' && (selOrder ? (
             <div className="flex flex-col min-h-0 overflow-hidden">
-              {/* Header */}
               <div className="flex items-center justify-between gap-4 px-5 py-3 border-b border-white/5 bg-slate-900/60 flex-shrink-0">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <MktLogo mkt={selOrder.marketplace} />
                     <span className="font-mono font-black text-sm text-slate-300">{selOrder.id}</span>
-                    {(selOrder.logistica === 'flex' || selOrder.isPriority) && <FlexBadge />}
+                    {(selOrder.logistica==='flex'||selOrder.isPriority) && <FlexBadge />}
                   </div>
-                  {selOrder.clienteNome && (
-                    <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1"><User size={10}/>{selOrder.clienteNome}</p>
-                  )}
+                  {selOrder.clienteNome && <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1"><User size={10}/>{selOrder.clienteNome}</p>}
                 </div>
                 <button onClick={() => setModalExp(true)}
                   className="px-4 py-2 rounded-xl text-sm font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white transition-all hover:scale-105 active:scale-95 shadow-lg shadow-emerald-900/30">
                   <Truck size={14} className="inline mr-1.5"/> Expedir
                 </button>
               </div>
-
-              {/* Scanner EXPEDIR */}
               <div className="flex-shrink-0">
-                <ScannerZone
-                  status={scanStatus}
-                  hint="bipe DANFE ou apelido 2× para confirmar"
-                  inputRef={scanInputRef}
-                  onManualScan={onScanExpedicao}
-                />
+                <ScannerZone status={scanStatus} hint="bipe DANFE ou apelido 2× para confirmar"
+                  inputRef={scanInputRef} onManualScan={onScanExpedicao}
+                  onCameraToggle={() => setCameraOpen(true)} cameraActive={cameraOpen} />
               </div>
-
-              {/* Instruções do fluxo scanner */}
               <div className="mx-4 mb-3 px-4 py-3 rounded-xl bg-blue-500/6 border border-blue-500/15 flex-shrink-0">
-                <p className="text-xs font-bold text-blue-400 mb-1">Como funciona o scanner aqui:</p>
+                <p className="text-xs font-bold text-blue-400 mb-1">Fluxo scanner:</p>
                 <ol className="text-[11px] text-slate-500 space-y-0.5 list-decimal list-inside">
-                  <li>Bipe o código da <strong className="text-slate-400">DANFE ou do apelido/pedido</strong> → pedido é identificado</li>
-                  <li>Bipe <strong className="text-slate-400">novamente</strong> o mesmo código → expedição é confirmada automaticamente</li>
+                  <li>Bipe código da <strong className="text-slate-400">DANFE ou apelido</strong> → pedido identificado</li>
+                  <li>Bipe <strong className="text-slate-400">novamente</strong> → expedição confirmada</li>
                 </ol>
               </div>
-
-              {/* Etiqueta destaque */}
-              <div className="px-4 mb-3 flex-shrink-0">
-                <EtiquetaDestaque o={selOrder} large />
-              </div>
-
-              {/* Itens */}
+              <div className="px-4 mb-3 flex-shrink-0"><EtiquetaDestaque o={selOrder} large /></div>
               <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2 scrollbar-thin scrollbar-thumb-slate-700/50">
                 {(Array.isArray(selOrder.items) ? selOrder.items : []).map((it, i) => {
                   const foto = it.stockPhotos?.[0] || it.image || '/assets/placeholder.png';
                   return (
                     <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-2xl border border-white/6 bg-slate-800/50">
-                      <img src={foto} onError={e => { e.target.src = '/assets/placeholder.png'; }}
+                      <img src={foto} onError={e=>{e.target.src='/assets/placeholder.png';}}
                         className="w-14 h-14 rounded-xl object-cover border border-white/8 bg-slate-700 shrink-0" alt="" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-slate-200 truncate">{it.nameShort || it.name || '—'}</p>
-                        <p className="font-mono text-[10px] text-slate-500 mt-0.5">SKU {it.sku}{(it.customBin || it.bin) ? ` · 📍 ${it.customBin || it.bin}` : ''}</p>
+                        <p className="text-sm font-bold text-slate-200 truncate">{it.nameShort||it.name||'—'}</p>
+                        <p className="font-mono text-[10px] text-slate-500 mt-0.5">SKU {it.sku}{(it.customBin||it.bin)?` · 📍 ${it.customBin||it.bin}`:''}</p>
                       </div>
                       <div className="w-12 h-12 rounded-xl bg-emerald-950/60 border border-emerald-500/25 flex items-center justify-center shrink-0">
                         <span className="font-mono text-lg font-black text-emerald-400">×{it.qty}</span>
@@ -1178,9 +1204,7 @@ export default function PedidosDoDia() {
               </div>
               <div className="text-center">
                 <p className="font-black text-lg text-slate-300">Selecione ou bipe um pedido</p>
-                <p className="text-slate-600 text-sm mt-2 max-w-xs leading-relaxed">
-                  Escolha um pedido na lista ou bipe o código da DANFE para identificar automaticamente
-                </p>
+                <p className="text-slate-600 text-sm mt-2 max-w-xs leading-relaxed">Escolha um pedido na lista ou bipe o código da DANFE para identificar automaticamente</p>
               </div>
               {counts.picked === 0 && (
                 <div className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-blue-500/8 border border-blue-500/15">
@@ -1191,14 +1215,12 @@ export default function PedidosDoDia() {
             </div>
           ))}
 
-          {/* ════ ABA EXPEDIDO ════ */}
+          {/* ════ EXPEDIDO ════ */}
           {tab === 'packed' && (
             <div className="flex flex-col overflow-hidden h-full">
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/5 bg-slate-900/60 flex-shrink-0">
                 <div>
-                  <p className="font-black text-base flex items-center gap-2">
-                    <CircleCheck size={16} className="text-emerald-400"/>Expedidos Hoje
-                  </p>
+                  <p className="font-black text-base flex items-center gap-2"><CircleCheck size={16} className="text-emerald-400"/>Expedidos Hoje</p>
                   <p className="text-xs text-slate-500 mt-0.5">{counts.packed} pedido(s) · contador zera à meia-noite</p>
                 </div>
                 <button onClick={refreshAll} disabled={loading}
@@ -1206,50 +1228,50 @@ export default function PedidosDoDia() {
                   <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-2.5 scrollbar-thin scrollbar-thumb-slate-700/50">
+              <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700/50">
+                {/* Relatório */}
+                <div className="pt-3">
+                  <RelatorioDia orders={orders} />
+                </div>
+
                 {orders.packed.length === 0
-                  ? <Vazio icon="✅" titulo="Nenhum pedido expedido hoje" sub="Dados históricos ficam salvos no Firestore para pesquisa futura." />
-                  : orders.packed.map(o => {
-                    const its = Array.isArray(o.items) ? o.items : [];
-                    const etiq = getEtiquetaInfo(o);
-                    return (
-                      <div key={o.id} className="rounded-2xl border border-emerald-500/12 bg-emerald-950/8 overflow-hidden">
-                        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-emerald-500/8">
-                          <div className="min-w-0 flex items-center gap-2">
-                            <CircleCheck size={14} className="text-emerald-500 shrink-0" />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <MktLogo mkt={o.marketplace} />
-                                <span className="font-mono text-[10px] text-slate-500">{o.id}</span>
+                  ? <Vazio icon="✅" titulo="Nenhum pedido expedido hoje" sub="Dados históricos ficam salvos para pesquisa futura." />
+                  : <div className="px-4 pb-4 space-y-2.5">
+                    {orders.packed.map(o => {
+                      const its = Array.isArray(o.items) ? o.items : [];
+                      const etiq = getEtiquetaInfo(o);
+                      return (
+                        <div key={o.id} className="rounded-2xl border border-emerald-500/12 bg-emerald-950/8 overflow-hidden">
+                          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-emerald-500/8">
+                            <div className="min-w-0 flex items-center gap-2">
+                              <CircleCheck size={14} className="text-emerald-500 shrink-0" />
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2"><MktLogo mkt={o.marketplace}/><span className="font-mono text-[10px] text-slate-500">{o.id}</span></div>
+                                {etiq?.valor && <p className={`text-[10px] font-bold mt-0.5 truncate ${etiq.tipo==='ml'?'text-amber-500':'text-orange-500'}`}>{etiq.valor}</p>}
                               </div>
-                              {etiq?.valor && (
-                                <p className={`text-[10px] font-bold mt-0.5 truncate ${etiq.tipo === 'ml' ? 'text-amber-500' : 'text-orange-500'}`}>
-                                  {etiq.valor}
-                                </p>
-                              )}
                             </div>
+                            <span className="text-[10px] font-mono text-emerald-600 shrink-0">{fmtTime(o.updatedAtMs)}</span>
                           </div>
-                          <span className="text-[10px] font-mono text-emerald-600 shrink-0">{fmtTime(o.updatedAtMs)}</span>
-                        </div>
-                        <div className="divide-y divide-white/5">
-                          {its.map((it, i) => {
-                            const foto = it.stockPhotos?.[0] || it.image || '/assets/placeholder.png';
-                            return (
-                              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                                <img src={foto} onError={e => { e.target.src = '/assets/placeholder.png'; }}
-                                  className="w-10 h-10 rounded-xl object-cover bg-slate-800 border border-white/8 shrink-0" alt="" />
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-xs font-bold text-slate-300 truncate">{it.nameShort || it.name || '—'}</p>
-                                  <p className="font-mono text-[10px] text-slate-600">SKU {it.sku}</p>
+                          <div className="divide-y divide-white/5">
+                            {its.map((it, i) => {
+                              const foto = it.stockPhotos?.[0] || it.image || '/assets/placeholder.png';
+                              return (
+                                <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                                  <img src={foto} onError={e=>{e.target.src='/assets/placeholder.png';}}
+                                    className="w-10 h-10 rounded-xl object-cover bg-slate-800 border border-white/8 shrink-0" alt="" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-slate-300 truncate">{it.nameShort||it.name||'—'}</p>
+                                    <p className="font-mono text-[10px] text-slate-600">SKU {it.sku}</p>
+                                  </div>
+                                  <span className="font-mono text-sm font-black text-emerald-500 shrink-0">×{it.qty}</span>
                                 </div>
-                                <span className="font-mono text-sm font-black text-emerald-500 shrink-0">×{it.qty}</span>
-                              </div>
-                            );
-                          })}
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })
+                      );
+                    })}
+                  </div>
                 }
               </div>
             </div>
@@ -1261,19 +1283,20 @@ export default function PedidosDoDia() {
       <Toast items={toasts} />
       <ScanFlash tipo={flash} />
 
-      {modalSep && (
-        <ModalSeparado
-          order={selOrder} proximo={proximoPedido}
-          onConfirmar={confirmarSeparado} onFechar={() => setModalSep(false)}
-          confirmando={!!confirmando}
+      {cameraOpen && (
+        <CameraOverlay
+          onScan={code => { tab === 'pending' ? onScan(code) : onScanExpedicao(code); }}
+          onClose={() => setCameraOpen(false)}
         />
       )}
+
+      {modalSep && (
+        <ModalSeparado order={selOrder} proximo={proximoPedido}
+          onConfirmar={confirmarSeparado} onFechar={() => setModalSep(false)} confirmando={!!confirmando} />
+      )}
       {modalExp && (
-        <ModalExpedicao
-          order={selOrder} proximo={proximoPedido}
-          onConfirmar={confirmarExpedicao} onFechar={() => setModalExp(false)}
-          confirmando={!!confirmando}
-        />
+        <ModalExpedicao order={selOrder} proximo={proximoPedido}
+          onConfirmar={confirmarExpedicao} onFechar={() => setModalExp(false)} confirmando={!!confirmando} />
       )}
     </div>
   );
