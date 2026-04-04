@@ -17,6 +17,8 @@ import GestaoInsumos from './pages/expedicao/GestaoInsumos';
 import PedidosDoDia from './pages/expedicao/PedidosDoDia';
 import AutomacaoCadastro from './pages/catalogo/AutomacaoCadastro';
 import CatalogoPro       from './pages/catalogo/CatalogoPro';
+import AdminProdutos     from './pages/catalogo/AdminProdutos';
+import ImportarCSV       from './pages/catalogo/ImportarCSV';
 
 export default function App() {
   return (
@@ -32,8 +34,10 @@ export default function App() {
         <Route path="/expedicao/pedidos"   element={<PedidosDoDia />} />
         <Route path="/expedicao/insumos"   element={<GestaoInsumos />} />
         {/* Catálogo */}
-        <Route path="/catalogo/produtos"  element={<CatalogoPro />} />
-        <Route path="/catalogo/automacao" element={<AutomacaoCadastro />} />
+        <Route path="/catalogo/produtos"   element={<CatalogoPro />} />
+        <Route path="/catalogo/admin"      element={<AdminProdutos />} />
+        <Route path="/catalogo/importar"   element={<ImportarCSV />} />
+        <Route path="/catalogo/automacao"  element={<AutomacaoCadastro />} />
         {/* Financeiro */}
         <Route path="/financeiro/despesas" element={<GestaoDespesas />} />
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />

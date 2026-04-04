@@ -35,11 +35,11 @@ const ROTAS = [
   // ── Catálogo ─────────────────────────────────────────────────────────────
   { key: 'catalogo-pro',   moduleId: 'catalogo',       label: 'Catálogo Pro',      secao: 'Catálogo',   Icon: LayoutGrid,       react: true,  href: '/catalogo/produtos'    },
   { key: 'busca-produto',  moduleId: 'catalogo',       label: 'Busca SKU / EAN',   secao: 'Catálogo',   Icon: Search,           react: true,  href: '/catalogo/automacao'   },
-  { key: 'admin',          moduleId: 'admin',          label: 'Admin Produtos',    secao: 'Catálogo',   Icon: Settings2,        react: false, href: '/admin'                },
+  { key: 'admin',          moduleId: 'admin',          label: 'Admin Produtos',    secao: 'Catálogo',   Icon: Settings2,        react: true,  href: '/catalogo/admin'       },
   { key: 'embalagens',     moduleId: 'embalagens',     label: 'Embalagens',        secao: 'Catálogo',   Icon: Box,              react: false, href: '/embalagens'           },
   { key: 'cadastrar',      moduleId: 'cadastrar',      label: 'Cadastro Rápido',   secao: 'Catálogo',   Icon: PlusCircle,       react: false, href: '/cadastrar'            },
   { key: 'enriquecer-xml', moduleId: 'enriquecer-xml', label: 'Cadastro XML',      secao: 'Catálogo',   Icon: FileCode,         react: false, href: '/enriquecer-xml'       },
-  { key: 'importar',       moduleId: 'importar',       label: 'Importar CSV',      secao: 'Catálogo',   Icon: FileUp,           react: false, href: '/importar'             },
+  { key: 'importar',       moduleId: 'importar',       label: 'Importar CSV',      secao: 'Catálogo',   Icon: FileUp,           react: true,  href: '/catalogo/importar'    },
 
   // ── Financeiro ───────────────────────────────────────────────────────────
   { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Receipt,          react: true,  href: '/financeiro/despesas'  },
