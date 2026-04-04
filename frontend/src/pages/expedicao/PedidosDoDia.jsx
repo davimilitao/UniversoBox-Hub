@@ -1,17 +1,18 @@
 /**
  * @file PedidosDoDia.jsx
  * @module expedicao
- * @description Separação com scanner, expedição e histórico.
- *              Migração da tela HTML /pedidos para React + Tailwind.
- * @version 1.0.0
- * @date 2026-04-03
+ * @description Separação com scanner — redesign operacional v2.0
+ *              Layout picking profissional: foto+qty+nome sempre visíveis,
+ *              scanner zone prominente, reset diário do contador Expedido.
+ * @version 2.0.0
+ * @date 2026-04-04
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  Package, RefreshCw, Plus, Scan, CheckCircle2, Truck,
-  ChevronRight, Loader2, Inbox, Zap, Clock, User,
-  MapPin, Image as ImageIcon, AlertTriangle, X,
+  RefreshCw, Plus, CheckCircle2, Truck, Loader2,
+  ChevronRight, User, MapPin, X, Scan, Package2,
+  BoxesIcon, SendHorizonal, CircleCheck,
 } from 'lucide-react';
 
 // ─── Terminal & Auth ──────────────────────────────────────────────────────────
@@ -41,8 +42,17 @@ async function api(path, opts = {}) {
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 function fmtTime(ms) {
-  if (!ms) return '';
+  if (!ms) return '—';
   return new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function isToday(ms) {
+  if (!ms) return false;
+  const d = new Date(Number(ms));
+  const n = new Date();
+  return d.getFullYear() === n.getFullYear() &&
+         d.getMonth() === n.getMonth() &&
+         d.getDate() === n.getDate();
 }
 
 function sortOrders(arr) {
@@ -68,50 +78,52 @@ function beep(ok = true) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     if (ok) {
-      [1046, 1318].forEach((freq, i) => {
+      [880, 1108].forEach((freq, i) => {
         const o = ctx.createOscillator(), g = ctx.createGain();
-        o.type = 'sine'; o.frequency.value = freq; g.gain.value = 0.07;
+        o.type = 'sine'; o.frequency.value = freq; g.gain.value = 0.08;
         o.connect(g); g.connect(ctx.destination);
-        o.start(ctx.currentTime + i * 0.11);
-        o.stop(ctx.currentTime + i * 0.11 + 0.08);
+        o.start(ctx.currentTime + i * 0.1);
+        o.stop(ctx.currentTime + i * 0.1 + 0.09);
       });
     } else {
       const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'square'; o.frequency.value = 220; g.gain.value = 0.07;
+      o.type = 'sawtooth'; o.frequency.value = 180; g.gain.value = 0.07;
       o.connect(g); g.connect(ctx.destination);
-      o.start(); o.stop(ctx.currentTime + 0.2);
+      o.start(); o.stop(ctx.currentTime + 0.22);
     }
-    setTimeout(() => ctx.close().catch(() => {}), 600);
+    setTimeout(() => ctx.close().catch(() => {}), 700);
   } catch {}
 }
 
 // ─── Badges ───────────────────────────────────────────────────────────────────
-function MktBadge({ mkt }) {
-  if (mkt === 'MERCADO_LIVRE') return <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-yellow-400/90 text-black">ML</span>;
-  if (mkt === 'SHOPEE')        return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-400 border border-orange-500/25">SHOPEE</span>;
-  return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-700 text-slate-400 border border-slate-600">{mkt || 'OUTROS'}</span>;
+function MktBadge({ mkt, size = 'sm' }) {
+  const base = size === 'lg' ? 'px-2 py-1 rounded-md text-xs font-extrabold' : 'px-1.5 py-0.5 rounded text-[10px] font-extrabold';
+  if (mkt === 'MERCADO_LIVRE') return <span className={`${base} bg-yellow-400 text-black`}>ML</span>;
+  if (mkt === 'SHOPEE')        return <span className={`${base} bg-orange-500/20 text-orange-400 border border-orange-500/30`}>SHOPEE</span>;
+  return <span className={`${base} bg-slate-700 text-slate-400 border border-slate-600`}>{mkt || 'OUTROS'}</span>;
 }
 
-function FlexBadge() {
-  return <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-yellow-400 text-black">FLEX</span>;
-}
-
-function StatusTag({ status }) {
-  if (status === 'pending') return <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-orange-500/15 text-orange-400 border border-orange-500/25">A Separar</span>;
-  if (status === 'picked')  return <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/15   text-blue-400   border border-blue-500/25">Separado</span>;
-  if (status === 'packed')  return <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Expedido</span>;
-  return null;
+function FlexBadge({ size = 'sm' }) {
+  const base = size === 'lg' ? 'px-2 py-1 rounded-md text-xs font-extrabold' : 'px-1.5 py-0.5 rounded text-[10px] font-extrabold';
+  return <span className={`${base} bg-amber-400 text-black animate-pulse`}>⚡ FLEX</span>;
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
-function Toast({ msg, tipo }) {
-  if (!msg) return null;
+function Toast({ items }) {
+  if (!items.length) return null;
   return (
-    <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium border max-w-xs
-      ${tipo === 'ok'  ? 'bg-emerald-900/95 border-emerald-600 text-emerald-200' :
-        tipo === 'err' ? 'bg-red-900/95 border-red-600 text-red-200' :
-                         'bg-slate-800/95 border-white/10 text-slate-200'}`}>
-      {msg}
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none" style={{ minWidth: 280 }}>
+      {items.map(t => (
+        <div key={t.id} className={`flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl text-sm font-semibold border backdrop-blur-sm
+          ${t.tipo === 'ok'  ? 'bg-emerald-950/95 border-emerald-500/40 text-emerald-200 shadow-emerald-900/40' :
+            t.tipo === 'err' ? 'bg-red-950/95 border-red-500/40 text-red-200 shadow-red-900/40' :
+                               'bg-slate-900/95 border-white/15 text-slate-200'}`}>
+          <span className="text-lg leading-none">
+            {t.tipo === 'ok' ? '✓' : t.tipo === 'err' ? '✕' : 'ℹ'}
+          </span>
+          {t.msg}
+        </div>
+      ))}
     </div>
   );
 }
@@ -120,8 +132,32 @@ function Toast({ msg, tipo }) {
 function ScanFlash({ tipo }) {
   if (!tipo) return null;
   return (
-    <div className={`fixed inset-0 pointer-events-none z-40 transition-opacity
-      ${tipo === 'ok' ? 'bg-emerald-400/10' : 'bg-red-400/10'}`} />
+    <div className={`fixed inset-0 pointer-events-none z-40
+      ${tipo === 'ok' ? 'bg-emerald-400/8' : 'bg-red-400/12'}`} />
+  );
+}
+
+// ─── Progress Circle ─────────────────────────────────────────────────────────
+function ProgressRing({ pct, size = 40, stroke = 3.5 }) {
+  const r = (size - stroke * 2) / 2;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - (pct / 100) * circ;
+  const color = pct >= 100 ? '#34d399' : pct > 0 ? '#60a5fa' : '#334155';
+  return (
+    <svg width={size} height={size} className="shrink-0 -rotate-90">
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#1e293b" strokeWidth={stroke} />
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+        strokeDasharray={circ} strokeDashoffset={offset}
+        strokeLinecap="round"
+        style={{ transition: 'stroke-dashoffset 0.4s ease, stroke 0.3s ease' }}
+      />
+      <text x={size/2} y={size/2} textAnchor="middle" dominantBaseline="middle"
+        className="rotate-90"
+        style={{ transform: `rotate(90deg) translate(0, 0)`, transformOrigin: `${size/2}px ${size/2}px`,
+          fill: pct >= 100 ? '#34d399' : '#94a3b8', fontSize: 9, fontWeight: 700, fontFamily: 'monospace' }}>
+        {pct}%
+      </text>
+    </svg>
   );
 }
 
@@ -133,189 +169,265 @@ function OrderCard({ o, tab, active, onClick }) {
   const pct     = total > 0 ? Math.round((checked / total) * 100) : 0;
   const isFlex  = o.logistica === 'flex' || !!o.isPriority;
   const etiq    = getEtiquetaInfo(o);
-
-  const thumbs = its.slice(0, 4);
-  const extra  = its.length - 4;
+  const thumbs  = its.slice(0, 3);
 
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left p-2.5 rounded-xl border transition-all mb-1.5
+      className={`w-full text-left rounded-xl border transition-all mb-1.5 overflow-hidden
         ${active
-          ? 'bg-blue-500/10 border-blue-500/30 border-l-2 border-l-blue-400'
+          ? 'border-blue-500/50 bg-blue-500/8 ring-1 ring-blue-500/20 shadow-lg shadow-blue-900/20'
           : isFlex
-          ? 'bg-slate-800/60 border-white/5 border-l-2 border-l-yellow-400 hover:bg-slate-800'
-          : 'bg-slate-800/60 border-white/5 hover:bg-slate-800 hover:border-white/10'}`}
+          ? 'border-l-2 border-amber-400/60 border-t-white/5 border-r-white/5 border-b-white/5 bg-slate-800/70 hover:bg-slate-800'
+          : 'border-white/5 bg-slate-800/50 hover:bg-slate-800 hover:border-white/10'}`}
     >
-      {/* Linha 1: ID + badges */}
-      <div className="flex items-center justify-between gap-2 mb-1.5">
-        <span className="font-mono text-[12px] font-bold text-slate-200 truncate">
-          {isFlex && '🔥 '}{o.id}
-        </span>
-        <div className="flex items-center gap-1 shrink-0">
-          {isFlex && <FlexBadge />}
-          <MktBadge mkt={o.marketplace} />
+      {/* Faixa FLEX */}
+      {isFlex && (
+        <div className="bg-amber-400/10 border-b border-amber-400/20 px-2.5 py-1 flex items-center gap-1.5">
+          <span className="text-[10px] font-black text-amber-400">⚡ PRIORIDADE FLEX</span>
         </div>
-      </div>
+      )}
 
-      {/* Barra de progresso — só na aba pending */}
-      {tab === 'pending' && (
-        <div className="mb-2">
-          <div className="h-1 bg-slate-700 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-emerald-400' : 'bg-blue-400'}`}
-              style={{ width: `${pct}%` }}
-            />
+      <div className="p-2.5">
+        {/* Linha topo: ID + badges */}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <span className="font-mono text-[11px] font-bold text-slate-300 truncate">{o.id}</span>
+          <div className="flex items-center gap-1 shrink-0">
+            <MktBadge mkt={o.marketplace} />
           </div>
-          <span className="font-mono text-[10px] text-slate-500">{checked}/{total}</span>
         </div>
-      )}
 
-      {/* Etiqueta highlight — aba expedir */}
-      {tab === 'picked' && etiq?.valor && (
-        <div className={`text-[11px] font-bold mb-1.5 truncate
-          ${etiq.tipo === 'ml' ? 'text-yellow-400' : 'text-orange-400'}`}>
-          {etiq.tipo === 'ml' ? '🏷️' : '📦'} {etiq.valor}
-        </div>
-      )}
-
-      {/* Thumbnails */}
-      {thumbs.length > 0 && (
-        <div className="flex gap-1 mb-1.5">
-          {thumbs.map((it, i) => (
-            <img key={i} src={it.image || '/assets/placeholder.png'}
-              onError={e => { e.target.src = '/assets/placeholder.png'; }}
-              className="w-7 h-7 rounded object-cover border border-white/5 bg-slate-700"
-              alt="" />
-          ))}
-          {extra > 0 && (
-            <div className="w-7 h-7 rounded bg-slate-700 border border-white/10 flex items-center justify-center text-[9px] font-bold text-slate-400">
-              +{extra}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Cliente + hora */}
-      <div className="flex items-center justify-between gap-2">
-        {o.clienteNome && (
-          <span className="text-[10px] text-slate-500 truncate flex items-center gap-1">
-            <User size={9}/>{o.clienteNome}
-          </span>
+        {/* Etiqueta highlight */}
+        {etiq?.valor && (
+          <div className={`text-[11px] font-bold mb-2 truncate px-1.5 py-1 rounded-lg
+            ${etiq.tipo === 'ml' ? 'text-amber-400 bg-amber-400/8 border border-amber-400/15' : 'text-orange-400 bg-orange-500/8 border border-orange-500/15 font-mono'}`}>
+            {etiq.tipo === 'ml' ? '🏷️ ' : '📦 '}{etiq.valor}
+          </div>
         )}
-        <span className="text-[10px] text-slate-600 shrink-0 flex items-center gap-1">
-          <Clock size={9}/>{fmtTime(o.createdAtMs)}
-        </span>
+
+        {/* Thumbs de produto + progresso */}
+        <div className="flex items-center gap-2">
+          {/* Fotos */}
+          <div className="flex gap-1 flex-1">
+            {thumbs.map((it, i) => (
+              <div key={i} className="relative">
+                <img
+                  src={it.stockPhotos?.[0] || it.image || '/assets/placeholder.png'}
+                  onError={e => { e.target.src = '/assets/placeholder.png'; }}
+                  className="w-9 h-9 rounded-lg object-cover border border-white/10 bg-slate-700"
+                  alt=""
+                />
+                {Number(it.qty) > 1 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-slate-900 border border-white/10 text-[8px] font-black text-slate-300 flex items-center justify-center">
+                    {it.qty}
+                  </span>
+                )}
+              </div>
+            ))}
+            {its.length > 3 && (
+              <div className="w-9 h-9 rounded-lg bg-slate-700 border border-white/10 flex items-center justify-center text-[9px] font-bold text-slate-400">
+                +{its.length - 3}
+              </div>
+            )}
+          </div>
+
+          {/* Progresso (só pending) */}
+          {tab === 'pending' && <ProgressRing pct={pct} size={38} />}
+        </div>
+
+        {/* Rodapé: cliente + hora */}
+        <div className="flex items-center justify-between gap-2 mt-2">
+          {o.clienteNome ? (
+            <span className="text-[10px] text-slate-500 truncate flex items-center gap-1">
+              <User size={9}/>{o.clienteNome.split(' ').slice(0, 2).join(' ')}
+            </span>
+          ) : <span />}
+          <span className="text-[10px] text-slate-600 font-mono shrink-0">{fmtTime(o.createdAtMs)}</span>
+        </div>
       </div>
     </button>
   );
 }
 
-// ─── Foto de item ─────────────────────────────────────────────────────────────
-function ItemFotoGrid({ stockPhotos, boxPhotos, binPhoto, binLabel }) {
-  const cols = [];
-  if (stockPhotos?.[0]) cols.push({ label: '📦 Produto',    src: stockPhotos[0] });
-  if (boxPhotos?.[0])   cols.push({ label: '🎁 Embalado',   src: boxPhotos[0]   });
-  if (binPhoto)         cols.push({ label: '📍 Prateleira', src: binPhoto        });
-
-  if (!cols.length && !binLabel) return null;
+// ─── Scanner Zone ─────────────────────────────────────────────────────────────
+function ScannerZone({ status, lastCode, inputRef, onManualScan }) {
+  const isReady = status === 'ready';
+  const isBusy  = status === 'busy';
 
   return (
-    <div className="border-t border-white/5 bg-slate-900/60 p-3">
-      {cols.length > 0 && (
-        <div className={`grid gap-3 mb-3 ${cols.length === 1 ? 'grid-cols-1 max-w-[140px]' : cols.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-          {cols.map((c, i) => (
-            <div key={i} className="flex flex-col gap-1.5">
-              <span className="text-[9px] font-bold text-slate-600 uppercase tracking-wider">{c.label}</span>
-              <img src={c.src} onError={e => { e.target.src = '/assets/placeholder.png'; }}
-                className="w-full aspect-square object-cover rounded-xl border border-white/10 bg-slate-800 cursor-zoom-in"
-                alt="" />
-            </div>
-          ))}
+    <div className={`mx-4 my-3 rounded-2xl border-2 overflow-hidden transition-all duration-300
+      ${isBusy
+        ? 'border-amber-400/60 bg-amber-400/5 shadow-lg shadow-amber-900/20'
+        : 'border-emerald-500/40 bg-emerald-950/30 shadow-lg shadow-emerald-900/20'}`}>
+
+      {/* Cabeçalho da zona */}
+      <div className={`flex items-center gap-3 px-4 py-2.5 border-b
+        ${isBusy ? 'border-amber-400/20 bg-amber-400/8' : 'border-emerald-500/15 bg-emerald-950/40'}`}>
+        <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${isBusy ? 'bg-amber-400 animate-ping' : 'bg-emerald-400 animate-pulse'}`} />
+        <span className={`text-xs font-black uppercase tracking-widest ${isBusy ? 'text-amber-400' : 'text-emerald-400'}`}>
+          {isBusy ? 'Lendo…' : 'Scanner Ativo — Pronto para Ler'}
+        </span>
+        <Scan size={14} className={`ml-auto ${isBusy ? 'text-amber-400' : 'text-emerald-500'}`} />
+      </div>
+
+      {/* Área de leitura / input visível */}
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex-1 relative">
+          <input
+            ref={inputRef}
+            id="scannerInput"
+            type="text"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="Bipe o código ou digite SKU/EAN + Enter"
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                const v = e.target.value.trim();
+                e.target.value = '';
+                if (v) onManualScan(v);
+              }
+            }}
+            className={`w-full font-mono text-sm font-bold rounded-xl border px-4 py-2.5 outline-none transition-all
+              bg-slate-950/60 text-slate-100 placeholder:text-slate-600
+              ${isBusy
+                ? 'border-amber-400/40 focus:border-amber-400'
+                : 'border-emerald-500/30 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20'}`}
+          />
+          {lastCode && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] text-slate-600 pointer-events-none">
+              último: {lastCode}
+            </span>
+          )}
         </div>
-      )}
-      {binLabel && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-yellow-400/8 border border-yellow-400/20">
-          <MapPin size={13} className="text-yellow-400 shrink-0" />
-          <span className="text-sm font-bold text-yellow-400">Localização: <strong>{binLabel}</strong></span>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
 
-// ─── Item row (separação) ─────────────────────────────────────────────────────
+// ─── Item Row (separação) — novo design ───────────────────────────────────────
 function ItemRow({ it, onCheck }) {
-  const qty  = Number(it.qty || 0);
-  const chk  = Number(it.checkedQty || 0);
-  const ok   = chk >= qty;
+  const qty      = Number(it.qty || 0);
+  const chk      = Number(it.checkedQty || 0);
+  const ok       = chk >= qty;
   const binLabel = it.customBin || it.bin || '';
+  const foto     = it.stockPhotos?.[0] || it.image || null;
+  const fotoBox  = it.boxPhotos?.[0] || null;
+  const fotoBin  = it.binPhoto || null;
 
   return (
-    <div className={`rounded-xl border overflow-hidden transition-all
-      ${ok ? 'border-emerald-500/20 bg-emerald-500/3' : 'border-white/5 bg-slate-800/60'}`}>
+    <div className={`rounded-2xl border overflow-hidden transition-all duration-300
+      ${ok
+        ? 'border-emerald-500/30 bg-emerald-950/20'
+        : 'border-white/8 bg-slate-800/60 hover:border-white/15'}`}>
 
       {/* Linha principal */}
-      <div className="grid gap-0" style={{ gridTemplateColumns: '72px 1fr 80px' }}>
+      <div className="flex items-stretch">
 
-        {/* Foto principal */}
-        <img
-          src={it.stockPhotos?.[0] || it.image || '/assets/placeholder.png'}
-          onError={e => { e.target.src = '/assets/placeholder.png'; }}
-          className="w-[72px] h-[72px] object-cover bg-slate-800"
-          alt=""
-        />
+        {/* Foto do produto */}
+        <div className="shrink-0 relative">
+          <img
+            src={foto || '/assets/placeholder.png'}
+            onError={e => { e.target.src = '/assets/placeholder.png'; }}
+            className="w-24 h-24 object-cover bg-slate-800"
+            alt=""
+          />
+          {ok && (
+            <div className="absolute inset-0 bg-emerald-500/20 flex items-center justify-center">
+              <CircleCheck size={32} className="text-emerald-400 drop-shadow-lg" />
+            </div>
+          )}
+        </div>
 
-        {/* Info */}
-        <div className="px-3 py-2 flex flex-col justify-center gap-1.5 min-w-0">
-          <p className="text-sm font-bold text-slate-200 leading-tight line-clamp-2">
+        {/* Info central */}
+        <div className="flex-1 min-w-0 px-3 py-2.5 flex flex-col justify-between gap-1">
+          <p className={`font-bold text-sm leading-snug line-clamp-2 ${ok ? 'text-emerald-300' : 'text-slate-100'}`}>
             {it.nameShort || it.name || '—'}
           </p>
-          <div className="flex gap-1.5 flex-wrap">
+          <div className="flex flex-wrap gap-1.5">
             {it.sku && (
-              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-700 border border-white/10 text-slate-400">
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-700/80 border border-white/8 text-slate-400">
                 SKU {it.sku}
               </span>
             )}
             {it.ean && (
-              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-700 border border-white/10 text-slate-400">
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-700/80 border border-white/8 text-slate-400">
                 EAN {it.ean}
+              </span>
+            )}
+            {it.eanBox && (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-500/20 text-blue-400">
+                CX {it.eanBox}
               </span>
             )}
           </div>
           {it.notes && (
-            <p className="text-[11px] text-orange-400 bg-orange-500/10 border border-orange-500/20 rounded px-2 py-1">
+            <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1">
               ⚠️ {it.notes}
             </p>
           )}
         </div>
 
         {/* Qty + Botão */}
-        <div className="flex flex-col items-center justify-center gap-1 px-2 py-2 border-l border-white/5 bg-slate-900/40">
-          <span className={`font-mono text-2xl font-black leading-none ${ok ? 'text-emerald-400' : 'text-white'}`}>
-            {chk}
-          </span>
-          <span className="text-[9px] text-slate-600">de {qty}</span>
+        <div className="flex flex-col items-center justify-center gap-2 px-3 py-2.5 border-l border-white/5 bg-slate-900/40 min-w-[76px]">
+          {/* Badge de quantidade */}
+          <div className={`flex flex-col items-center justify-center w-14 h-14 rounded-2xl font-black leading-none transition-all
+            ${ok
+              ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400'
+              : chk > 0
+              ? 'bg-blue-500/15 border border-blue-500/30 text-blue-300'
+              : 'bg-slate-700/60 border border-white/8 text-slate-200'}`}>
+            <span className="text-2xl leading-none">{ok ? '✓' : chk > 0 ? chk : qty}</span>
+            {!ok && chk > 0 && <span className="text-[9px] text-slate-500 mt-0.5">de {qty}</span>}
+            {!ok && chk === 0 && <span className="text-[9px] text-slate-500 mt-0.5">und</span>}
+          </div>
+
+          {/* Botão confirmar */}
           <button
-            onClick={() => onCheck(it.sku)}
+            onClick={() => !ok && onCheck(it.sku)}
             disabled={ok}
-            className={`w-8 h-8 rounded-lg border text-base font-bold transition-all flex items-center justify-center
+            title={ok ? 'Conferido' : `Confirmar +1 (${it.sku})`}
+            className={`w-10 h-8 rounded-xl border text-sm font-extrabold transition-all flex items-center justify-center
               ${ok
-                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 cursor-default'
-                : 'bg-slate-700 border-white/10 text-slate-200 hover:bg-blue-500 hover:border-transparent hover:text-white'}`}
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500 cursor-default opacity-60'
+                : 'bg-slate-700 border-white/10 text-slate-200 hover:bg-blue-500 hover:border-blue-400 hover:text-white hover:scale-105 active:scale-95'}`}
           >
-            {ok ? '✓' : '+'}
+            {ok ? '✓' : '+1'}
           </button>
         </div>
       </div>
 
-      {/* Fotos */}
-      <ItemFotoGrid
-        stockPhotos={it.stockPhotos}
-        boxPhotos={it.boxPhotos}
-        binPhoto={it.binPhoto}
-        binLabel={binLabel}
-      />
+      {/* Localização em prateleira */}
+      {binLabel && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-400/6 border-t border-amber-400/15">
+          <MapPin size={12} className="text-amber-400 shrink-0" />
+          <span className="text-xs font-black text-amber-300">Localização:</span>
+          <span className="font-mono text-sm font-black text-amber-400">{binLabel}</span>
+        </div>
+      )}
+
+      {/* Fotos adicionais */}
+      {(fotoBox || fotoBin) && (
+        <div className={`grid gap-2 p-3 border-t border-white/5 bg-slate-900/50
+          ${[fotoBox, fotoBin].filter(Boolean).length === 1 ? 'grid-cols-1 max-w-[120px]' : 'grid-cols-2'}`}>
+          {fotoBox && (
+            <div>
+              <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Embalado</p>
+              <img src={fotoBox} onError={e => { e.target.src = '/assets/placeholder.png'; }}
+                className="w-full aspect-square object-cover rounded-xl border border-white/8 bg-slate-800"
+                alt="" />
+            </div>
+          )}
+          {fotoBin && (
+            <div>
+              <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Prateleira</p>
+              <img src={fotoBin} onError={e => { e.target.src = '/assets/placeholder.png'; }}
+                className="w-full aspect-square object-cover rounded-xl border border-white/8 bg-slate-800"
+                alt="" />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -329,89 +441,102 @@ function EtiquetaDestaque({ o }) {
     navigator.clipboard.writeText(info.valor).catch(() => {});
   }
 
-  if (info.tipo === 'ml') {
-    return (
-      <div onClick={copiar} title="Clique para copiar"
-        className="mx-4 mt-3 flex items-center gap-3 px-4 py-3 rounded-xl bg-yellow-400/10 border border-yellow-400/25 cursor-pointer hover:bg-yellow-400/15 transition-colors">
-        <span className="text-xl">🏷️</span>
-        <div>
-          <p className="text-[9px] font-bold text-yellow-600 uppercase tracking-wider mb-0.5">Apelido ML — cole a etiqueta para:</p>
-          <p className="text-lg font-extrabold text-yellow-400">{info.valor}</p>
-        </div>
-      </div>
-    );
-  }
+  const isMl = info.tipo === 'ml';
   return (
     <div onClick={copiar} title="Clique para copiar"
-      className="mx-4 mt-3 flex items-center gap-3 px-4 py-3 rounded-xl bg-orange-500/10 border border-orange-500/20 cursor-pointer hover:bg-orange-500/15 transition-colors font-mono">
-      <span className="text-xl">📦</span>
-      <div>
-        <p className="text-[9px] font-bold text-orange-600 uppercase tracking-wider mb-0.5">Código de envio Shopee</p>
-        <p className="text-lg font-extrabold text-orange-400">{info.valor}</p>
+      className={`flex items-center gap-4 px-5 py-4 cursor-pointer transition-all rounded-2xl border-2
+        ${isMl
+          ? 'bg-amber-400/8 border-amber-400/30 hover:bg-amber-400/12 hover:border-amber-400/50'
+          : 'bg-orange-500/8 border-orange-500/25 hover:bg-orange-500/12 hover:border-orange-500/40'}`}>
+      <span className="text-3xl">{isMl ? '🏷️' : '📦'}</span>
+      <div className="flex-1 min-w-0">
+        <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${isMl ? 'text-amber-600' : 'text-orange-600'}`}>
+          {isMl ? 'Apelido ML — cole na etiqueta' : 'Código de envio Shopee'}
+        </p>
+        <p className={`text-2xl font-black tracking-tight leading-none truncate ${isMl ? 'text-amber-400' : 'text-orange-400 font-mono'}`}>
+          {info.valor}
+        </p>
       </div>
+      <span className="text-[10px] text-slate-600 shrink-0">toque para copiar</span>
     </div>
   );
 }
 
-// ─── Card de expedição ────────────────────────────────────────────────────────
+// ─── Card Expedição ───────────────────────────────────────────────────────────
 function ExpedicaoCard({ o, onConfirmar, confirmando }) {
   const its    = Array.isArray(o.items) ? o.items : [];
-  const info   = getEtiquetaInfo(o);
   const isFlex = o.logistica === 'flex' || !!o.isPriority;
+  const total  = its.reduce((a, it) => a + Number(it.qty || 0), 0);
 
   return (
-    <div className="rounded-xl border border-white/5 bg-slate-800/60 overflow-hidden mb-3 hover:border-white/10 transition-colors">
+    <div className={`rounded-2xl border overflow-hidden mb-3 transition-all
+      ${isFlex ? 'border-amber-400/40 shadow-lg shadow-amber-900/10' : 'border-white/8 hover:border-white/15'}`}>
 
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 px-4 py-3 bg-slate-800 border-b border-white/5">
-        <div className="min-w-0">
-          {info?.valor ? (
-            <>
-              <EtiquetaDestaque o={o} />
-              <p className="font-mono text-[11px] text-slate-600 mt-1 px-4">{o.id}</p>
-            </>
-          ) : (
-            <>
-              <p className="font-bold text-slate-200">{o.clienteNome || o.id}</p>
-              <p className="font-mono text-[11px] text-slate-600">{o.id}</p>
-            </>
-          )}
+      {/* Faixa FLEX */}
+      {isFlex && (
+        <div className="bg-amber-400/10 px-4 py-1.5 border-b border-amber-400/15">
+          <span className="text-[10px] font-black text-amber-400">⚡ PRIORIDADE FLEX — expedir imediatamente</span>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0 mt-1">
-          {isFlex && <FlexBadge />}
-          <MktBadge mkt={o.marketplace} />
-        </div>
-      </div>
+      )}
 
-      {/* Itens */}
-      <div className="px-4 py-3 space-y-2">
-        {its.length > 0 ? its.map((it, i) => (
-          <div key={i} className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
-            <img src={it.image || '/assets/placeholder.png'}
-              onError={e => { e.target.src = '/assets/placeholder.png'; }}
-              className="w-11 h-11 rounded-lg object-cover border border-white/10 bg-slate-700 shrink-0"
-              alt="" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-slate-200 truncate">{it.nameShort || it.name || it.sku || '—'}</p>
-              <p className="text-[10px] text-slate-500">
-                SKU: {it.sku || '—'}
-                {(it.customBin || it.bin) ? ` · 📍 ${it.customBin || it.bin}` : ''}
-              </p>
-            </div>
-            <span className="font-mono text-lg font-extrabold text-emerald-400 shrink-0">×{it.qty || 1}</span>
+      {/* Etiqueta principal */}
+      <div className="p-4 space-y-3">
+        <EtiquetaDestaque o={o} />
+
+        {/* Header: ID + marketplace */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-mono text-xs text-slate-500">{o.id}</p>
+            {o.clienteNome && <p className="text-xs text-slate-400 truncate mt-0.5"><User size={9} className="inline mr-1"/>{o.clienteNome}</p>}
           </div>
-        )) : (
-          <p className="text-sm text-slate-600 text-center py-2">Itens não carregados — clique em ⟳</p>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {isFlex && <FlexBadge />}
+            <MktBadge mkt={o.marketplace} size="lg" />
+          </div>
+        </div>
+
+        {/* Itens */}
+        {its.length > 0 && (
+          <div className="rounded-xl border border-white/5 overflow-hidden">
+            {its.map((it, i) => {
+              const foto = it.stockPhotos?.[0] || it.image || '/assets/placeholder.png';
+              return (
+                <div key={i} className="flex items-center gap-3 px-3 py-2.5 border-b border-white/5 last:border-0 bg-slate-800/40">
+                  <img src={foto} onError={e => { e.target.src = '/assets/placeholder.png'; }}
+                    className="w-12 h-12 rounded-xl object-cover border border-white/8 bg-slate-700 shrink-0"
+                    alt="" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-slate-200 truncate">{it.nameShort || it.name || it.sku || '—'}</p>
+                    <p className="text-[10px] font-mono text-slate-500 mt-0.5">
+                      {it.sku && `SKU ${it.sku}`}{(it.customBin || it.bin) ? ` · 📍 ${it.customBin || it.bin}` : ''}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <span className="font-mono text-xl font-black text-emerald-400">×{it.qty || 1}</span>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="flex items-center justify-between px-3 py-2 bg-slate-800/60 border-t border-white/5">
+              <span className="text-[11px] text-slate-600">{its.length} produto(s)</span>
+              <span className="font-mono text-xs font-bold text-slate-400">{total} unid. total</span>
+            </div>
+          </div>
         )}
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-slate-800/80 border-t border-white/5">
-        <span className="text-[11px] text-slate-600">🕐 Separado às {fmtTime(o.updatedAtMs || o.createdAtMs)}</span>
+      {/* Footer ação */}
+      <div className="flex items-center justify-between gap-3 px-4 py-3 bg-slate-900/60 border-t border-white/5">
+        <span className="text-[11px] text-slate-600 flex items-center gap-1">
+          <CheckCircle2 size={10} className="text-blue-400" />
+          Separado às {fmtTime(o.updatedAtMs || o.createdAtMs)}
+        </span>
         <button
           onClick={() => onConfirmar(o.id)}
           disabled={confirmando === o.id}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white shadow-lg shadow-emerald-500/20 transition-all"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-extrabold
+            bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white
+            shadow-lg shadow-emerald-900/40 transition-all hover:scale-105 active:scale-95"
         >
           {confirmando === o.id
             ? <><Loader2 size={14} className="animate-spin"/> Confirmando…</>
@@ -429,76 +554,78 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
   const its = Array.isArray(order.items) ? order.items : [];
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
       onClick={e => e.target === e.currentTarget && onFechar()}>
-      <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
+      <div className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
 
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 p-4 border-b border-white/5">
+        <div className="flex items-start justify-between gap-3 p-5 border-b border-white/5">
           <div>
-            <p className="font-mono text-sm font-bold text-slate-200">{order.id}</p>
-            <p className="text-xs text-slate-500 mt-0.5">Confirmar separação completa?</p>
+            <div className="flex items-center gap-2 mb-1">
+              <CheckCircle2 size={20} className="text-emerald-400" />
+              <p className="font-black text-base text-slate-100">Separação Completa!</p>
+            </div>
+            <p className="font-mono text-xs text-slate-500">{order.id}</p>
+            <p className="text-xs text-slate-500 mt-1">Confirmar e mover para Expedir?</p>
           </div>
-          <div className="flex items-center gap-2">
-            <MktBadge mkt={order.marketplace} />
-            <button onClick={onFechar} className="text-slate-500 hover:text-slate-300 transition-colors">
-              <X size={18}/>
-            </button>
-          </div>
+          <button onClick={onFechar} className="text-slate-500 hover:text-slate-300 transition-colors mt-1">
+            <X size={18}/>
+          </button>
         </div>
 
         {/* Itens */}
-        <div className="p-4">
-          <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-3">
-            ✅ {its.length} item(s) separado(s)
-          </p>
-          <div className="space-y-0">
-            {its.map((it, i) => (
-              <div key={i} className="flex items-center gap-3 py-2.5 border-b border-white/5 last:border-0">
-                <img src={it.image || '/assets/placeholder.png'}
-                  onError={e => { e.target.src = '/assets/placeholder.png'; }}
-                  className="w-11 h-11 rounded-lg object-cover bg-slate-800 shrink-0"
+        <div className="p-4 space-y-0">
+          {its.map((it, i) => {
+            const foto = it.stockPhotos?.[0] || it.image || '/assets/placeholder.png';
+            return (
+              <div key={i} className="flex items-center gap-3 py-3 border-b border-white/5 last:border-0">
+                <img src={foto} onError={e => { e.target.src = '/assets/placeholder.png'; }}
+                  className="w-12 h-12 rounded-xl object-cover bg-slate-800 border border-white/8 shrink-0"
                   alt="" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-slate-200 truncate">{it.nameShort || it.name || ''}</p>
-                  <p className="text-[10px] text-slate-500">
-                    SKU: {it.sku}
-                    {(it.customBin || it.bin) ? ` · 📍 ${it.customBin || it.bin}` : ''}
+                  <p className="font-mono text-[10px] text-slate-500">
+                    {it.sku}{(it.customBin || it.bin) ? ` · 📍 ${it.customBin || it.bin}` : ''}
                   </p>
                 </div>
-                <span className="font-mono text-base font-extrabold text-emerald-400">×{it.qty}</span>
+                <div className="w-12 h-12 rounded-xl bg-emerald-950/60 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                  <span className="font-mono text-lg font-black text-emerald-400">×{it.qty}</span>
+                </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
+        </div>
 
-          {/* Próximo pedido */}
+        {/* Próximo pedido */}
+        <div className="px-4 pb-2">
           {proximo ? (
-            <div className="mt-4 p-3 rounded-xl bg-blue-500/8 border border-blue-500/20 flex items-center gap-3">
+            <div className="p-3.5 rounded-2xl bg-blue-500/8 border border-blue-500/20 flex items-center gap-3">
               <ChevronRight size={20} className="text-blue-400 shrink-0" />
               <div>
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Próximo pedido</p>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Próximo na fila</p>
                 <p className="font-bold text-sm text-blue-400">{proximo.id}</p>
                 <p className="text-[11px] text-slate-500">{(proximo.items || []).length} item(s) · {proximo.marketplace || ''}</p>
               </div>
             </div>
           ) : (
-            <div className="mt-4 p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/15 text-center text-sm text-emerald-400">
-              🎉 Último pedido da fila!
+            <div className="p-3.5 rounded-2xl bg-emerald-500/8 border border-emerald-500/15 text-center">
+              <p className="text-base font-black text-emerald-400">🎉 Último pedido da fila!</p>
+              <p className="text-xs text-slate-500 mt-1">Todos os pedidos foram separados</p>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex gap-2 justify-end p-4 border-t border-white/5">
+        <div className="flex gap-2 p-4 border-t border-white/5">
           <button onClick={onFechar}
-            className="px-4 py-2 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">
-            ✕ Cancelar
+            className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">
+            Cancelar
           </button>
           <button onClick={() => onConfirmar(proximo?.id || '')} disabled={confirmando}
-            className="px-5 py-2 rounded-xl text-sm font-extrabold bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white transition-all">
+            className="flex-[2] py-2.5 rounded-xl text-sm font-extrabold bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white transition-all shadow-lg shadow-blue-900/40">
             {confirmando
-              ? <span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin"/> Confirmando…</span>
-              : proximo ? '✓ Confirmar e ir para próximo' : '✓ Confirmar separação'
+              ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/> Confirmando…</span>
+              : proximo ? '✓ Confirmar e ir ao próximo' : '✓ Confirmar separação'
             }
           </button>
         </div>
@@ -507,19 +634,13 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
   );
 }
 
-// ─── Painel vazio ─────────────────────────────────────────────────────────────
-function PainelVazio({ tab }) {
-  const msgs = {
-    pending: { icon: '📦', titulo: 'Selecione um pedido', sub: 'Clique em um pedido para iniciar a separação.' },
-    picked:  { icon: '🏷️', titulo: 'Nenhum pedido separado', sub: 'Quando a separação for confirmada, os pedidos aparecem aqui.' },
-    packed:  { icon: '✅', titulo: 'Nenhum pedido expedido', sub: 'Pedidos expedidos hoje aparecerão aqui.' },
-  };
-  const m = msgs[tab] || msgs.pending;
+// ─── Empty state ──────────────────────────────────────────────────────────────
+function Vazio({ icon, titulo, sub }) {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-10">
-      <div className="text-5xl opacity-10">{m.icon}</div>
-      <p className="text-slate-400 font-semibold">{m.titulo}</p>
-      <p className="text-slate-600 text-sm max-w-xs leading-relaxed">{m.sub}</p>
+    <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-10 opacity-60">
+      <div className="text-5xl">{icon}</div>
+      <p className="text-slate-300 font-bold">{titulo}</p>
+      {sub && <p className="text-slate-500 text-sm max-w-xs leading-relaxed">{sub}</p>}
     </div>
   );
 }
@@ -531,53 +652,53 @@ export default function PedidosDoDia() {
   const [loading,      setLoading]      = useState(false);
   const [selOrder,     setSelOrder]     = useState(null);
   const [filter,       setFilter]       = useState('');
-  const [flash,        setFlash]        = useState(null);   // 'ok' | 'err'
-  const [toast,        setToast]        = useState(null);
+  const [flash,        setFlash]        = useState(null);
+  const [toasts,       setToasts]       = useState([]);
   const [modal,        setModal]        = useState(false);
-  const [confirmando,  setConfirmando]  = useState(null);   // orderId em progresso
-  const [scanStatus,   setScanStatus]   = useState('ready');// 'ready' | 'busy'
+  const [confirmando,  setConfirmando]  = useState(null);
+  const [scanStatus,   setScanStatus]   = useState('ready');
+  const [lastCode,     setLastCode]     = useState('');
   const [clock,        setClock]        = useState('');
-  const scanBuf  = useRef('');
-  const scanTimer = useRef(null);
+
+  const scanBuf    = useRef('');
+  const scanTimer  = useRef(null);
+  const scanInputRef = useRef(null);
 
   // Relógio
   useEffect(() => {
-    const tick = () => setClock(new Date().toLocaleTimeString('pt-BR'));
-    tick();
-    const t = setInterval(tick, 1000);
-    return () => clearInterval(t);
+    const tick = () => setClock(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    tick(); const t = setInterval(tick, 1000); return () => clearInterval(t);
   }, []);
 
   // Toast helper
   const showToast = useCallback((msg, tipo = 'info') => {
-    setToast({ msg, tipo });
-    setTimeout(() => setToast(null), 2600);
+    const id = Date.now() + Math.random();
+    setToasts(p => [...p.slice(-2), { id, msg, tipo }]);
+    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 2800);
   }, []);
 
   // Flash helper
   const doFlash = useCallback((ok) => {
     setFlash(ok ? 'ok' : 'err');
-    setTimeout(() => setFlash(null), 150);
+    setTimeout(() => setFlash(null), 160);
   }, []);
 
-  // ── Refresh ──
+  // Refresh
   const refreshAll = useCallback(async () => {
     setLoading(true);
     try {
       const [p, pi, pk] = await Promise.all([
         api('/orders/list?status=pending&limit=80'),
         api('/orders/list?status=picked&limit=80'),
-        api('/orders/list?status=packed&limit=80'),
+        api('/orders/list?status=packed&limit=200'),
       ]);
       if (!p || !pi || !pk) return;
       const novo = {
         pending: sortOrders(p.items  || []),
         picked:  sortOrders(pi.items || []),
-        packed:  sortOrders(pk.items || []),
+        packed:  sortOrders((pk.items || []).filter(o => isToday(o.updatedAtMs || o.createdAtMs))),
       };
       setOrders(novo);
-
-      // Atualiza o pedido selecionado
       setSelOrder(prev => {
         if (!prev) return null;
         const found = [...novo.pending, ...novo.picked, ...novo.packed].find(x => x.id === prev.id);
@@ -589,18 +710,20 @@ export default function PedidosDoDia() {
 
   useEffect(() => { refreshAll(); }, [refreshAll]);
 
-  // ── Selecionar pedido ──
+  // Selecionar pedido
   async function selectOrder(o) {
     setSelOrder(o);
     try { await api(`/orders/${encodeURIComponent(o.id)}/lock`, { method: 'POST', body: '{}' }); } catch {}
+    setTimeout(() => scanInputRef.current?.focus(), 100);
   }
 
-  // ── Scan item ──
+  // Scan item
   async function onScan(code) {
     if (tab !== 'pending') return;
     if (!selOrder) { showToast('Selecione um pedido primeiro', 'info'); beep(false); return; }
 
     setScanStatus('busy');
+    setLastCode(code);
     try {
       const r = await api(`/orders/${encodeURIComponent(selOrder.id)}/check`, {
         method: 'POST', body: JSON.stringify({ code }),
@@ -610,7 +733,6 @@ export default function PedidosDoDia() {
         beep(true); doFlash(true);
         showToast(`✓ ${r.sku}  (${r.checkedQty}/${r.qty})`, 'ok');
 
-        // Atualiza localmente
         setSelOrder(prev => {
           if (!prev || !Array.isArray(prev.items)) return prev;
           const items = prev.items.map(it =>
@@ -618,21 +740,18 @@ export default function PedidosDoDia() {
           );
           const total   = items.reduce((a, i) => a + Number(i.qty || 0), 0);
           const checked = items.reduce((a, i) => a + Number(i.checkedQty || 0), 0);
-          const updated = { ...prev, items };
-          if (total > 0 && checked >= total) {
-            setTimeout(() => setModal(true), 600);
-          }
-          return updated;
+          if (total > 0 && checked >= total) setTimeout(() => setModal(true), 600);
+          return { ...prev, items };
         });
 
         refreshAll().catch(() => {});
       } else if (r) {
         beep(false); doFlash(false);
         const msgs = {
-          item_not_found:           `⚠ Código não encontrado: ${code}`,
+          item_not_found:           `Código não encontrado: ${code}`,
           already_fully_checked:    'Item já conferido por completo',
           locked_by_other_terminal: 'Pedido em uso em outro terminal',
-          not_all_items_checked:    'Confira todos os itens antes de confirmar',
+          not_all_items_checked:    'Confira todos os itens antes',
         };
         showToast(msgs[r.error] || r.error || 'Erro desconhecido', 'err');
       }
@@ -641,15 +760,17 @@ export default function PedidosDoDia() {
       showToast(`Erro: ${e.message}`, 'err');
     } finally {
       setScanStatus('ready');
+      scanInputRef.current?.focus();
     }
   }
 
-  // ── Scanner global (teclado / leitor de código) ──
+  // Scanner global (leitor físico USB/BT)
   useEffect(() => {
     function handler(e) {
       const active = document.activeElement;
       if (active && active.id === 'filterInput') return;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && active.id !== 'scannerInput') return;
+      if (active && active.id === 'scannerInput') return; // já tratado pelo onKeyDown
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
       if (tab !== 'pending') return;
 
       if (e.key === 'Enter') {
@@ -669,10 +790,10 @@ export default function PedidosDoDia() {
     return () => window.removeEventListener('keydown', handler);
   }, [tab, selOrder]); // eslint-disable-line
 
-  // ── Marcar como separado (abre modal) ──
+  // Marcar separado
   function handleMarkPicked() { setModal(true); }
 
-  // ── Confirmar separação ──
+  // Confirmar separação
   async function confirmarSeparado(proximoId) {
     setConfirmando(selOrder?.id);
     try {
@@ -682,21 +803,7 @@ export default function PedidosDoDia() {
       if (r?.ok) {
         beep(true);
         setModal(false);
-
-        // Impressão etiqueta ML
-        const o = selOrder;
-        if (o?.marketplace === 'MERCADO_LIVRE') {
-          const mlId = o.mlOrderId || (() => {
-            const m = (o.clienteNome || '').match(/\[#(\d+)\]/);
-            return m ? m[1] : null;
-          })();
-          if (mlId && window.imprimirEtiquetaML) {
-            window.imprimirEtiquetaML(mlId, o.id).catch(err => showToast(`Etiqueta: ${err.message}`, 'err'));
-          }
-        }
-
         await refreshAll();
-
         if (proximoId) {
           const proximo = orders.pending.find(x => x.id === proximoId);
           if (proximo) { selectOrder(proximo); showToast(`✓ Separado! Próximo: ${proximoId}`, 'ok'); }
@@ -705,14 +812,12 @@ export default function PedidosDoDia() {
           setSelOrder(null);
           showToast('🎉 Todos os pedidos separados!', 'ok');
         }
-      } else if (r) {
-        showToast(r.error || 'Falha', 'err');
-      }
+      } else if (r) showToast(r.error || 'Falha', 'err');
     } catch (e) { showToast(e.message, 'err'); }
     finally { setConfirmando(null); }
   }
 
-  // ── Confirmar expedição ──
+  // Confirmar expedição
   async function confirmarExpedicao(orderId) {
     setConfirmando(orderId);
     try {
@@ -725,17 +830,17 @@ export default function PedidosDoDia() {
     finally { setConfirmando(null); }
   }
 
-  // ── Troca de aba ──
   async function switchTab(t) {
     setTab(t);
     if (t !== 'pending') setSelOrder(null);
+    else setTimeout(() => scanInputRef.current?.focus(), 150);
     if (t === 'picked' || t === 'packed') await refreshAll();
   }
 
-  // ── Contadores ──
+  // Contadores
   const counts = { pending: orders.pending.length, picked: orders.picked.length, packed: orders.packed.length };
 
-  // ── Lista filtrada ──
+  // Lista filtrada
   const listaFiltrada = useMemo(() => {
     const q = filter.toLowerCase().trim();
     const lista = orders[tab] || [];
@@ -746,7 +851,7 @@ export default function PedidosDoDia() {
     );
   }, [orders, tab, filter]);
 
-  // ── Progress do pedido selecionado ──
+  // Progress do pedido selecionado
   const progress = useMemo(() => {
     const its     = Array.isArray(selOrder?.items) ? selOrder.items : [];
     const total   = its.reduce((a, i) => a + Number(i.qty || 0), 0);
@@ -754,244 +859,289 @@ export default function PedidosDoDia() {
     return { total, checked, pct: total > 0 ? Math.round((checked / total) * 100) : 0, allOk: total > 0 && checked >= total };
   }, [selOrder]);
 
-  // ── Próximo pedido da fila ──
   const proximoPedido = useMemo(() => {
     if (!selOrder) return null;
     return orders.pending.find(x => x.id !== selOrder.id) || null;
   }, [orders.pending, selOrder]);
 
   const TABS = [
-    { id: 'pending', label: 'Separar',  count: counts.pending },
-    { id: 'picked',  label: 'Expedir',  count: counts.picked  },
-    { id: 'packed',  label: 'Expedido', count: counts.packed  },
+    { id: 'pending', label: 'Separar',  count: counts.pending,  dot: 'bg-amber-400'  },
+    { id: 'picked',  label: 'Expedir',  count: counts.picked,   dot: 'bg-blue-400'   },
+    { id: 'packed',  label: 'Expedido', count: counts.packed,   dot: 'bg-emerald-400', sub: 'hoje' },
   ];
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col overflow-hidden text-slate-100">
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-slate-950 text-slate-100">
 
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 flex-shrink-0 bg-slate-900">
-        <div>
-          <h1 className="font-bold text-lg flex items-center gap-2"><Package size={18} className="text-blue-400"/> Pedidos do Dia</h1>
-          <p className="text-xs text-slate-500">
-            {tab === 'pending' ? 'Separação com scanner · bipe SKU ou EAN + Enter' :
-             tab === 'picked'  ? 'Cole a etiqueta de envio e confirme a expedição' :
-             'Histórico de pedidos expedidos hoje'}
-          </p>
+      {/* ── Topbar ── */}
+      <div className="flex items-center justify-between px-5 py-3 border-b border-white/5 bg-slate-900/80 backdrop-blur-sm flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center">
+            <BoxesIcon size={16} className="text-blue-400" />
+          </div>
+          <div>
+            <h1 className="font-black text-base text-slate-100 leading-none">Expedição do Dia</h1>
+            <p className="text-[10px] text-slate-600 mt-0.5 font-mono">{clock}</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs text-slate-600 bg-slate-800 border border-white/5 px-2 py-1 rounded">{clock}</span>
           <button onClick={refreshAll} disabled={loading}
-            className="p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors">
+            className="p-2 rounded-xl bg-slate-800 border border-white/8 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
           <a href="/manual"
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-colors">
-            <Plus size={14}/> Pedido
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold transition-all hover:scale-105 shadow-lg shadow-blue-900/30">
+            <Plus size={13}/> Novo Pedido
           </a>
         </div>
       </div>
 
-      {/* ── Layout principal ── */}
-      <div className="flex-1 min-h-0 grid overflow-hidden" style={{ gridTemplateColumns: '290px 1fr' }}>
+      {/* ── Layout: lista | detalhe ── */}
+      <div className="flex-1 min-h-0 grid overflow-hidden" style={{ gridTemplateColumns: '300px 1fr' }}>
 
-        {/* ── Coluna esquerda: lista ── */}
-        <div className="border-r border-white/5 flex flex-col overflow-hidden">
+        {/* ── Coluna esquerda ── */}
+        <div className="border-r border-white/5 flex flex-col overflow-hidden bg-slate-900/40">
 
           {/* Tabs */}
-          <div className="grid grid-cols-3 gap-1 p-2 border-b border-white/5 flex-shrink-0">
+          <div className="grid grid-cols-3 gap-1.5 p-3 border-b border-white/5 flex-shrink-0">
             {TABS.map(t => (
               <button key={t.id} onClick={() => switchTab(t.id)}
-                className={`flex flex-col items-center gap-0.5 py-2 px-1 rounded-lg border transition-all text-xs font-semibold
+                className={`flex flex-col items-center gap-0.5 py-2.5 px-1 rounded-xl border transition-all
                   ${tab === t.id
-                    ? 'bg-blue-500/12 border-blue-500/25 text-blue-400'
-                    : 'bg-slate-800/60 border-white/5 text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}>
-                <span className="font-mono text-lg font-black leading-none">{t.count}</span>
-                <span>{t.label}</span>
+                    ? 'bg-slate-800 border-white/15 shadow-sm'
+                    : 'bg-transparent border-transparent text-slate-600 hover:text-slate-400'}`}>
+                <div className="flex items-center gap-1.5">
+                  {t.count > 0 && <div className={`w-1.5 h-1.5 rounded-full ${t.dot}`} />}
+                  <span className={`font-black text-2xl leading-none tabular-nums
+                    ${tab === t.id
+                      ? t.id === 'pending' ? 'text-amber-400' : t.id === 'picked' ? 'text-blue-400' : 'text-emerald-400'
+                      : 'text-slate-500'}`}>
+                    {t.count}
+                  </span>
+                </div>
+                <span className={`text-[11px] font-bold ${tab === t.id ? 'text-slate-300' : 'text-slate-600'}`}>{t.label}</span>
+                {t.sub && <span className="text-[9px] text-slate-700 font-mono">{t.sub}</span>}
               </button>
             ))}
           </div>
 
           {/* Search */}
-          <div className="px-2 py-2 border-b border-white/5 flex-shrink-0">
+          <div className="px-3 py-2 border-b border-white/5 flex-shrink-0">
             <input
               id="filterInput"
               value={filter}
               onChange={e => setFilter(e.target.value)}
-              placeholder="Filtrar pedidos…"
-              className="w-full bg-slate-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600"
+              placeholder="🔍  Filtrar por ID ou cliente…"
+              className="w-full bg-slate-800/60 border border-white/5 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none focus:border-white/20 transition-colors placeholder:text-slate-600"
             />
           </div>
 
-          {/* Lista */}
-          <div className="flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-slate-700">
-            {listaFiltrada.length === 0 ? (
-              <div className="text-center text-slate-600 text-sm py-10">
+          {/* Lista de pedidos */}
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-0 scrollbar-thin scrollbar-thumb-slate-700/50">
+            {loading && orders[tab].length === 0 ? (
+              <div className="space-y-2 pt-1">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="h-24 rounded-xl bg-slate-800/60 animate-pulse" />
+                ))}
+              </div>
+            ) : listaFiltrada.length === 0 ? (
+              <div className="text-center text-slate-600 text-xs py-12">
                 {orders[tab]?.length === 0
-                  ? { pending: 'Nenhum pedido para separar', picked: 'Nenhum pedido aguardando expedição', packed: 'Nenhum pedido expedido hoje' }[tab]
-                  : 'Nenhum resultado para o filtro'}
+                  ? tab === 'pending' ? '📭 Sem pedidos para separar'
+                    : tab === 'picked' ? '📭 Sem pedidos aguardando expedição'
+                    : '📭 Nenhum pedido expedido hoje'
+                  : '🔍 Sem resultados para o filtro'}
               </div>
             ) : listaFiltrada.map(o => (
               <OrderCard key={o.id} o={o} tab={tab}
                 active={selOrder?.id === o.id}
                 onClick={() => tab === 'pending' ? selectOrder(o) : (() => {
-                  const el = document.getElementById(`expcard-${o.id}`);
-                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  document.getElementById(`expcard-${o.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 })()} />
             ))}
           </div>
         </div>
 
-        {/* ── Coluna direita: detalhe ── */}
+        {/* ── Coluna direita ── */}
         <div className="flex flex-col overflow-hidden">
 
-          {/* ── ABA SEPARAR ── */}
-          {tab === 'pending' && (
-            selOrder ? (
-              <div className="flex flex-col min-h-0 overflow-hidden">
+          {/* ABA SEPARAR */}
+          {tab === 'pending' && (selOrder ? (
+            <div className="flex flex-col min-h-0 overflow-hidden">
 
-                {/* Header do pedido */}
-                <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-white/5 bg-slate-900 flex-shrink-0">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-base text-slate-200">{selOrder.id}</span>
-                      <StatusTag status={selOrder.status} />
-                      <MktBadge mkt={selOrder.marketplace} />
-                      {(selOrder.logistica === 'flex' || selOrder.isPriority) && <FlexBadge />}
-                    </div>
-                    {/* Etiqueta inline */}
-                    {(() => {
-                      const info = getEtiquetaInfo(selOrder);
-                      if (!info?.valor) return null;
-                      return (
-                        <span className={`inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-full border
-                          ${info.tipo === 'ml' ? 'bg-yellow-400/15 text-yellow-400 border-yellow-400/30' : 'bg-orange-500/12 text-orange-400 border-orange-500/25 font-mono'}`}>
-                          {info.tipo === 'ml' ? '🏷️' : '📦'} {info.valor}
-                        </span>
-                      );
-                    })()}
-                    {selOrder.clienteNome && (
-                      <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1"><User size={10}/>{selOrder.clienteNome}</p>
-                    )}
+              {/* Header do pedido */}
+              <div className="flex items-center justify-between gap-4 px-5 py-3 border-b border-white/5 bg-slate-900/60 flex-shrink-0">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono font-black text-sm text-slate-200">{selOrder.id}</span>
+                    <MktBadge mkt={selOrder.marketplace} />
+                    {(selOrder.logistica === 'flex' || selOrder.isPriority) && <FlexBadge />}
                   </div>
-                  <div className="flex gap-2 shrink-0">
-                    <button onClick={refreshAll}
-                      className="p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-500 hover:text-slate-300 transition-colors">
-                      <RefreshCw size={13}/>
-                    </button>
-                    <button onClick={handleMarkPicked} disabled={!progress.allOk || selOrder.status !== 'pending'}
-                      className="px-4 py-1.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white transition-all">
-                      ✓ Separado
-                    </button>
-                  </div>
+                  {(() => {
+                    const info = getEtiquetaInfo(selOrder);
+                    if (!info?.valor) return null;
+                    return (
+                      <span className={`inline-flex items-center gap-1 mt-1 text-xs font-bold px-2 py-0.5 rounded-full border
+                        ${info.tipo === 'ml' ? 'bg-amber-400/12 text-amber-400 border-amber-400/25' : 'bg-orange-500/10 text-orange-400 border-orange-500/20 font-mono'}`}>
+                        {info.tipo === 'ml' ? '🏷️' : '📦'} {info.valor}
+                      </span>
+                    );
+                  })()}
+                  {selOrder.clienteNome && (
+                    <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+                      <User size={10}/>{selOrder.clienteNome}
+                    </p>
+                  )}
                 </div>
-
-                {/* Barra de scanner */}
-                <div className="px-4 py-2 border-b border-white/5 flex-shrink-0">
-                  <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-slate-800 border border-white/5">
-                    <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse shrink-0"/>
-                    <span className="text-xs text-slate-400"><strong className="text-slate-200">Scanner ativo</strong> — bipe SKU ou EAN + Enter</span>
-                    <span className={`ml-auto font-mono text-xs font-bold ${scanStatus === 'busy' ? 'text-yellow-400' : 'text-emerald-400'}`}>
-                      {scanStatus === 'busy' ? '● LENDO…' : '● PRONTO'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Itens */}
-                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 scrollbar-thin scrollbar-thumb-slate-700">
-                  {(selOrder.items || []).length === 0 ? (
-                    <p className="text-slate-600 text-sm text-center py-10">Sem itens neste pedido.</p>
-                  ) : (selOrder.items || []).map((it, i) => (
-                    <ItemRow key={i} it={it} onCheck={onScan} />
-                  ))}
-                </div>
-
-                {/* Progresso footer */}
-                <div className="flex items-center gap-3 px-4 py-2.5 border-t border-white/5 bg-slate-900 flex-shrink-0">
-                  <span className="text-xs text-slate-500">Progresso</span>
-                  <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${progress.pct >= 100 ? 'bg-emerald-400' : 'bg-blue-400'}`}
-                      style={{ width: `${progress.pct}%` }}
-                    />
-                  </div>
-                  <span className="font-mono text-sm font-bold text-slate-300">{progress.checked} / {progress.total}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <ProgressRing pct={progress.pct} size={46} stroke={4} />
+                  <button onClick={handleMarkPicked}
+                    disabled={!progress.allOk || selOrder.status !== 'pending'}
+                    className="px-4 py-2 rounded-xl text-sm font-extrabold bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-900/30">
+                    ✓ Separado
+                  </button>
                 </div>
               </div>
-            ) : (
-              <PainelVazio tab="pending" />
-            )
-          )}
 
-          {/* ── ABA EXPEDIR ── */}
-          {tab === 'picked' && (
-            <div className="flex flex-col h-full overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-slate-900 flex-shrink-0">
-                <div>
-                  <p className="font-bold">🏷️ Pronto para Expedir</p>
-                  <p className="text-xs text-slate-500">Cole a etiqueta e confirme cada pedido</p>
+              {/* Scanner Zone */}
+              <div className="flex-shrink-0">
+                <ScannerZone
+                  status={scanStatus}
+                  lastCode={lastCode}
+                  inputRef={scanInputRef}
+                  onManualScan={onScan}
+                />
+              </div>
+
+              {/* Lista de itens */}
+              <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2.5 scrollbar-thin scrollbar-thumb-slate-700/50">
+                {(selOrder.items || []).length === 0 ? (
+                  <Vazio icon="📦" titulo="Sem itens" sub="Este pedido não possui itens cadastrados." />
+                ) : (selOrder.items || []).map((it, i) => (
+                  <ItemRow key={i} it={it} onCheck={onScan} />
+                ))}
+              </div>
+
+              {/* Footer de progresso */}
+              <div className="flex items-center gap-3 px-5 py-3 border-t border-white/5 bg-slate-900/60 flex-shrink-0">
+                <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Progresso</span>
+                <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${progress.pct >= 100 ? 'bg-emerald-400' : 'bg-blue-400'}`}
+                    style={{ width: `${progress.pct}%` }}
+                  />
                 </div>
-                <button onClick={refreshAll} className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 transition-colors">
-                  <RefreshCw size={12}/> Atualizar
+                <span className={`font-mono text-sm font-black ${progress.allOk ? 'text-emerald-400' : 'text-slate-300'}`}>
+                  {progress.checked} / {progress.total}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col flex-1 items-center justify-center gap-6 p-10">
+              <div className="w-20 h-20 rounded-3xl bg-slate-800/60 border border-white/5 flex items-center justify-center">
+                <Scan size={36} className="text-slate-600" />
+              </div>
+              <div className="text-center">
+                <p className="font-black text-lg text-slate-300">Selecione um pedido</p>
+                <p className="text-slate-600 text-sm mt-2 max-w-xs leading-relaxed">
+                  Escolha um pedido na lista à esquerda para iniciar a separação com o scanner
+                </p>
+              </div>
+              {counts.pending === 0 && (
+                <div className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-emerald-500/8 border border-emerald-500/15">
+                  <CircleCheck size={18} className="text-emerald-400" />
+                  <span className="text-sm font-bold text-emerald-400">Todos os pedidos foram separados!</span>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* ABA EXPEDIR */}
+          {tab === 'picked' && (
+            <div className="flex flex-col overflow-hidden h-full">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/5 bg-slate-900/60 flex-shrink-0">
+                <div>
+                  <p className="font-black text-base flex items-center gap-2">
+                    <SendHorizonal size={16} className="text-blue-400"/>Pronto para Expedir
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">{counts.picked} pedido(s) separados aguardando etiqueta</p>
+                </div>
+                <button onClick={refreshAll} disabled={loading}
+                  className="p-2 rounded-xl bg-slate-800 border border-white/8 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors">
+                  <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-slate-700">
-                {orders.picked.length === 0 ? <PainelVazio tab="picked" /> : (
-                  orders.picked.map(o => (
+              <div className="flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-slate-700/50">
+                {orders.picked.length === 0
+                  ? <Vazio icon="🏷️" titulo="Nenhum pedido separado" sub="Quando a separação for confirmada, os pedidos aparecem aqui para expedição." />
+                  : orders.picked.map(o => (
                     <div key={o.id} id={`expcard-${o.id}`}>
                       <ExpedicaoCard o={o} onConfirmar={confirmarExpedicao} confirmando={confirmando} />
                     </div>
                   ))
-                )}
+                }
               </div>
             </div>
           )}
 
-          {/* ── ABA EXPEDIDO ── */}
+          {/* ABA EXPEDIDO */}
           {tab === 'packed' && (
-            <div className="flex flex-col h-full overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-slate-900 flex-shrink-0">
+            <div className="flex flex-col overflow-hidden h-full">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/5 bg-slate-900/60 flex-shrink-0">
                 <div>
-                  <p className="font-bold">✅ Expedidos</p>
-                  <p className="text-xs text-slate-500">Pedidos finalizados hoje</p>
+                  <p className="font-black text-base flex items-center gap-2">
+                    <CircleCheck size={16} className="text-emerald-400"/>Expedidos Hoje
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">{counts.packed} pedido(s) finalizados · contador zera à meia-noite</p>
                 </div>
-                <button onClick={refreshAll} className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 transition-colors">
-                  <RefreshCw size={12}/> Atualizar
+                <button onClick={refreshAll} disabled={loading}
+                  className="p-2 rounded-xl bg-slate-800 border border-white/8 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors">
+                  <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-slate-700">
-                {orders.packed.length === 0 ? <PainelVazio tab="packed" /> : (
-                  orders.packed.map(o => (
-                    <div key={o.id} className="rounded-xl border border-white/5 bg-slate-800/40 overflow-hidden mb-3 opacity-70">
-                      <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-slate-800/60">
-                        <div>
-                          <p className="font-mono font-bold text-sm text-slate-300">{o.id}</p>
-                          {o.clienteNome && <p className="text-xs text-slate-500 mt-0.5">👤 {o.clienteNome}</p>}
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <MktBadge mkt={o.marketplace} />
-                          <StatusTag status="packed" />
-                        </div>
-                      </div>
-                      <div className="px-4 py-2 space-y-1.5">
-                        {(Array.isArray(o.items) ? o.items : []).map((it, i) => (
-                          <div key={i} className="flex items-center gap-3 py-1.5 border-b border-white/5 last:border-0">
-                            <img src={it.image || '/assets/placeholder.png'} onError={e => { e.target.src = '/assets/placeholder.png'; }}
-                              className="w-9 h-9 rounded-lg object-cover bg-slate-700 shrink-0" alt="" />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-bold text-slate-300 truncate">{it.nameShort || it.name || ''}</p>
-                              <p className="text-[10px] text-slate-500">SKU: {it.sku}</p>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2.5 scrollbar-thin scrollbar-thumb-slate-700/50">
+                {orders.packed.length === 0
+                  ? <Vazio icon="✅" titulo="Nenhum pedido expedido hoje" sub="Os pedidos expedidos hoje aparecerão aqui. Dados históricos ficam salvos para pesquisa." />
+                  : orders.packed.map(o => {
+                    const its = Array.isArray(o.items) ? o.items : [];
+                    return (
+                      <div key={o.id} className="rounded-2xl border border-emerald-500/15 bg-emerald-950/10 overflow-hidden">
+                        {/* Header */}
+                        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-emerald-500/10">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <CircleCheck size={14} className="text-emerald-500 shrink-0" />
+                              <span className="font-mono text-xs font-bold text-slate-300 truncate">{o.id}</span>
                             </div>
-                            <span className="font-mono text-sm font-bold text-emerald-500">×{it.qty}</span>
+                            {o.clienteNome && <p className="text-[10px] text-slate-500 mt-1 truncate"><User size={9} className="inline mr-1"/>{o.clienteNome}</p>}
                           </div>
-                        ))}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <MktBadge mkt={o.marketplace} />
+                            <span className="text-[10px] font-mono text-emerald-600">{fmtTime(o.updatedAtMs)}</span>
+                          </div>
+                        </div>
+                        {/* Itens */}
+                        <div className="divide-y divide-white/5">
+                          {its.map((it, i) => {
+                            const foto = it.stockPhotos?.[0] || it.image || '/assets/placeholder.png';
+                            return (
+                              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                                <img src={foto} onError={e => { e.target.src = '/assets/placeholder.png'; }}
+                                  className="w-10 h-10 rounded-xl object-cover bg-slate-800 border border-white/8 shrink-0"
+                                  alt="" />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-bold text-slate-300 truncate">{it.nameShort || it.name || '—'}</p>
+                                  <p className="font-mono text-[10px] text-slate-600">SKU {it.sku}</p>
+                                </div>
+                                <span className="font-mono text-base font-black text-emerald-500 shrink-0">×{it.qty}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div className="px-4 py-2 border-t border-white/5">
-                        <span className="text-[11px] text-slate-600">✅ Expedido às {fmtTime(o.updatedAtMs || o.createdAtMs)}</span>
-                      </div>
-                    </div>
-                  ))
-                )}
+                    );
+                  })
+                }
               </div>
             </div>
           )}
@@ -999,7 +1149,7 @@ export default function PedidosDoDia() {
       </div>
 
       {/* ── Overlays ── */}
-      <Toast msg={toast?.msg} tipo={toast?.tipo} />
+      <Toast items={toasts} />
       <ScanFlash tipo={flash} />
       {modal && (
         <ModalSeparado
@@ -1010,10 +1160,6 @@ export default function PedidosDoDia() {
           confirmando={!!confirmando}
         />
       )}
-
-      {/* Input oculto para scanner em alguns dispositivos */}
-      <input id="scannerInput" autoComplete="off"
-        style={{ opacity: 0, position: 'absolute', pointerEvents: 'none', width: 1, height: 1 }} />
     </div>
   );
 }
