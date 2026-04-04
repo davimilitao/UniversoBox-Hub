@@ -187,6 +187,30 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
 });
 
 
+// ── DANFE PDF (proxy para o frontend imprimir via QZ Tray) ───────
+// GET /bling/danfe/:id  → retorna { ok, pdf: base64, numero }
+app.get('/bling/danfe/:id', async (req, res, next) => {
+  try {
+    const token = await blingEnsureToken();
+    // Bling v3: GET /nfe/{id}/danfe  →  retorna PDF binário
+    const resp = await fetch(`${BLING_API_BASE}/nfe/${req.params.id}/danfe`, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/pdf' },
+    });
+    if (resp.status === 401) throw new Error('bling_not_authorized');
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error(`Bling DANFE ${resp.status}: ${txt.slice(0, 120)}`);
+    }
+    const buffer = await resp.arrayBuffer();
+    const b64 = Buffer.from(buffer).toString('base64');
+    res.json({ ok: true, pdf: b64, nfId: req.params.id });
+  } catch(err) {
+    if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    console.error('[GET /bling/danfe/:id]', err.message);
+    next(err);
+  }
+});
+
 // ── DEBUG: ver resposta bruta da API do Bling ────────────────────
 // GET /bling/debug/nfe/:id  — remover em produção após diagnóstico
 app.get('/bling/debug/nfe/:id', async (req, res, next) => {
