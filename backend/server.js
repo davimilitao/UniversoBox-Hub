@@ -2743,10 +2743,10 @@ app.post('/bling/clonar', async (req, res, next) => {
 
 // Perfis padrão caso o Firestore não tenha
 const PERFIS_DEFAULT = {
-  admin:      { nome: 'Super Admin', avatar: 'DA', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','importar','index','config'] },
-  operacao:   { nome: 'Operação',    avatar: 'SU', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','embalagens','index'] },
+  admin:      { nome: 'Super Admin', avatar: 'DA', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','importar','index','config'] },
+  operacao:   { nome: 'Operação',    avatar: 'SU', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','embalagens','index'] },
   financeiro: { nome: 'Financeiro',  avatar: 'JE', tema: 'dark',  modulos: ['financas','compras','index'] },
-  catalogo:   { nome: 'Catálogo',    avatar: 'DN', tema: 'dark',  modulos: ['admin','catalogo','embalagens','cadastrar','enriquecer-xml','compras','index'] },
+  catalogo:   { nome: 'Catálogo',    avatar: 'DN', tema: 'dark',  modulos: ['admin','catalogo','embalagens','cadastrar','enriquecer-xml','compras','importar','index'] },
   vendas:     { nome: 'Vendas',      avatar: 'VE', tema: 'light', modulos: ['catalogo','index'] },
 };
 
@@ -2805,7 +2805,7 @@ app.put('/api/perfis/:id', async (req, res, next) => {
     }
 
     // Validar módulos
-    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','importar','index','config'];
+    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','importar','index','config'];
     if (clean.modulos) {
       clean.modulos = clean.modulos.filter(m => modulosValidos.includes(m));
     }
@@ -2826,7 +2826,7 @@ app.post('/api/perfis', async (req, res, next) => {
     if (!id || !nome) return res.status(400).json({ error: 'id e nome obrigatórios' });
 
     const temasValidos   = ['dark','light','hc','ml'];
-    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','importar','index','config'];
+    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','importar','index','config'];
 
     const data = {
       nome,
@@ -2853,6 +2853,68 @@ app.delete('/api/perfis/:id', async (req, res, next) => {
     await db.collection('perfis').doc(id).delete();
     res.json({ ok: true });
   } catch(err) {
+    next(err);
+  }
+});
+
+// ─── API USUÁRIOS — gestão de Firebase Auth users ────────────────────────────
+// Requer role admin para listar e editar roles
+
+// GET /api/users — lista usuários do Firebase Auth (admin only)
+app.get('/api/users', requireFirebaseAuth, requireFirebaseRole(['admin']), async (req, res, next) => {
+  try {
+    const admin = require('firebase-admin');
+    const listResult = await admin.auth().listUsers(500);
+    const users = listResult.users.map(u => ({
+      uid:         u.uid,
+      email:       u.email || null,
+      displayName: u.displayName || null,
+      photoURL:    u.photoURL || null,
+      disabled:    u.disabled,
+      lastSignIn:  u.metadata.lastSignInTime || null,
+      createdAt:   u.metadata.creationTime  || null,
+      role:        u.customClaims?.role      || null,
+      tenantId:    u.customClaims?.tenantId  || null,
+    }));
+    // Ordena por último login mais recente
+    users.sort((a, b) => (b.lastSignIn || '') > (a.lastSignIn || '') ? 1 : -1);
+    res.json({ users, total: users.length });
+  } catch(err) {
+    console.error('[GET /api/users]', err);
+    next(err);
+  }
+});
+
+// PATCH /api/users/:uid/role — atribui role a um usuário (admin only)
+app.patch('/api/users/:uid/role', requireFirebaseAuth, requireFirebaseRole(['admin']), async (req, res, next) => {
+  try {
+    const admin    = require('firebase-admin');
+    const { uid }  = req.params;
+    const { role } = req.body;
+
+    // Busca claims atuais para não sobrescrever tenantId
+    const user          = await admin.auth().getUser(uid);
+    const currentClaims = user.customClaims || {};
+
+    const newClaims = role
+      ? { ...currentClaims, role: String(role) }
+      : { ...currentClaims, role: null };
+
+    await admin.auth().setCustomUserClaims(uid, newClaims);
+
+    // Log de auditoria
+    await db.collection('audit_logs').add({
+      action:    'set_user_role',
+      targetUid: uid,
+      role:      role || null,
+      byUid:     req.auth.uid,
+      byEmail:   req.auth.email,
+      atMs:      Date.now(),
+    });
+
+    res.json({ ok: true, uid, role: role || null });
+  } catch(err) {
+    console.error('[PATCH /api/users/:uid/role]', err);
     next(err);
   }
 });
