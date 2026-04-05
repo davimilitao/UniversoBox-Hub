@@ -1,47 +1,47 @@
 /**
  * @file AdminProdutos.jsx
- * @description Migração React de admin.html — gestão de localização, fotos e notas.
- *              Layout fiel ao legado: sidebar esquerda (busca+lista) + painel direito.
- * @version 2.0.0
- * @date 2026-04-04
+ * @description Admin de Produtos — migração completa de admin.html
+ *   • Aba Produtos: busca SKU/EAN/nome, filtros, navegação prev/next
+ *   • Aba Marcas: normalização de marca (sem-marca, nova marca, delete)
+ *   • Painel direito: Bling (read-only), Localização, Fotos, Notas, Embalagens
+ *   • Modal de Marca
+ *   • Auto-seleciona via ?sku= na URL
+ * @version 3.0.0
+ * @date 2026-04-05
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback, useReducer } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
 import {
   Search, X, Image, MapPin, StickyNote, Box, Package,
-  Weight, Barcode, Tag, DollarSign, Loader2, Save,
-  CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight,
-  Camera, Plus, Trash2, Eye, Info, Hash, Boxes, Ruler,
-  ShoppingBag, RefreshCw, ExternalLink, Star,
+  Weight, Barcode, DollarSign, Loader2, Save, Camera,
+  CheckCircle2, ChevronLeft, ChevronRight, Plus, Trash2,
+  Eye, Hash, Boxes, Ruler, ShoppingBag, Tag, RefreshCw,
+  AlertTriangle, Layers, ArrowUpDown, ExternalLink,
 } from 'lucide-react';
 import { getAuthToken } from '../../utils/getAuthToken';
 
-// ─── API helpers ──────────────────────────────────────────────────────────────
+// ─── API ─────────────────────────────────────────────────────────────────────
 
 async function apiFetch(path, opts = {}) {
   const token = await getAuthToken();
-  const isFormData = opts.body instanceof FormData;
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-    ...(opts.headers || {}),
-  };
-  const res = await fetch(path, { ...opts, headers });
-  return res;
-}
-
-async function apiJson(path, opts = {}) {
-  const res = await apiFetch(path, opts);
+  const isForm = opts.body instanceof FormData;
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(isForm ? {} : { 'Content-Type': 'application/json' }),
+      ...(opts.headers || {}),
+    },
+  });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || `HTTP ${res.status}`);
   }
   return res.json();
 }
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
-
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtBrl = v => v ? BRL.format(v) : null;
 const fmtKg  = v => v ? `${v} kg` : null;
@@ -49,64 +49,94 @@ const fmtCm  = v => v ? `${v} cm` : null;
 
 function calcScore(p) {
   let s = 0;
-  const hasImg = p.displayImage || p.images?.length || p.stockPhotos?.length;
-  if (hasImg)                               s += 25;
-  if (p.ean)                                s += 20;
-  if (p.width && p.height && p.depth)       s += 20;
-  if (p.preco)                              s += 20;
-  if (p.weight)                             s += 15;
+  if (p.displayImage || p.images?.length || p.stockPhotos?.length) s += 25;
+  if (p.ean)                              s += 20;
+  if (p.width && p.height && p.depth)    s += 20;
+  if (p.preco)                            s += 20;
+  if (p.weight)                           s += 15;
   return s;
 }
 
-// ─── Score Dot ────────────────────────────────────────────────────────────────
-function ScoreDot({ score }) {
-  const c = score >= 80 ? 'bg-emerald-400' : score >= 50 ? 'bg-amber-400' : 'bg-red-400';
-  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${c}`} title={`Score ${score}%`} />;
+// ─── Embalagens — lógica de tolerância idêntica ao legado ─────────────────────
+function embalagemFit(emb, p) {
+  if (!p.width || !p.height) return false;
+  const pw = parseFloat(p.width) || 0;
+  const ph = parseFloat(p.height) || 0;
+  const pd = parseFloat(p.depth) || 0;
+  const mg = 1.25;
+  if (emb.type === 'saco') {
+    const mid = [pw, ph, pd].sort((a, b) => a - b)[1];
+    const max = Math.max(pw, ph, pd);
+    return mid <= (emb.width || 0) * mg && max <= (emb.height || 0) * mg;
+  }
+  return pw <= (emb.width || 0) * mg && ph <= (emb.height || 0) * mg && pd <= (emb.depth || 0) * mg;
 }
 
-// ─── Section wrapper ──────────────────────────────────────────────────────────
-function Section({ emoji, title, badge, children, muted }) {
+// ─────────────────────────────────────────────────────────────────────────────
+// SUB-COMPONENTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Score Dots ────────────────────────────────────────────────────────────────
+function StatusDots({ hasStockPhoto, hasBinPhoto }) {
   return (
-    <div className="border border-white/[0.07] rounded-xl overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-900/70 border-b border-white/[0.05]">
-        <span className="text-sm">{emoji}</span>
-        <span className="text-[11px] font-bold text-slate-300 tracking-wide">{title}</span>
-        {badge && <span className="ml-1 text-[10px] text-slate-600 border border-white/[0.06] rounded px-1.5 py-px">{badge}</span>}
-        {muted && <span className="ml-auto text-[10px] text-slate-700 italic">{muted}</span>}
+    <div className="flex gap-1 mt-0.5">
+      <span className={`w-1.5 h-1.5 rounded-full ${hasStockPhoto ? 'bg-emerald-400' : 'bg-slate-700 border border-slate-600'}`} title={hasStockPhoto ? 'Tem foto' : 'Sem foto'} />
+      <span className={`w-1.5 h-1.5 rounded-full ${hasBinPhoto  ? 'bg-amber-400'   : 'bg-slate-700 border border-slate-600'}`} title={hasBinPhoto  ? 'Tem foto prateleira' : 'Sem foto prateleira'} />
+    </div>
+  );
+}
+
+// ── Product List Item ─────────────────────────────────────────────────────────
+function ProdListItem({ p, active, onClick }) {
+  const img = p.displayImage || p.images?.[0] || p.stockPhotos?.[0] || null;
+  const hasStockPhoto = !!(p.stockPhotos?.length || p.images?.length || p.displayImage);
+  const hasBinPhoto   = !!p.binPhoto;
+  return (
+    <button onClick={onClick}
+      className={[
+        'w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors border-r-2 group',
+        active ? 'bg-blue-500/[0.07] border-blue-400' : 'hover:bg-white/[0.025] border-transparent',
+      ].join(' ')}
+    >
+      <div className="w-9 h-9 rounded-lg bg-slate-800 border border-white/[0.06] overflow-hidden shrink-0">
+        {img
+          ? <img src={img} alt="" className="w-full h-full object-contain" />
+          : <div className="flex h-full items-center justify-center"><Image size={13} className="text-slate-700" /></div>
+        }
       </div>
-      <div className="p-4 bg-slate-900/30">{children}</div>
-    </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] font-mono text-blue-400 leading-none truncate">{p.sku}</p>
+        <p className="text-[11px] text-slate-400 truncate mt-0.5 leading-snug">{p.name}</p>
+        <StatusDots hasStockPhoto={hasStockPhoto} hasBinPhoto={hasBinPhoto} />
+      </div>
+    </button>
   );
 }
 
-// ─── DataRow (Dados do Bling) ─────────────────────────────────────────────────
-function DataRow({ label, value, warn }) {
-  if (!value && !warn) return null;
-  return (
-    <div className="flex items-baseline gap-2 py-1.5 border-b border-white/[0.04] last:border-0">
-      <span className="text-[10px] text-slate-600 w-24 shrink-0 uppercase tracking-wider font-medium">{label}</span>
-      <span className={`text-[12px] font-medium flex-1 ${warn ? 'text-amber-400' : 'text-slate-200'}`}>
-        {value || <span className="text-slate-700 italic text-[11px]">Não informado</span>}
-      </span>
-    </div>
-  );
-}
-
-// ─── PhotoStrip ───────────────────────────────────────────────────────────────
-function PhotoStrip({ photos, kind, onUpload, onDelete, maxSlots = 10 }) {
-  const fileRef = useRef();
+// ── Photo Strip ───────────────────────────────────────────────────────────────
+function PhotoStrip({ photos, kind, sku, onUploaded, onDelete }) {
   const [uploading, setUploading] = useState(false);
+  const fileRef = useRef();
 
   async function handleUpload(file) {
-    if (!file || uploading) return;
+    if (!file || !sku) return;
     setUploading(true);
     try {
+      const token = await getAuthToken();
       const fd = new FormData();
       fd.append('file', file);
       fd.append('kind', kind);
-      onUpload(fd, kind, setUploading);
-    } catch {
+      const res = await fetch(`/admin/save-photo-cloudinary/${encodeURIComponent(sku)}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Falha no upload');
+      onUploaded(kind, data.url);
+    } catch (e) {
+      alert('Erro no upload: ' + e.message);
+    } finally {
       setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
     }
   }
 
@@ -114,17 +144,11 @@ function PhotoStrip({ photos, kind, onUpload, onDelete, maxSlots = 10 }) {
     <div className="flex flex-wrap gap-2">
       {photos.map((url, i) => (
         <div key={i} className="relative group w-[88px] h-[88px] rounded-xl overflow-hidden border border-white/[0.08] bg-slate-800 shrink-0">
-          <img
-            src={url}
-            alt=""
-            className="w-full h-full object-contain p-1"
-            onError={e => { e.target.src = ''; e.target.style.display = 'none'; }}
-          />
-          {/* Hover overlay */}
+          <img src={url} alt="" className="w-full h-full object-contain p-0.5"
+            onError={e => { e.target.style.opacity = '0.3'; }} />
           <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-            <a href={url} target="_blank" rel="noreferrer"
-              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-              onClick={e => e.stopPropagation()}>
+            <a href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors">
               <Eye size={12} />
             </a>
             <button onClick={() => onDelete(kind, i)}
@@ -134,22 +158,12 @@ function PhotoStrip({ photos, kind, onUpload, onDelete, maxSlots = 10 }) {
           </div>
         </div>
       ))}
-
-      {/* Add button */}
-      {photos.length < maxSlots && (
+      {photos.length < 10 && (
         <>
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            className="w-[88px] h-[88px] rounded-xl border-2 border-dashed border-slate-700 hover:border-emerald-500/60 hover:bg-emerald-500/5 flex flex-col items-center justify-center gap-1 text-slate-700 hover:text-emerald-400 transition-all shrink-0 disabled:opacity-40"
-          >
-            {uploading
-              ? <Loader2 size={18} className="animate-spin" />
-              : <Plus size={18} />
-            }
-            <span className="text-[9px] font-semibold uppercase tracking-wider">
-              {uploading ? 'Enviando' : 'Adicionar'}
-            </span>
+          <button onClick={() => fileRef.current?.click()} disabled={uploading}
+            className="w-[88px] h-[88px] rounded-xl border-2 border-dashed border-slate-700 hover:border-emerald-500/60 hover:bg-emerald-500/[0.04] flex flex-col items-center justify-center gap-1 text-slate-700 hover:text-emerald-400 transition-all shrink-0 disabled:opacity-40">
+            {uploading ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+            <span className="text-[9px] font-semibold uppercase tracking-wide">{uploading ? 'Enviando' : 'Adicionar'}</span>
           </button>
           <input ref={fileRef} type="file" accept="image/*" className="hidden"
             onChange={e => handleUpload(e.target.files?.[0])} />
@@ -159,388 +173,634 @@ function PhotoStrip({ photos, kind, onUpload, onDelete, maxSlots = 10 }) {
   );
 }
 
-// ─── BinPhotoSlot ─────────────────────────────────────────────────────────────
-function BinPhotoSlot({ url, onUpload, onDelete }) {
-  const fileRef = useRef();
+// ── Bin Photo ─────────────────────────────────────────────────────────────────
+function BinPhotoSlot({ url, sku, updatedAtMs, onUploaded, onDelete }) {
   const [uploading, setUploading] = useState(false);
+  const fileRef = useRef();
 
   async function handleUpload(file) {
-    if (!file) return;
+    if (!file || !sku) return;
     setUploading(true);
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('kind', 'bin');
-    onUpload(fd, 'bin', setUploading);
-  }
-
-  if (url) {
-    return (
-      <div className="relative group w-full h-32 rounded-xl overflow-hidden border border-white/[0.08] bg-slate-800">
-        <img src={url} alt="Prateleira" className="w-full h-full object-cover" />
-        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-          <a href={url} target="_blank" rel="noreferrer"
-            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors">
-            <Eye size={14} />
-          </a>
-          <button onClick={() => onDelete('bin', 0)}
-            className="p-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-200 transition-colors">
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <button
-        onClick={() => fileRef.current?.click()}
-        disabled={uploading}
-        className="w-full h-24 rounded-xl border-2 border-dashed border-slate-700 hover:border-amber-500/50 hover:bg-amber-500/5 flex items-center justify-center gap-2 text-slate-600 hover:text-amber-400 transition-all disabled:opacity-40"
-      >
-        {uploading ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
-        <span className="text-xs font-medium">{uploading ? 'Enviando…' : 'Tirar foto da prateleira'}</span>
-      </button>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden"
-        onChange={e => handleUpload(e.target.files?.[0])} />
-    </>
-  );
-}
-
-// ─── CheckItem ────────────────────────────────────────────────────────────────
-function CheckItem({ ok, label }) {
-  return (
-    <div className={`flex items-center gap-2 text-xs ${ok ? 'text-emerald-400' : 'text-slate-600'}`}>
-      <CheckCircle2 size={12} className={ok ? '' : 'opacity-0'} />
-      {!ok && <span className="w-3 h-3 rounded-full border border-slate-700 shrink-0" />}
-      <span>{label}</span>
-    </div>
-  );
-}
-
-// ─── AdminProdutos ────────────────────────────────────────────────────────────
-export default function AdminProdutos() {
-  const [searchParams] = useSearchParams();
-
-  // Left panel state
-  const [query,      setQuery]      = useState('');
-  const [results,    setResults]    = useState([]);
-  const [allProds,   setAllProds]   = useState([]); // /products/all para browse
-  const [loading,    setLoading]    = useState(true);
-  const [searching,  setSearching]  = useState(false);
-  const [filter,     setFilter]     = useState('todos');
-  const [page,       setPage]       = useState(0);
-  const PER = 20;
-
-  // Right panel state
-  const [sku,        setSku]        = useState(searchParams.get('sku') || '');
-  const [produto,    setProduto]    = useState(null);
-  const [loadingP,   setLoadingP]   = useState(false);
-  const [saving,     setSaving]     = useState(false);
-  const [savedOk,    setSavedOk]    = useState(false);
-
-  // Editable overrides
-  const [binName,    setBinName]    = useState('');
-  const [notes,      setNotes]      = useState('');
-  const [stockPhotos,setStockPhotos]= useState([]);
-  const [boxPhotos,  setBoxPhotos]  = useState([]);
-  const [binPhoto,   setBinPhoto]   = useState('');
-
-  // Embalagens
-  const [embs, setEmbs] = useState([]);
-
-  const debRef = useRef(null);
-
-  // ── Load all products (browse / filter) ──────────────────────────────────
-  useEffect(() => {
-    fetch('/products/all')
-      .then(r => r.json())
-      .then(d => {
-        const items = Array.isArray(d) ? d : (d.items || []);
-        setAllProds(items);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-
-    fetch('/embalagens/list')
-      .then(r => r.json())
-      .then(d => setEmbs(Array.isArray(d) ? d : (d.items || [])));
-  }, []);
-
-  // ── Load initial SKU from URL param ──────────────────────────────────────
-  useEffect(() => {
-    if (sku) loadProduct(sku);
-  }, []); // eslint-disable-line
-
-  // ── Search ───────────────────────────────────────────────────────────────
-  async function doSearch(q) {
-    if (!q.trim() || q.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-    setSearching(true);
     try {
-      const res = await fetch(`/admin/products/search?q=${encodeURIComponent(q.trim())}`);
-      const data = await res.json();
-      setResults(Array.isArray(data) ? data : (data.items || []));
-    } catch { setResults([]); }
-    setSearching(false);
-  }
-
-  function handleQuery(v) {
-    setQuery(v);
-    setPage(0);
-    clearTimeout(debRef.current);
-    debRef.current = setTimeout(() => doSearch(v), 320);
-  }
-
-  // ── Filtered list ─────────────────────────────────────────────────────────
-  const list = (() => {
-    const base = query.trim().length >= 2 ? results : allProds;
-    let arr = [...base];
-    if (filter === 'semfoto')   arr = arr.filter(p => !p.displayImage && !p.images?.length && !p.stockPhotos?.length);
-    if (filter === 'semmarca')  arr = arr.filter(p => !p.marca);
-    if (filter === 'semlocal')  arr = arr.filter(p => !p.bin && !p.customBinName);
-    return arr;
-  })();
-
-  const pageItems = list.slice(page * PER, (page + 1) * PER);
-  const totalPages = Math.ceil(list.length / PER);
-
-  // ── Load product detail ───────────────────────────────────────────────────
-  async function loadProduct(s) {
-    setSku(s);
-    setLoadingP(true);
-    setSavedOk(false);
-    try {
-      const res = await fetch(`/admin/products/${encodeURIComponent(s)}`);
-      const data = await res.json();
-      const p = data.item || data.produto || data;
-      setProduto(p);
-      setBinName(p.customBinName || p.bin || '');
-      setNotes(p.notes || '');
-      setStockPhotos(p.stockPhotos || []);
-      setBoxPhotos(p.boxPhotos || []);
-      setBinPhoto(p.binPhoto || '');
-    } catch {}
-    setLoadingP(false);
-  }
-
-  // ── Save overrides ────────────────────────────────────────────────────────
-  async function handleSave() {
-    if (!produto) return;
-    setSaving(true);
-    try {
-      await apiJson(`/admin/products/${encodeURIComponent(produto.sku)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ customBinName: binName, notes, stockPhotos, boxPhotos, binPhoto }),
-      });
-      setSavedOk(true);
-      setTimeout(() => setSavedOk(false), 2500);
-    } catch (e) {
-      alert('Erro ao salvar: ' + e.message);
-    }
-    setSaving(false);
-  }
-
-  // ── Photo upload ──────────────────────────────────────────────────────────
-  async function handlePhotoUpload(fd, kind, setUploading) {
-    if (!produto) return;
-    try {
-      const res = await apiFetch(`/admin/save-photo-cloudinary/${encodeURIComponent(produto.sku)}`, {
-        method: 'POST',
-        body: fd,
+      const token = await getAuthToken();
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('kind', 'bin');
+      const res = await fetch(`/admin/save-photo-cloudinary/${encodeURIComponent(sku)}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
       });
       const data = await res.json();
-      if (data.ok && data.url) {
-        if (kind === 'stock') setStockPhotos(p => [...p, data.url]);
-        if (kind === 'box')   setBoxPhotos(p => [...p, data.url]);
-        if (kind === 'bin')   setBinPhoto(data.url);
-      } else {
-        alert(data.error || 'Erro no upload');
-      }
+      if (!data.ok) throw new Error(data.error || 'Falha');
+      onUploaded('bin', data.url);
     } catch (e) {
-      alert('Erro no upload: ' + e.message);
+      alert('Erro: ' + e.message);
     } finally {
       setUploading(false);
     }
   }
 
-  function handleDeletePhoto(kind, idx) {
-    if (kind === 'stock') setStockPhotos(p => p.filter((_, i) => i !== idx));
-    if (kind === 'box')   setBoxPhotos(p => p.filter((_, i) => i !== idx));
-    if (kind === 'bin')   setBinPhoto('');
+  const dateStr = updatedAtMs
+    ? new Date(updatedAtMs).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : null;
+
+  return (
+    <div className="flex gap-3 items-start flex-wrap">
+      {url && (
+        <div className="relative group w-28 h-24 rounded-xl overflow-hidden border border-white/[0.08] bg-slate-800 shrink-0">
+          <img src={url} alt="Prateleira" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+            <a href={url} target="_blank" rel="noreferrer"
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"><Eye size={13} /></a>
+            <button onClick={() => onDelete('bin', 0)}
+              className="p-1.5 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-200 transition-colors"><Trash2 size={13} /></button>
+          </div>
+          {dateStr && <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[9px] text-slate-300 px-1.5 py-0.5">📅 {dateStr}</div>}
+        </div>
+      )}
+      {!url && <div className="text-xs text-slate-600 self-center">Sem foto</div>}
+      <>
+        <button onClick={() => fileRef.current?.click()} disabled={uploading}
+          className="flex flex-col items-center justify-center gap-1 w-24 h-24 rounded-xl border-2 border-dashed border-slate-700 hover:border-amber-500/50 hover:bg-amber-500/[0.04] text-slate-600 hover:text-amber-400 transition-all shrink-0 disabled:opacity-40">
+          {uploading ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+          <span className="text-[10px] font-medium">{uploading ? 'Enviando…' : url ? 'Atualizar' : 'Tirar foto'}</span>
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden"
+          onChange={e => handleUpload(e.target.files?.[0])} />
+      </>
+    </div>
+  );
+}
+
+// ── Section Card ──────────────────────────────────────────────────────────────
+function Section({ emoji, title, badge, right, children }) {
+  return (
+    <div className="rounded-xl border border-white/[0.07] overflow-hidden bg-slate-900/40">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.05] bg-slate-900/60">
+        {emoji && <span className="text-sm">{emoji}</span>}
+        <span className="text-[11px] font-bold text-slate-300 tracking-wide">{title}</span>
+        {badge && (
+          <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold uppercase tracking-wider">
+            {badge}
+          </span>
+        )}
+        {right && <div className="ml-auto">{right}</div>}
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  );
+}
+
+// ── Bling Data Grid ────────────────────────────────────────────────────────────
+function BlingField({ label, value, warn }) {
+  return (
+    <div className="bg-slate-800/60 rounded-lg px-3 py-2.5 border border-white/[0.05]">
+      <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">{label}</p>
+      <p className={`font-mono text-sm font-bold mt-0.5 ${warn ? 'text-amber-400' : value ? 'text-slate-200' : 'text-slate-700'}`}>
+        {value || '—'}
+      </p>
+    </div>
+  );
+}
+
+// ── Save Button ───────────────────────────────────────────────────────────────
+function SaveBtn({ saving, saved, onClick, label = 'Salvar', size = 'sm' }) {
+  const base = size === 'sm'
+    ? 'px-3 py-1.5 text-xs rounded-lg'
+    : 'px-4 py-2 text-sm rounded-xl w-full justify-center';
+  return (
+    <button onClick={onClick} disabled={saving}
+      className={[
+        `flex items-center gap-1.5 font-bold transition-all ${base}`,
+        saved
+          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+          : 'bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:bg-blue-500/25 active:scale-95',
+      ].join(' ')}
+    >
+      {saving ? <Loader2 size={12} className="animate-spin" /> : saved ? <CheckCircle2 size={12} /> : <Save size={12} />}
+      {saved ? 'Salvo ✓' : label}
+    </button>
+  );
+}
+
+// ── Toast (interno) ───────────────────────────────────────────────────────────
+function Toast({ msg, type }) {
+  if (!msg) return null;
+  const colors = {
+    ok:  'bg-emerald-500/15 border-emerald-500/30 text-emerald-300',
+    err: 'bg-red-500/15 border-red-500/30 text-red-300',
+    info:'bg-blue-500/15 border-blue-500/30 text-blue-300',
+  };
+  return (
+    <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl border text-sm font-medium shadow-2xl animate-slide-in-up ${colors[type] || colors.info}`}>
+      {msg}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function AdminProdutos() {
+  const [searchParams] = useSearchParams();
+
+  // ── Left panel ────────────────────────────────────────────────────────────
+  const [leftTab,    setLeftTab]    = useState('produtos'); // 'produtos' | 'marcas'
+  const [query,      setQuery]      = useState('');
+  const [filter,     setFilter]     = useState(null);       // null | 'sem-foto' | 'sem-marca'
+  const [results,    setResults]    = useState([]);
+  const [allProds,   setAllProds]   = useState([]);
+  const [loadingAll, setLoadingAll] = useState(true);
+  const [searching,  setSearching]  = useState(false);
+  const [navIdx,     setNavIdx]     = useState(-1);
+
+  // ── Right panel ───────────────────────────────────────────────────────────
+  const [produto,    setProduto]    = useState(null);
+  const [loadingP,   setLoadingP]   = useState(false);
+
+  // Editable state — saved independently per section
+  const [binName,    setBinName]    = useState('');
+  const [binPhoto,   setBinPhoto]   = useState('');
+  const [notes,      setNotes]      = useState('');
+  const [stockPhotos,setStockPhotos]= useState([]);
+  const [boxPhotos,  setBoxPhotos]  = useState([]);
+  const [updatedAtMs,setUpdatedAtMs]= useState(null);
+
+  // Save states (per section)
+  const [savingBin,  setSavingBin]  = useState(false);
+  const [savedBin,   setSavedBin]   = useState(false);
+  const [savingNotes,setSavingNotes]= useState(false);
+  const [savedNotes, setSavedNotes] = useState(false);
+
+  // ── Marcas tab ────────────────────────────────────────────────────────────
+  const [semMarca,    setSemMarca]    = useState([]);
+  const [marcasList,  setMarcasList]  = useState([]);
+  const [loadingMarca,setLoadingMarca]= useState(false);
+  const [marcaFilter, setMarcaFilter] = useState('');
+  const [marcaPage,   setMarcaPage]   = useState(0);
+  const MARCA_PER = 20;
+
+  // ── Modal marca ───────────────────────────────────────────────────────────
+  const [modalMarca, setModalMarca] = useState(false);
+  const [marcaSel,   setMarcaSel]   = useState('');
+  const [marcaNova,  setMarcaNova]  = useState('');
+  const [savingMarca,setSavingMarca]= useState(false);
+
+  // ── Embalagens ────────────────────────────────────────────────────────────
+  const [embalagens, setEmbalagens] = useState([]);
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  const [toast, setToast] = useState(null);
+  const toastRef = useRef(null);
+  function showToast(msg, type = 'ok') {
+    setToast({ msg, type });
+    clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast(null), 2800);
   }
 
-  // ── Compatible packaging ──────────────────────────────────────────────────
-  const embsFit = embs.filter(e => {
-    if (!produto?.width || !produto?.height || !produto?.depth) return false;
-    const fits = (prod, box) => !box || prod <= box;
-    return fits(produto.width, e.largura) && fits(produto.height, e.altura) && fits(produto.depth, e.profundidade);
-  }).slice(0, 8);
+  const debRef  = useRef(null);
+  const activeResults = results.length ? results : allProds;
 
-  const score = produto ? calcScore(produto) : 0;
-  const thumbUrl = produto?.displayImage || produto?.images?.[0] || stockPhotos[0] || null;
+  // ── Load all products ─────────────────────────────────────────────────────
+  useEffect(() => {
+    fetch('/products/all')
+      .then(r => r.json())
+      .then(d => setAllProds(Array.isArray(d) ? d : (d.items || [])))
+      .catch(() => {})
+      .finally(() => setLoadingAll(false));
+    fetch('/embalagens/list')
+      .then(r => r.json())
+      .then(d => setEmbalagens(Array.isArray(d) ? d : (d.items || [])));
+  }, []);
+
+  // ── Auto-select via URL param ─────────────────────────────────────────────
+  useEffect(() => {
+    const sku = searchParams.get('sku');
+    if (sku) selectProduct(decodeURIComponent(sku));
+  }, []); // eslint-disable-line
+
+  // ── Search ────────────────────────────────────────────────────────────────
+  function handleQuery(v) {
+    setQuery(v);
+    setFilter(null);
+    clearTimeout(debRef.current);
+    if (v.trim().length < 2) { setResults([]); return; }
+    debRef.current = setTimeout(() => doSearch(v.trim()), 280);
+  }
+
+  async function doSearch(q) {
+    setSearching(true);
+    try {
+      const res  = await fetch(`/admin/products/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      const items = data.items || [];
+      setResults(items);
+      const idx = items.findIndex(p => p.sku === produto?.sku);
+      setNavIdx(idx);
+    } catch {}
+    setSearching(false);
+  }
+
+  async function applyFilter(f) {
+    if (filter === f) { setFilter(null); setResults([]); return; }
+    setFilter(f);
+    setQuery('');
+    setResults([]);
+    setSearching(true);
+    try {
+      if (f === 'sem-foto') {
+        const d = await fetch('/products/all').then(r => r.json());
+        const all = Array.isArray(d) ? d : (d.items || []);
+        const filtered = all.filter(p => !(p.stockPhotos?.length > 0) && !p.displayImage);
+        setResults(filtered);
+        setNavIdx(filtered.findIndex(p => p.sku === produto?.sku));
+      } else if (f === 'sem-marca') {
+        const d = await fetch('/products/sem-marca?limit=500').then(r => r.json());
+        const items = d.items || [];
+        setResults(items);
+        setNavIdx(items.findIndex(p => p.sku === produto?.sku));
+      }
+    } catch {}
+    setSearching(false);
+  }
+
+  // ── Select product ────────────────────────────────────────────────────────
+  async function selectProduct(sku) {
+    setLoadingP(true);
+    setProduto(null);
+    setSavedBin(false); setSavedNotes(false);
+    try {
+      const res  = await fetch(`/admin/products/${encodeURIComponent(sku)}`);
+      const data = await res.json();
+      const p    = data.item || data.produto || data;
+      setProduto(p);
+      const ov = p.override || {};
+      setBinName(ov.customBinName || p.bin || '');
+      setBinPhoto(ov.binPhoto || '');
+      setNotes(ov.notes || '');
+      setStockPhotos(ov.stockPhotos || []);
+      setBoxPhotos(ov.boxPhotos || []);
+      setUpdatedAtMs(ov.updatedAtMs || null);
+      // sync nav index
+      const list = results.length ? results : allProds;
+      setNavIdx(list.findIndex(p2 => p2.sku === sku));
+    } catch (e) {
+      showToast('Erro ao carregar: ' + e.message, 'err');
+    }
+    setLoadingP(false);
+  }
+
+  function navProd(dir) {
+    const list = activeResults;
+    const next = navIdx + dir;
+    if (next < 0 || next >= list.length) return;
+    setNavIdx(next);
+    selectProduct(list[next].sku);
+  }
+
+  // ── Save bin ──────────────────────────────────────────────────────────────
+  async function saveBin() {
+    if (!produto) return;
+    setSavingBin(true);
+    try {
+      await apiFetch(`/admin/products/${encodeURIComponent(produto.sku)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ customBinName: binName }),
+      });
+      setSavedBin(true);
+      showToast('Localização salva ✓');
+      setTimeout(() => setSavedBin(false), 3000);
+    } catch (e) { showToast('Erro: ' + e.message, 'err'); }
+    setSavingBin(false);
+  }
+
+  // ── Save notes ────────────────────────────────────────────────────────────
+  async function saveNotes() {
+    if (!produto) return;
+    setSavingNotes(true);
+    try {
+      await apiFetch(`/admin/products/${encodeURIComponent(produto.sku)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ notes }),
+      });
+      setSavedNotes(true);
+      showToast('Notas salvas ✓');
+      setTimeout(() => setSavedNotes(false), 3000);
+    } catch (e) { showToast('Erro: ' + e.message, 'err'); }
+    setSavingNotes(false);
+  }
+
+  // ── Photo callbacks ───────────────────────────────────────────────────────
+  function onPhotoUploaded(kind, url) {
+    if (kind === 'stock') { setStockPhotos(p => [...p, url]); }
+    if (kind === 'box')   { setBoxPhotos(p => [...p, url]);   }
+    if (kind === 'bin')   { setBinPhoto(url); }
+    showToast('Foto salva ✓');
+  }
+
+  async function deletePhoto(kind, idx) {
+    if (!produto) return;
+    let patch = {};
+    if (kind === 'bin')   { patch.binPhoto = ''; setBinPhoto(''); }
+    if (kind === 'stock') { const n = stockPhotos.filter((_, i) => i !== idx); patch.stockPhotos = n; setStockPhotos(n); }
+    if (kind === 'box')   { const n = boxPhotos.filter((_, i) => i !== idx);   patch.boxPhotos   = n; setBoxPhotos(n);   }
+    try {
+      await apiFetch(`/admin/products/${encodeURIComponent(produto.sku)}`, {
+        method: 'PATCH', body: JSON.stringify(patch),
+      });
+      showToast('Foto removida', 'info');
+    } catch (e) { showToast('Erro: ' + e.message, 'err'); }
+  }
+
+  // ── Marca modal ───────────────────────────────────────────────────────────
+  async function openMarcaModal() {
+    if (!marcasList.length) {
+      const d = await fetch('/products/marcas-list').then(r => r.json()).catch(() => ({}));
+      setMarcasList(d.items || []);
+    }
+    setMarcaSel(produto?.marca || '');
+    setMarcaNova('');
+    setModalMarca(true);
+  }
+
+  async function saveMarca() {
+    if (!produto) return;
+    const marca = marcaSel === '__nova__' ? marcaNova.trim() : marcaSel.trim();
+    if (!marca) { showToast('Selecione ou digite uma marca', 'err'); return; }
+    setSavingMarca(true);
+    try {
+      await apiFetch(`/products/${encodeURIComponent(produto.sku)}/marca`, {
+        method: 'PATCH', body: JSON.stringify({ marca }),
+      });
+      showToast(`Marca → "${marca}" ✓`);
+      setProduto(p => ({ ...p, marca }));
+      setModalMarca(false);
+    } catch (e) { showToast('Erro: ' + e.message, 'err'); }
+    setSavingMarca(false);
+  }
+
+  // ── Marcas Tab ────────────────────────────────────────────────────────────
+  async function loadMarcasTab() {
+    if (semMarca.length) return;
+    setLoadingMarca(true);
+    try {
+      const [prodRes, marcasRes] = await Promise.all([
+        fetch('/products/sem-marca?limit=500').then(r => r.json()),
+        fetch('/products/marcas-list').then(r => r.json()),
+      ]);
+      setSemMarca(prodRes.items || []);
+      setMarcasList(marcasRes.items || []);
+    } catch {}
+    setLoadingMarca(false);
+  }
+
+  function handleLeftTab(t) {
+    setLeftTab(t);
+    if (t === 'marcas') loadMarcasTab();
+  }
+
+  async function saveMarcaItem(sku, marca) {
+    if (!marca) return;
+    try {
+      await apiFetch(`/products/${encodeURIComponent(sku)}/marca`, {
+        method: 'PATCH', body: JSON.stringify({ marca }),
+      });
+      showToast(`"${marca}" salva ✓`);
+      setSemMarca(p => p.filter(x => x.sku !== sku));
+      if (!marcasList.find(m => m.marca === marca)) {
+        setMarcasList(p => [{ marca, count: 1 }, ...p]);
+      }
+    } catch (e) { showToast('Erro: ' + e.message, 'err'); }
+  }
+
+  async function deleteProd(sku) {
+    if (!confirm(`Deletar "${sku}" permanentemente?`)) return;
+    try {
+      const token = await getAuthToken();
+      await fetch(`/products/${encodeURIComponent(sku)}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      });
+      showToast(sku + ' deletado', 'info');
+      setSemMarca(p => p.filter(x => x.sku !== sku));
+    } catch (e) { showToast('Erro: ' + e.message, 'err'); }
+  }
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const listShown = (query.trim().length >= 2 || filter) ? results : allProds;
+  const embsFit   = embalagens.filter(e => produto && embalagemFit(e, produto)).slice(0, 6);
+  const score     = produto ? calcScore(produto) : 0;
+  const thumbUrl  = produto?.displayImage || produto?.images?.[0] || stockPhotos[0] || null;
+
+  const marcaFiltrada = semMarca.filter(p =>
+    !marcaFilter || p.name.toLowerCase().includes(marcaFilter) || p.sku.toLowerCase().includes(marcaFilter)
+  );
+  const marcaPageItems = marcaFiltrada.slice(marcaPage * MARCA_PER, (marcaPage + 1) * MARCA_PER);
+  const marcaTotalPages = Math.ceil(marcaFiltrada.length / MARCA_PER);
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="flex h-full min-h-0 overflow-hidden bg-slate-950 animate-fade-in">
 
-      {/* ══ LEFT: Search + List ═══════════════════════════════════════════════ */}
-      <aside className="flex flex-col w-[260px] shrink-0 border-r border-white/[0.06] overflow-hidden">
+      {/* Toast */}
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
 
-        {/* Header + busca */}
-        <div className="shrink-0 border-b border-white/[0.05] px-3 pt-3 pb-2 space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="text-[12px] font-bold text-slate-200">Admin Produtos</span>
-            <span className="ml-auto text-[10px] text-slate-700 tabular-nums">{list.length}</span>
-          </div>
+      {/* ══ ESQUERDA ══════════════════════════════════════════════════════════ */}
+      <aside className="flex flex-col w-[260px] shrink-0 border-r border-white/[0.06] overflow-hidden bg-slate-950">
 
-          {/* Search input */}
-          <div className="relative">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
-            <input
-              value={query}
-              onChange={e => handleQuery(e.target.value)}
-              placeholder="SKU, EAN ou nome…"
-              className="w-full pl-7 pr-6 py-1.5 rounded-lg bg-slate-800 border border-white/[0.07] text-[12px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20 transition-all"
-            />
-            {searching && <Loader2 size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 animate-spin" />}
-            {query && !searching && (
-              <button onClick={() => { setQuery(''); setResults([]); }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300 transition-colors">
-                <X size={11} />
-              </button>
-            )}
-          </div>
-          {query.length > 0 && query.length < 2 && (
-            <p className="text-[10px] text-slate-700 px-1">Digite ao menos 2 letras</p>
-          )}
-
-          {/* Filter chips */}
-          <div className="flex flex-wrap gap-1">
-            {[
-              { id: 'todos',    label: 'Todos' },
-              { id: 'semfoto',  label: 'Sem foto' },
-              { id: 'semmarca', label: 'Sem marca' },
-              { id: 'semlocal', label: 'Sem local' },
-            ].map(f => (
-              <button key={f.id} onClick={() => { setFilter(f.id); setPage(0); }}
-                className={[
-                  'text-[10px] px-2 py-0.5 rounded-full border font-semibold transition-colors',
-                  filter === f.id
-                    ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
-                    : 'bg-slate-800/60 text-slate-600 border-white/[0.06] hover:border-slate-600 hover:text-slate-400',
-                ].join(' ')}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+        {/* Tabs */}
+        <div className="flex shrink-0 border-b border-white/[0.05]">
+          {[
+            { id: 'produtos', label: 'Produtos' },
+            { id: 'marcas',   label: 'Marcas', badge: semMarca.length || null },
+          ].map(t => (
+            <button key={t.id} onClick={() => handleLeftTab(t.id)}
+              className={[
+                'flex-1 py-2.5 text-[12px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5',
+                leftTab === t.id
+                  ? 'text-blue-400 border-blue-400'
+                  : 'text-slate-600 border-transparent hover:text-slate-400',
+              ].join(' ')}
+            >
+              {t.label}
+              {t.badge > 0 && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">{t.badge}</span>
+              )}
+            </button>
+          ))}
         </div>
 
-        {/* Product list */}
-        <div className="flex-1 overflow-y-auto">
-          {loading && (
-            <div className="space-y-px p-2">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="flex items-center gap-2 p-2.5 rounded-lg">
-                  <div className="w-8 h-8 rounded-lg bg-white/[0.04] animate-pulse shrink-0" />
-                  <div className="flex-1 space-y-1.5">
-                    <div className="h-2.5 bg-white/[0.04] rounded animate-pulse w-1/3" />
-                    <div className="h-2 bg-white/[0.03] rounded animate-pulse w-2/3" />
-                  </div>
+        {/* ── ABA: PRODUTOS ──────────────────────────────────────────────────── */}
+        {leftTab === 'produtos' && (
+          <>
+            <div className="shrink-0 px-3 pt-2.5 pb-2 border-b border-white/[0.05] space-y-2">
+              {/* Search */}
+              <div className="relative">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
+                <input value={query} onChange={e => handleQuery(e.target.value)}
+                  placeholder="SKU, EAN ou nome…"
+                  className="w-full pl-7 pr-6 py-1.5 rounded-lg bg-slate-800 border border-white/[0.07] text-[12px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500/40 transition-all" />
+                {searching && <Loader2 size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 animate-spin" />}
+                {query && !searching && (
+                  <button onClick={() => { setQuery(''); setResults([]); setFilter(null); }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300">
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+
+              {/* Filtros */}
+              <div className="flex gap-1">
+                {[
+                  { id: 'sem-foto',  label: 'Sem foto' },
+                  { id: 'sem-marca', label: 'Sem marca' },
+                ].map(f => (
+                  <button key={f.id} onClick={() => applyFilter(f.id)}
+                    className={[
+                      'text-[10px] px-2.5 py-0.5 rounded-full border font-bold transition-colors',
+                      filter === f.id
+                        ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                        : 'bg-slate-800/60 text-slate-600 border-white/[0.06] hover:text-slate-400 hover:border-slate-600',
+                    ].join(' ')}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Count + nav */}
+              {listShown.length > 0 && (
+                <div className="flex items-center justify-between text-[10px] text-slate-600">
+                  <span>{listShown.length} produto{listShown.length !== 1 ? 's' : ''}</span>
+                  {navIdx >= 0 && (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => navProd(-1)} disabled={navIdx <= 0}
+                        className="p-0.5 rounded disabled:opacity-30 hover:text-slate-300 transition-colors"><ChevronLeft size={13} /></button>
+                      <span className="tabular-nums">{navIdx + 1} / {listShown.length}</span>
+                      <button onClick={() => navProd(1)} disabled={navIdx >= listShown.length - 1}
+                        className="p-0.5 rounded disabled:opacity-30 hover:text-slate-300 transition-colors"><ChevronRight size={13} /></button>
+                    </div>
+                  )}
                 </div>
+              )}
+            </div>
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto divide-y divide-white/[0.03]">
+              {loadingAll && !listShown.length && (
+                <div className="space-y-px p-2">
+                  {[...Array(6)].map((_, i) => (
+                    <div key={i} className="flex gap-2 p-2.5">
+                      <div className="w-9 h-9 rounded-lg bg-white/[0.04] animate-pulse shrink-0" />
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-2 bg-white/[0.04] rounded animate-pulse w-1/3" />
+                        <div className="h-2.5 bg-white/[0.03] rounded animate-pulse w-3/4" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!loadingAll && listShown.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-12 gap-2 text-slate-700">
+                  <Package size={22} />
+                  <p className="text-[11px]">Nenhum produto</p>
+                </div>
+              )}
+              {listShown.map(p => (
+                <ProdListItem key={p.sku} p={p}
+                  active={p.sku === produto?.sku}
+                  onClick={() => selectProduct(p.sku)} />
               ))}
             </div>
-          )}
+          </>
+        )}
 
-          {!loading && pageItems.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-12 gap-2 text-slate-700">
-              <Package size={22} />
-              <p className="text-[11px]">Nenhum produto</p>
+        {/* ── ABA: MARCAS ────────────────────────────────────────────────────── */}
+        {leftTab === 'marcas' && (
+          <>
+            <div className="shrink-0 px-3 pt-2.5 pb-2 border-b border-white/[0.05] space-y-2">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-400 font-bold">{semMarca.length} sem marca</span>
+                <button onClick={() => { setSemMarca([]); setMarcasList([]); loadMarcasTab(); }}
+                  className="text-slate-600 hover:text-slate-300 transition-colors">
+                  <RefreshCw size={12} />
+                </button>
+              </div>
+              <div className="relative">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
+                <input value={marcaFilter} onChange={e => { setMarcaFilter(e.target.value.toLowerCase()); setMarcaPage(0); }}
+                  placeholder="Filtrar…"
+                  className="w-full pl-7 pr-3 py-1.5 rounded-lg bg-slate-800 border border-white/[0.07] text-[12px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500/40 transition-all" />
+              </div>
             </div>
-          )}
 
-          {!loading && pageItems.map(p => {
-            const img = p.displayImage || p.images?.[0] || p.stockPhotos?.[0] || null;
-            const sc  = calcScore(p);
-            const isActive = p.sku === produto?.sku;
-            return (
-              <button key={p.sku} onClick={() => loadProduct(p.sku)}
-                className={[
-                  'w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors border-r-2',
-                  isActive
-                    ? 'bg-blue-500/[0.08] border-blue-400'
-                    : 'hover:bg-white/[0.025] border-transparent',
-                ].join(' ')}
-              >
-                {/* Thumb */}
-                <div className="w-9 h-9 rounded-lg bg-slate-800 border border-white/[0.06] overflow-hidden shrink-0">
-                  {img
-                    ? <img src={img} alt="" className="w-full h-full object-contain" />
-                    : <div className="flex h-full items-center justify-center"><Image size={13} className="text-slate-700" /></div>
-                  }
+            <div className="flex-1 overflow-y-auto">
+              {loadingMarca && (
+                <div className="flex items-center justify-center py-12 gap-2 text-slate-600">
+                  <Loader2 size={16} className="animate-spin" />
+                  <span className="text-xs">Carregando…</span>
                 </div>
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-mono text-blue-400 leading-none truncate">{p.sku}</p>
-                  <p className="text-[11px] text-slate-400 truncate mt-0.5 leading-snug">{p.name}</p>
+              )}
+              {!loadingMarca && marcaFiltrada.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-12 gap-2 text-slate-700">
+                  <Tag size={22} />
+                  <p className="text-[11px]">Todos com marca ✓</p>
                 </div>
-                <ScoreDot score={sc} />
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="shrink-0 flex items-center justify-between px-3 py-2 border-t border-white/[0.05]">
-            <button disabled={page === 0} onClick={() => setPage(p => p - 1)}
-              className="p-1 rounded text-slate-600 hover:text-slate-300 disabled:opacity-30 transition-colors">
-              <ChevronLeft size={14} />
-            </button>
-            <span className="text-[10px] text-slate-600">{page + 1} / {totalPages}</span>
-            <button disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}
-              className="p-1 rounded text-slate-600 hover:text-slate-300 disabled:opacity-30 transition-colors">
-              <ChevronRight size={14} />
-            </button>
-          </div>
+              )}
+              <div className="divide-y divide-white/[0.03]">
+                {marcaPageItems.map(p => (
+                  <MarcaCard key={p.sku} p={p} marcasList={marcasList}
+                    onSave={saveMarcaItem} onDelete={deleteProd} />
+                ))}
+              </div>
+              {marcaTotalPages > 1 && (
+                <div className="flex items-center justify-between px-3 py-2 border-t border-white/[0.05] text-[10px] text-slate-600">
+                  <button disabled={marcaPage === 0} onClick={() => setMarcaPage(p => p - 1)}
+                    className="p-1 rounded disabled:opacity-30 hover:text-slate-300 transition-colors"><ChevronLeft size={13} /></button>
+                  <span>{marcaPage + 1} / {marcaTotalPages} ({marcaFiltrada.length})</span>
+                  <button disabled={marcaPage >= marcaTotalPages - 1} onClick={() => setMarcaPage(p => p + 1)}
+                    className="p-1 rounded disabled:opacity-30 hover:text-slate-300 transition-colors"><ChevronRight size={13} /></button>
+                </div>
+              )}
+            </div>
+          </>
         )}
       </aside>
 
-      {/* ══ RIGHT: Product Panel ══════════════════════════════════════════════ */}
+      {/* ══ PAINEL DIREITO ══════════════════════════════════════════════════ */}
       <div className="flex-1 min-w-0 overflow-y-auto">
 
         {/* Empty */}
         {!produto && !loadingP && (
           <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-700 p-8 text-center">
             <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-white/[0.05] flex items-center justify-center">
-              <Search size={26} />
+              {leftTab === 'marcas' ? <Tag size={26} /> : <Search size={26} />}
             </div>
-            <p className="text-sm text-slate-500 font-medium">Selecione um produto</p>
-            <p className="text-xs text-slate-700 max-w-xs">Busque por SKU, EAN ou nome na lista ao lado — ou use o filtro rápido</p>
+            <p className="text-sm text-slate-500 font-medium">
+              {leftTab === 'marcas' ? 'Normalização de marcas' : 'Selecione um produto'}
+            </p>
+            <p className="text-xs text-slate-700 max-w-xs">
+              {leftTab === 'marcas'
+                ? 'Produtos com marca vazia aparecem na lista ao lado. Selecione a marca e clique OK.'
+                : 'Busque pelo SKU, EAN ou nome na lista ao lado.'}
+            </p>
           </div>
         )}
 
         {/* Loading */}
         {loadingP && (
           <div className="p-5 max-w-2xl space-y-4">
-            <div className="h-8 bg-white/[0.04] rounded-xl animate-pulse w-2/3" />
-            <div className="h-5 bg-white/[0.03] rounded animate-pulse w-1/3" />
-            <div className="h-32 bg-white/[0.03] rounded-xl animate-pulse" />
-            <div className="h-24 bg-white/[0.03] rounded-xl animate-pulse" />
+            {[130, 90, 180, 80].map((h, i) => (
+              <div key={i} className={`h-[${h}px] bg-white/[0.03] rounded-xl animate-pulse`} style={{ height: h }} />
+            ))}
           </div>
         )}
 
-        {/* Panel */}
+        {/* ── Product Panel ────────────────────────────────────────────────── */}
         {produto && !loadingP && (
-          <div className="max-w-2xl p-4 space-y-3 animate-fade-in">
+          <div className="max-w-2xl p-4 space-y-3 animate-fade-in pb-10">
 
-            {/* ── Product header ─────────────────────────────────────────── */}
+            {/* ── Header ── */}
             <div className="flex items-start gap-4 p-4 rounded-xl bg-slate-900 border border-white/[0.07]">
-
-              {/* Thumb grande */}
               <div className="w-20 h-20 rounded-xl bg-slate-800 border border-white/[0.07] overflow-hidden shrink-0">
                 {thumbUrl
                   ? <img src={thumbUrl} alt="" className="w-full h-full object-contain p-1" />
@@ -548,12 +808,10 @@ export default function AdminProdutos() {
                 }
               </div>
 
-              {/* Info */}
               <div className="flex-1 min-w-0">
                 <p className="text-base font-bold text-slate-100 leading-snug">{produto.name}</p>
-
-                {/* Tags: SKU, EAN, bin, marca */}
                 <div className="flex flex-wrap gap-1.5 mt-2">
+                  {/* SKU */}
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
                     <Barcode size={9}/>{produto.sku}
                   </span>
@@ -567,189 +825,269 @@ export default function AdminProdutos() {
                       cx: {produto.eanBox}
                     </span>
                   )}
-                  {(binName || produto.bin) && (
+                  {binName && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                      <MapPin size={9}/>{binName || produto.bin}
+                      <MapPin size={9}/>{binName}
                     </span>
                   )}
                   {produto.stock != null && (
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${
                       produto.stock === 0 ? 'bg-red-500/10 text-red-400 border-red-500/20' :
                       produto.stock < 5  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                      'bg-slate-700/50 text-slate-400 border-white/[0.06]'
-                    }`}>
+                      'bg-slate-700/50 text-slate-400 border-white/[0.06]'}`}>
                       <Boxes size={9}/>{produto.stock}
                     </span>
                   )}
-                  {produto.marca && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-slate-700/40 text-slate-500 border border-white/[0.05]">
-                      <Tag size={9}/>{produto.marca}
-                    </span>
-                  )}
+                  {/* Marca — clicável */}
+                  <button onClick={openMarcaModal}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-slate-700/40 text-slate-400 border border-dashed border-slate-600 hover:border-blue-500/50 hover:text-blue-400 transition-colors">
+                    <Tag size={9}/>
+                    {produto.marca || <span className="italic opacity-60">sem marca</span>}
+                  </button>
                 </div>
 
-                {/* Completude inline */}
+                {/* Checklist + score */}
                 <div className="flex items-center gap-3 mt-3">
-                  <div className="flex gap-2">
-                    <CheckItem ok={!!thumbUrl}                               label="Foto" />
-                    <CheckItem ok={!!produto.ean}                            label="EAN" />
-                    <CheckItem ok={!!(produto.width && produto.height && produto.depth)} label="Dims" />
-                    <CheckItem ok={!!produto.preco}                          label="Preço" />
-                    <CheckItem ok={!!produto.weight}                         label="Peso" />
+                  <div className="flex gap-2 flex-wrap">
+                    {[
+                      { ok: !!thumbUrl,                                          label: 'Foto'  },
+                      { ok: !!produto.ean,                                        label: 'EAN'   },
+                      { ok: !!(produto.width && produto.height && produto.depth), label: 'Dims'  },
+                      { ok: !!produto.preco,                                      label: 'Preço' },
+                      { ok: !!produto.weight,                                     label: 'Peso'  },
+                    ].map(({ ok, label }) => (
+                      <span key={label} className={`flex items-center gap-1 text-[10px] ${ok ? 'text-emerald-400' : 'text-slate-700'}`}>
+                        <CheckCircle2 size={10} className={ok ? '' : 'opacity-0'} />
+                        {!ok && <span className="w-2.5 h-2.5 rounded-full border border-slate-700 shrink-0 inline-block" />}
+                        {label}
+                      </span>
+                    ))}
                   </div>
-                  <div className="ml-auto flex items-center gap-1.5 shrink-0">
-                    <a href={`/admin?sku=${produto.sku}`} target="_blank" rel="noreferrer"
-                      className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors underline">
-                      legado
-                    </a>
-                    <button onClick={handleSave} disabled={saving}
-                      className={[
-                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all',
-                        savedOk
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                          : 'bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:bg-blue-500/25 active:scale-95',
-                      ].join(' ')}
-                    >
-                      {saving ? <Loader2 size={12} className="animate-spin" /> : savedOk ? <CheckCircle2 size={12} /> : <Save size={12} />}
-                      {savedOk ? 'Salvo!' : 'Salvar'}
-                    </button>
-                  </div>
+                  <span className={`ml-auto text-[11px] font-black tabular-nums ${score >= 80 ? 'text-emerald-400' : score >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                    {score}%
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* ── Dados do Bling (read-only) ─────────────────────────────── */}
-            <Section emoji="📋" title="Dados do Bling" muted="somente leitura — reimporte o CSV para atualizar">
-              <div className="grid grid-cols-2 gap-x-8">
-                <div>
-                  <DataRow label="Peso líq."   value={fmtKg(produto.weight)} warn={!produto.weight} />
-                  <DataRow label="Peso bruto"  value={fmtKg(produto.weightBruto)} />
-                  <DataRow label="Largura"     value={fmtCm(produto.width)}  warn={!produto.width} />
-                  <DataRow label="Altura"      value={fmtCm(produto.height)} warn={!produto.height} />
-                  <DataRow label="Profund."    value={fmtCm(produto.depth)}  warn={!produto.depth} />
-                </div>
-                <div>
-                  <DataRow label="Local Bling" value={produto.bin} />
-                  <DataRow label="Estoque"     value={produto.stock != null ? String(produto.stock) : null}
-                    warn={produto.stock === 0} />
-                  <DataRow label="Itens/cx"    value={produto.itensPorCaixa ? String(produto.itensPorCaixa) : null} />
-                  <DataRow label="Preço"       value={fmtBrl(produto.preco)} warn={!produto.preco} />
-                  <DataRow label="Custo"       value={fmtBrl(produto.precoCusto)} />
-                </div>
+            {/* ── Dados do Bling ── */}
+            <Section emoji="📋" title="Dados do Bling" right={
+              <span className="text-[10px] text-slate-700 italic">somente leitura — reimporte o CSV para atualizar</span>
+            }>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <BlingField label="Peso líq."  value={fmtKg(produto.weight)}     warn={!produto.weight} />
+                <BlingField label="Peso bruto" value={fmtKg(produto.weightBruto)} />
+                <BlingField label="Largura"    value={fmtCm(produto.width)}      warn={!produto.width} />
+                <BlingField label="Altura"     value={fmtCm(produto.height)}     warn={!produto.height} />
+                <BlingField label="Profund."   value={fmtCm(produto.depth)}      warn={!produto.depth} />
+                <BlingField label="Local Bling" value={produto.bin} />
+                <BlingField label="Estoque"    value={produto.stock != null ? String(produto.stock) : null}
+                  warn={produto.stock === 0} />
+                <BlingField label="Itens/cx"   value={produto.itensPorCaixa ? String(produto.itensPorCaixa) : null} />
               </div>
+              {(produto.preco || produto.precoCusto) && (
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <BlingField label="Preço"   value={fmtBrl(produto.preco)}      warn={!produto.preco} />
+                  <BlingField label="Custo"   value={fmtBrl(produto.precoCusto)} />
+                </div>
+              )}
             </Section>
 
-            {/* ── Localização ──────────────────────────────────────────────── */}
+            {/* ── Localização ── */}
             <Section emoji="📍" title="Localização" badge="Sistema">
               <div className="space-y-3">
                 <div>
-                  <label className="block text-[10px] text-slate-600 uppercase tracking-widest font-bold mb-1.5">
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-1.5">
                     Nome do local (prateleira, rua, caixa…)
                   </label>
-                  <input
-                    value={binName}
-                    onChange={e => setBinName(e.target.value)}
-                    placeholder="Ex: Rua A — Prateleira 2 — Caixa 3"
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/[0.07] text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500/40 focus:ring-1 focus:ring-amber-500/15 transition-all"
-                  />
+                  <div className="flex gap-2">
+                    <input value={binName} onChange={e => setBinName(e.target.value)}
+                      placeholder="Ex: Rua A — Prateleira 2 — Caixa 3"
+                      className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-white/[0.07] text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500/40 transition-all" />
+                    <SaveBtn saving={savingBin} saved={savedBin} onClick={saveBin} />
+                  </div>
                 </div>
-
                 <div>
-                  <label className="block text-[10px] text-slate-600 uppercase tracking-widest font-bold mb-1.5">
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-1.5">
                     Foto da prateleira
                   </label>
                   <BinPhotoSlot
-                    url={binPhoto}
-                    onUpload={handlePhotoUpload}
-                    onDelete={handleDeletePhoto}
+                    url={binPhoto} sku={produto.sku} updatedAtMs={updatedAtMs}
+                    onUploaded={onPhotoUploaded} onDelete={deletePhoto}
                   />
                 </div>
               </div>
             </Section>
 
-            {/* ── Fotos do Produto ─────────────────────────────────────────── */}
+            {/* ── Fotos do Produto ── */}
             <Section emoji="📦" title="Fotos do Produto" badge="Sistema"
-              muted={`${stockPhotos.length + boxPhotos.length}/20`}>
+              right={<span className="text-[10px] text-slate-600">{stockPhotos.length + boxPhotos.length}/20</span>}>
               <div className="space-y-4">
                 <div>
-                  <p className="text-[10px] text-slate-600 uppercase tracking-widest font-bold mb-2">
-                    📦 Produto (sem embalagem)
-                  </p>
-                  <PhotoStrip
-                    photos={stockPhotos}
-                    kind="stock"
-                    onUpload={handlePhotoUpload}
-                    onDelete={handleDeletePhoto}
-                  />
+                  <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">📦 Produto (sem embalagem)</p>
+                  <PhotoStrip photos={stockPhotos} kind="stock" sku={produto.sku}
+                    onUploaded={onPhotoUploaded} onDelete={deletePhoto} />
                 </div>
                 <div>
-                  <p className="text-[10px] text-slate-600 uppercase tracking-widest font-bold mb-2">
-                    🎁 Produto embalado
-                  </p>
-                  <PhotoStrip
-                    photos={boxPhotos}
-                    kind="box"
-                    onUpload={handlePhotoUpload}
-                    onDelete={handleDeletePhoto}
-                  />
+                  <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">🎁 Produto embalado</p>
+                  <PhotoStrip photos={boxPhotos} kind="box" sku={produto.sku}
+                    onUploaded={onPhotoUploaded} onDelete={deletePhoto} />
                 </div>
               </div>
             </Section>
 
-            {/* ── Notas Operacionais ────────────────────────────────────────── */}
+            {/* ── Notas Operacionais ── */}
             <Section emoji="📝" title="Notas Operacionais" badge="Sistema">
-              <textarea
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                rows={3}
-                placeholder="Instruções para o separador — fragilidade, orientação, embalagem especial…"
-                className="w-full px-3 py-2.5 rounded-lg bg-slate-800 border border-white/[0.07] text-sm text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/15 transition-all leading-relaxed"
-              />
+              <div className="space-y-2">
+                <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-1.5">
+                  Notas para o separador (aparece no pedido)
+                </label>
+                <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+                  placeholder="Ex: Produto frágil — embalar com bolha."
+                  className="w-full px-3 py-2.5 rounded-lg bg-slate-800 border border-white/[0.07] text-sm text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500/40 transition-all leading-relaxed" />
+                <SaveBtn saving={savingNotes} saved={savedNotes} onClick={saveNotes} label="Salvar notas" />
+              </div>
             </Section>
 
-            {/* ── Embalagens Compatíveis ────────────────────────────────────── */}
-            {(produto.width || produto.height) && (
-              <Section emoji="📐" title="Embalagens Compatíveis" badge={`${embsFit.length} opções`}>
-                {embsFit.length === 0 ? (
-                  <p className="text-xs text-slate-600">Nenhuma embalagem compatível com estas dimensões.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {embsFit.map((e, i) => (
-                      <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-slate-800/60 border border-white/[0.05]">
-                        <Box size={13} className="text-slate-600 shrink-0" />
-                        <div>
-                          <p className="text-[11px] font-medium text-slate-300">{e.nome || e.name}</p>
-                          {(e.largura || e.altura) && (
-                            <p className="text-[10px] text-slate-600">{e.largura}×{e.altura}×{e.profundidade} cm</p>
-                          )}
+            {/* ── Embalagens Compatíveis ── */}
+            <Section emoji="🎁" title="Embalagens Compatíveis"
+              right={
+                <Link to="/expedicao/insumos" className="text-[11px] text-blue-400 hover:text-blue-300 font-bold transition-colors">
+                  Gerenciar →
+                </Link>
+              }
+            >
+              {!produto.width || !produto.height ? (
+                <p className="text-xs text-slate-600">Produto sem dimensões no Bling — impossível sugerir embalagens.</p>
+              ) : embsFit.length === 0 ? (
+                <p className="text-xs text-slate-600">
+                  Nenhuma embalagem compatível com {produto.width}×{produto.height}×{produto.depth || '?'} cm.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {embsFit.map((e, i) => {
+                    const stock = e.stock ?? e.estoque ?? 0;
+                    const sc = stock <= e.stockMin ? 'text-red-400' : stock <= (e.stockMin || 0) * 1.5 ? 'text-amber-400' : 'text-emerald-400';
+                    const dims = [e.width, e.height, e.depth].filter(Boolean).join('×');
+                    return (
+                      <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-slate-800/60 border border-white/[0.05]">
+                        <span className="text-lg">{e.type === 'saco' ? '🛍️' : '📦'}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] font-medium text-slate-300 truncate">{e.name}</p>
+                          {dims && <p className="text-[10px] text-slate-600">{dims} cm</p>}
                         </div>
-                        <span className={`text-[11px] font-bold ml-auto tabular-nums ${
-                          (e.estoque ?? e.stock) > 0 ? 'text-emerald-400' : 'text-red-400'
-                        }`}>{e.estoque ?? e.stock ?? 0}</span>
+                        <span className={`text-[11px] font-bold tabular-nums ${sc}`}>Estq: {stock}</span>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </Section>
-            )}
+                    );
+                  })}
+                </div>
+              )}
+            </Section>
 
-            {/* Save bottom */}
-            <div className="pb-6">
-              <button onClick={handleSave} disabled={saving}
-                className={[
-                  'w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all',
-                  savedOk
-                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                    : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-[0.99]',
-                ].join(' ')}
-              >
-                {saving ? <Loader2 size={15} className="animate-spin" /> : savedOk ? <CheckCircle2 size={15} /> : <Save size={15} />}
-                {savedOk ? 'Alterações salvas!' : 'Salvar alterações'}
-              </button>
-            </div>
           </div>
         )}
       </div>
+
+      {/* ══ MODAL MARCA ═══════════════════════════════════════════════════════ */}
+      {modalMarca && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setModalMarca(false)} />
+          <div className="relative w-full max-w-sm rounded-2xl bg-slate-900 border border-white/[0.08] shadow-2xl p-5 space-y-4 animate-scale-in">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
+                <Tag size={14} className="text-blue-400" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-100">Editar Marca</p>
+                <p className="text-[10px] text-slate-600 font-mono">{produto?.sku}</p>
+              </div>
+              <button onClick={() => setModalMarca(false)} className="ml-auto text-slate-600 hover:text-slate-300 transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Selecionar</label>
+              <select value={marcaSel} onChange={e => setMarcaSel(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg bg-slate-800 border border-white/[0.07] text-sm text-slate-200 focus:outline-none focus:border-blue-500/40 transition-all">
+                <option value="">— Selecionar —</option>
+                <option value="__nova__">+ Nova marca…</option>
+                <optgroup label="Cadastradas">
+                  {marcasList.map(m => <option key={m.marca} value={m.marca}>{m.marca}</option>)}
+                </optgroup>
+              </select>
+              {marcaSel === '__nova__' && (
+                <input value={marcaNova} onChange={e => setMarcaNova(e.target.value)}
+                  placeholder="Nome da nova marca"
+                  className="w-full px-3 py-2.5 rounded-lg bg-slate-800 border border-white/[0.07] text-sm text-slate-200 focus:outline-none focus:border-blue-500/40 transition-all mt-2"
+                  autoFocus />
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setModalMarca(false)}
+                className="flex-1 py-2 rounded-xl border border-white/[0.08] text-slate-500 hover:text-slate-300 text-sm transition-colors">
+                Cancelar
+              </button>
+              <button onClick={saveMarca} disabled={savingMarca}
+                className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-1.5 disabled:opacity-50">
+                {savingMarca ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MarcaCard ────────────────────────────────────────────────────────────────
+function MarcaCard({ p, marcasList, onSave, onDelete }) {
+  const [sel,  setSel]  = useState('');
+  const [nova, setNova] = useState('');
+  const [saving, setSaving] = useState(false);
+  const img = p.displayImage || p.images?.[0] || null;
+
+  async function handle() {
+    const marca = sel === '__nova__' ? nova.trim() : sel.trim();
+    if (!marca) return;
+    setSaving(true);
+    await onSave(p.sku, marca);
+    setSaving(false);
+  }
+
+  return (
+    <div className="p-3 space-y-2">
+      <div className="flex items-center gap-2.5">
+        <div className="w-9 h-9 rounded-lg bg-slate-800 border border-white/[0.06] overflow-hidden shrink-0">
+          {img ? <img src={img} alt="" className="w-full h-full object-contain" />
+               : <div className="flex h-full items-center justify-center"><Image size={13} className="text-slate-700" /></div>}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-mono text-blue-400 leading-none truncate">{p.sku}</p>
+          <p className="text-[11px] text-slate-400 truncate mt-0.5">{p.name}</p>
+        </div>
+        <button onClick={() => onDelete(p.sku)} className="text-slate-700 hover:text-red-400 transition-colors p-1 shrink-0">
+          <Trash2 size={11} />
+        </button>
+      </div>
+      <div className="flex gap-1.5">
+        <select value={sel} onChange={e => { setSel(e.target.value); if (e.target.value !== '__nova__') setNova(''); }}
+          className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-slate-800 border border-white/[0.07] text-[11px] text-slate-300 focus:outline-none focus:border-blue-500/40 transition-all">
+          <option value="">— marca —</option>
+          <option value="__nova__">+ Nova…</option>
+          {marcasList.map(m => <option key={m.marca} value={m.marca}>{m.marca}</option>)}
+        </select>
+        <button onClick={handle} disabled={saving || !sel}
+          className="px-2.5 py-1 rounded-lg bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[11px] font-bold disabled:opacity-30 hover:bg-blue-500/25 transition-colors shrink-0">
+          {saving ? '…' : 'OK'}
+        </button>
+      </div>
+      {sel === '__nova__' && (
+        <input value={nova} onChange={e => setNova(e.target.value)} placeholder="Nova marca"
+          className="w-full px-2 py-1 rounded-lg bg-slate-800 border border-white/[0.07] text-[11px] text-slate-200 focus:outline-none focus:border-blue-500/40 transition-all" />
+      )}
     </div>
   );
 }
