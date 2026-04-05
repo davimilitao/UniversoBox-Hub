@@ -24,7 +24,12 @@ const TEMAS_VALIDOS = ['dark', 'uber', 'ifood', '99', 'marvel', 'rick'];
 
 function applyTheme(tema) {
   const t = TEMAS_VALIDOS.includes(tema) ? tema : 'dark';
-  document.documentElement.setAttribute('data-theme', t);
+  const html = document.documentElement;
+
+  // Ativa transição suave por 400 ms
+  html.classList.add('theme-transitioning');
+  html.setAttribute('data-theme', t);
+  setTimeout(() => html.classList.remove('theme-transitioning'), 400);
 }
 
 function getRoleFromStorage() {

@@ -91,7 +91,7 @@ function ThemeBackground({ tema }) {
   /* ── UBER ── pure black, scan line ───────────────────────────── */
   if (tema === 'uber') {
     return (
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+      <div className="fixed inset-0 z-[8] pointer-events-none overflow-hidden">
         {/* Subtle scan line */}
         <div
           className="absolute left-0 right-0 h-[1px] animate-uber-scan"
@@ -112,7 +112,7 @@ function ThemeBackground({ tema }) {
   /* ── IFOOD ── warm red glows ──────────────────────────────────── */
   if (tema === 'ifood') {
     return (
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+      <div className="fixed inset-0 z-[8] pointer-events-none overflow-hidden">
         <div
           className="absolute animate-ifood-glow"
           style={{
@@ -144,7 +144,7 @@ function ThemeBackground({ tema }) {
   /* ── 99 ── diagonal yellow taxi stripes ───────────────────────── */
   if (tema === '99') {
     return (
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+      <div className="fixed inset-0 z-[8] pointer-events-none overflow-hidden">
         {/* Animated diagonal stripes */}
         <div
           className="absolute inset-0 animate-taxi-drift"
@@ -175,7 +175,7 @@ function ThemeBackground({ tema }) {
   /* ── MARVEL ── red/gold epic atmosphere ───────────────────────── */
   if (tema === 'marvel') {
     return (
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+      <div className="fixed inset-0 z-[8] pointer-events-none overflow-hidden">
         {/* Red glow top-left */}
         <div
           className="absolute"
@@ -213,7 +213,7 @@ function ThemeBackground({ tema }) {
   /* ── RICK & MORTY ── portal interestelar ──────────────────────── */
   if (tema === 'rick') {
     return (
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+      <div className="fixed inset-0 z-[8] pointer-events-none overflow-hidden">
         {/* Main portal glow */}
         <div
           className="absolute animate-rick-portal"
