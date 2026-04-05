@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { getAuthToken } from '../../utils/getAuthToken';
 import {
   Search, LayoutGrid, LayoutList, SlidersHorizontal, X, ChevronRight,
@@ -361,15 +362,13 @@ function StudioPanel({ produto, onClose }) {
             {/* Ações */}
             <section className="space-y-2 pt-2">
               <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest">Ações</p>
-              <a
-                href={`/admin?sku=${produto.sku}`}
-                target="_blank"
-                rel="noreferrer"
+              <Link
+                to={`/catalogo/admin?sku=${encodeURIComponent(produto.sku)}`}
                 className="flex items-center gap-2 w-full px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
               >
                 <ExternalLink size={13} />
                 Editar no Admin
-              </a>
+              </Link>
             </section>
           </div>
         )}
@@ -424,15 +423,13 @@ function StudioPanel({ produto, onClose }) {
                 A sincronização com o Bling será ativada em breve.
                 Por enquanto edite diretamente via Admin Produtos.
               </p>
-              <a
-                href={`/admin?sku=${produto.sku}`}
-                target="_blank"
-                rel="noreferrer"
+              <Link
+                to={`/catalogo/admin?sku=${encodeURIComponent(produto.sku)}`}
                 className="mt-3 flex items-center gap-2 w-full px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
               >
                 <ExternalLink size={13} />
                 Abrir Admin
-              </a>
+              </Link>
             </div>
           </div>
         )}
