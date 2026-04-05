@@ -114,8 +114,30 @@ async function printDanfe(blingNfId, onStatus) {
   const res = await fetch(`/bling/danfe/${encodeURIComponent(blingNfId)}`, {
     headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
   });
-  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    // Mensagem amigável para NF sem DANFE disponível
+    if (res.status === 404 || data.error === 'danfe_nao_disponivel') {
+      throw new Error('DANFE não disponível — NF ainda não autorizada no Bling.');
+    }
+    throw new Error(data.message || data.error || `Erro ${res.status}`);
+  }
+
+  // Bling pode retornar PDF base64 ou URL direta
+  if (data.pdfUrl) {
+    // Baixa o PDF pela URL e converte para base64
+    onStatus?.('Baixando PDF…');
+    const pdfRes = await fetch(data.pdfUrl);
+    const buf    = await pdfRes.arrayBuffer();
+    const b64    = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    onStatus?.('Enviando para impressora…');
+    const printer = await qz.printers.getDefault();
+    const config  = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
+    await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64 }]);
+    return;
+  }
+
   if (!data?.pdf) throw new Error('Bling não retornou o PDF da DANFE.');
   onStatus?.('Enviando para impressora…');
   const printer = await qz.printers.getDefault();
@@ -539,20 +561,26 @@ function DanfeButton({ blingNfId }) {
       await printDanfe(blingNfId, m => setMsg(m));
       setSt('ok'); setMsg('Impresso ✓');
       setTimeout(()=>{setSt(null);setMsg('');}, 4000);
-    } catch(e) { setSt('err'); setMsg(e.message); }
+    } catch(e) {
+      const isNaoDisp = e.message.includes('não disponível') || e.message.includes('nao_disponivel');
+      setSt(isNaoDisp ? 'warn' : 'err');
+      setMsg(e.message);
+    }
   }
 
   return (
-    <button onClick={handle} disabled={st==='loading'}
-      className={`w-full flex items-center justify-center gap-2.5 py-3 rounded-2xl border-2 text-sm font-extrabold transition-all
+    <button onClick={handle} disabled={st==='loading' || st==='warn'}
+      className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl border text-sm font-bold transition-all
         ${st==='loading' ? 'border-slate-600 bg-slate-800/60 text-slate-500 cursor-wait' :
-          st==='ok'      ? 'border-emerald-500/50 bg-emerald-950/40 text-emerald-400' :
-          st==='err'     ? 'border-red-500/40 bg-red-950/30 text-red-400' :
-          'border-dashed border-slate-600 bg-slate-800/30 text-slate-400 hover:border-slate-400 hover:text-slate-200'}`}>
-      {st==='loading' ? <><Loader2 size={15} className="animate-spin"/>{msg}</> :
-       st==='ok'      ? <><CircleCheck size={15}/>{msg}</> :
-       st==='err'     ? <><span>⚠️</span><span className="text-xs font-normal">{msg}</span></> :
-       <><Printer size={15}/> Imprimir DANFE Simplificado</>}
+          st==='ok'      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' :
+          st==='warn'    ? 'border-amber-500/30 bg-amber-500/5 text-amber-500 cursor-default' :
+          st==='err'     ? 'border-red-500/30 bg-red-500/5 text-red-400' :
+          'border-dashed border-slate-600 bg-slate-800/20 text-slate-500 hover:border-slate-400 hover:text-slate-300'}`}>
+      {st==='loading' ? <><Loader2 size={14} className="animate-spin"/><span className="text-xs font-normal">{msg}</span></> :
+       st==='ok'      ? <><CircleCheck size={14}/><span>{msg}</span></> :
+       st==='warn'    ? <><span className="text-sm">⚠️</span><span className="text-xs font-normal">{msg}</span></> :
+       st==='err'     ? <><span className="text-sm">⚠️</span><span className="text-xs font-normal">{msg}</span><span className="ml-auto text-[10px] underline" onClick={e=>{e.stopPropagation();setSt(null);}}>tentar de novo</span></> :
+       <><Printer size={14}/> Imprimir DANFE</>}
     </button>
   );
 }

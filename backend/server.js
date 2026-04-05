@@ -2458,11 +2458,47 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
     const resp = await fetch(`${BLING_API_BASE}/nfe/${req.params.id}/danfe`, {
       headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/pdf' },
     });
-    if (resp.status === 401) throw new Error('bling_not_authorized');
+
+    if (resp.status === 401) return res.status(401).json({ error: 'bling_not_authorized' });
+
+    // Bling retorna 4xx com JSON quando a NF não tem DANFE (ex: não autorizada ainda)
     if (!resp.ok) {
-      const txt = await resp.text().catch(() => '');
-      throw new Error(`Bling DANFE ${resp.status}: ${txt.slice(0, 120)}`);
+      let errBody = {};
+      const ct = resp.headers.get('content-type') || '';
+      if (ct.includes('json')) {
+        errBody = await resp.json().catch(() => ({}));
+      } else {
+        const txt = await resp.text().catch(() => '');
+        errBody = { message: txt.slice(0, 120) };
+      }
+      const isNotFound = resp.status === 404
+        || (errBody.error?.type || '').includes('NOT_FOUND')
+        || (errBody.data?.[0]?.type || '').includes('NOT_FOUND');
+
+      if (isNotFound) {
+        return res.status(404).json({
+          error: 'danfe_nao_disponivel',
+          message: 'DANFE não disponível para esta NF — verifique se foi autorizada no Bling.',
+        });
+      }
+
+      console.error('[GET /bling/danfe/:id] Bling error', resp.status, errBody);
+      return res.status(422).json({
+        error: 'bling_danfe_error',
+        message: `Bling retornou ${resp.status}: ${errBody.message || JSON.stringify(errBody).slice(0, 100)}`,
+      });
     }
+
+    // Sucesso — pode vir como PDF binário ou JSON com URL
+    const ct = resp.headers.get('content-type') || '';
+    if (ct.includes('json')) {
+      // Bling retornou JSON com link para o PDF
+      const data = await resp.json();
+      const pdfUrl = data?.data?.url || data?.url;
+      if (pdfUrl) return res.json({ ok: true, pdfUrl, nfId: req.params.id });
+      return res.status(422).json({ error: 'danfe_sem_url', message: 'Bling retornou JSON sem URL do PDF.' });
+    }
+
     const buffer = await resp.arrayBuffer();
     const b64 = Buffer.from(buffer).toString('base64');
     res.json({ ok: true, pdf: b64, nfId: req.params.id });
