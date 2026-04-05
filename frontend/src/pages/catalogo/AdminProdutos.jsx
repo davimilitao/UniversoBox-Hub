@@ -1,41 +1,55 @@
 /**
  * @file AdminProdutos.jsx
- * @description Migração React de admin.html — gestão completa de produtos:
- *              localização, fotos (Cloudinary), notas operacionais, embalagens.
- * @version 1.0.0
+ * @description Migração React de admin.html — gestão de localização, fotos e notas.
+ *              Layout fiel ao legado: sidebar esquerda (busca+lista) + painel direito.
+ * @version 2.0.0
  * @date 2026-04-04
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-  Search, X, Image, MapPin, StickyNote, Box, Package, Ruler,
-  Weight, Barcode, Tag, DollarSign, Upload, Trash2, RefreshCw,
+  Search, X, Image, MapPin, StickyNote, Box, Package,
+  Weight, Barcode, Tag, DollarSign, Loader2, Save,
   CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight,
-  ExternalLink, Star, Layers, Edit3, Save, Loader2,
-  Camera, Plus, ShoppingBag, Info, Eye, Hash, Boxes,
+  Camera, Plus, Trash2, Eye, Info, Hash, Boxes, Ruler,
+  ShoppingBag, RefreshCw, ExternalLink, Star,
 } from 'lucide-react';
+import { getAuthToken } from '../../utils/getAuthToken';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function apiHeaders(extra = {}) {
-  const token = localStorage.getItem('expedicao_token') || '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...extra };
-}
+// ─── API helpers ──────────────────────────────────────────────────────────────
+
 async function apiFetch(path, opts = {}) {
-  const token = localStorage.getItem('expedicao_token') || '';
-  const res = await fetch(path, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(opts.headers || {}) },
-  });
+  const token = await getAuthToken();
+  const isFormData = opts.body instanceof FormData;
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(opts.headers || {}),
+  };
+  const res = await fetch(path, { ...opts, headers });
+  return res;
+}
+
+async function apiJson(path, opts = {}) {
+  const res = await apiFetch(path, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
   return res.json();
 }
 
+// ─── Formatters ───────────────────────────────────────────────────────────────
+
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-function fmtBrl(v) { return v ? BRL.format(v) : '—'; }
-function fmtNum(v, unit = '') { return v ? `${v}${unit}` : '—'; }
+const fmtBrl = v => v ? BRL.format(v) : null;
+const fmtKg  = v => v ? `${v} kg` : null;
+const fmtCm  = v => v ? `${v} cm` : null;
 
 function calcScore(p) {
   let s = 0;
-  const hasImg = !!(p.displayImage || p.images?.length || p.stockPhotos?.length);
+  const hasImg = p.displayImage || p.images?.length || p.stockPhotos?.length;
   if (hasImg)                               s += 25;
   if (p.ean)                                s += 20;
   if (p.width && p.height && p.depth)       s += 20;
@@ -44,334 +58,379 @@ function calcScore(p) {
   return s;
 }
 
-// ─── Score Badge ──────────────────────────────────────────────────────────────
-function ScorePill({ score }) {
-  const c = score >= 80 ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25'
-          : score >= 50 ? 'text-amber-400 bg-amber-500/10 border-amber-500/25'
-          :               'text-red-400 bg-red-500/10 border-red-500/25';
-  return <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md border tabular-nums ${c}`}>{score}%</span>;
+// ─── Score Dot ────────────────────────────────────────────────────────────────
+function ScoreDot({ score }) {
+  const c = score >= 80 ? 'bg-emerald-400' : score >= 50 ? 'bg-amber-400' : 'bg-red-400';
+  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${c}`} title={`Score ${score}%`} />;
 }
 
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
-function Sk({ h = 'h-4', w = 'w-full', cls = '' }) {
-  return <div className={`${h} ${w} rounded-md bg-white/[0.05] animate-pulse ${cls}`} />;
-}
-
-// ─── PhotoSlot ───────────────────────────────────────────────────────────────
-function PhotoSlot({ url, label, onUpload, onDelete, uploading }) {
-  const ref = useRef();
+// ─── Section wrapper ──────────────────────────────────────────────────────────
+function Section({ emoji, title, badge, children, muted }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <p className="text-[9px] text-slate-600 uppercase tracking-widest font-semibold">{label}</p>
-      {url ? (
-        <div className="relative group rounded-xl overflow-hidden bg-slate-800 aspect-square border border-white/[0.07]">
-          <img src={url} alt={label} className="w-full h-full object-contain p-1" />
-          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-            <a href={url} target="_blank" rel="noreferrer" className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors">
-              <Eye size={14} />
+    <div className="border border-white/[0.07] rounded-xl overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-900/70 border-b border-white/[0.05]">
+        <span className="text-sm">{emoji}</span>
+        <span className="text-[11px] font-bold text-slate-300 tracking-wide">{title}</span>
+        {badge && <span className="ml-1 text-[10px] text-slate-600 border border-white/[0.06] rounded px-1.5 py-px">{badge}</span>}
+        {muted && <span className="ml-auto text-[10px] text-slate-700 italic">{muted}</span>}
+      </div>
+      <div className="p-4 bg-slate-900/30">{children}</div>
+    </div>
+  );
+}
+
+// ─── DataRow (Dados do Bling) ─────────────────────────────────────────────────
+function DataRow({ label, value, warn }) {
+  if (!value && !warn) return null;
+  return (
+    <div className="flex items-baseline gap-2 py-1.5 border-b border-white/[0.04] last:border-0">
+      <span className="text-[10px] text-slate-600 w-24 shrink-0 uppercase tracking-wider font-medium">{label}</span>
+      <span className={`text-[12px] font-medium flex-1 ${warn ? 'text-amber-400' : 'text-slate-200'}`}>
+        {value || <span className="text-slate-700 italic text-[11px]">Não informado</span>}
+      </span>
+    </div>
+  );
+}
+
+// ─── PhotoStrip ───────────────────────────────────────────────────────────────
+function PhotoStrip({ photos, kind, onUpload, onDelete, maxSlots = 10 }) {
+  const fileRef = useRef();
+  const [uploading, setUploading] = useState(false);
+
+  async function handleUpload(file) {
+    if (!file || uploading) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('kind', kind);
+      onUpload(fd, kind, setUploading);
+    } catch {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {photos.map((url, i) => (
+        <div key={i} className="relative group w-[88px] h-[88px] rounded-xl overflow-hidden border border-white/[0.08] bg-slate-800 shrink-0">
+          <img
+            src={url}
+            alt=""
+            className="w-full h-full object-contain p-1"
+            onError={e => { e.target.src = ''; e.target.style.display = 'none'; }}
+          />
+          {/* Hover overlay */}
+          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+            <a href={url} target="_blank" rel="noreferrer"
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+              onClick={e => e.stopPropagation()}>
+              <Eye size={12} />
             </a>
-            <button onClick={onDelete} className="p-2 rounded-lg bg-red-500/20 hover:bg-red-500/40 text-red-300 transition-colors">
-              <Trash2 size={14} />
+            <button onClick={() => onDelete(kind, i)}
+              className="p-1.5 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-200 transition-colors">
+              <Trash2 size={12} />
             </button>
           </div>
         </div>
-      ) : (
-        <button
-          onClick={() => ref.current?.click()}
-          disabled={uploading}
-          className="aspect-square rounded-xl border-2 border-dashed border-slate-700 hover:border-emerald-500/50 flex flex-col items-center justify-center gap-2 text-slate-600 hover:text-emerald-400 transition-all disabled:opacity-50"
-        >
-          {uploading ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
-          <span className="text-[10px]">{uploading ? 'Enviando…' : 'Adicionar'}</span>
-        </button>
+      ))}
+
+      {/* Add button */}
+      {photos.length < maxSlots && (
+        <>
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="w-[88px] h-[88px] rounded-xl border-2 border-dashed border-slate-700 hover:border-emerald-500/60 hover:bg-emerald-500/5 flex flex-col items-center justify-center gap-1 text-slate-700 hover:text-emerald-400 transition-all shrink-0 disabled:opacity-40"
+          >
+            {uploading
+              ? <Loader2 size={18} className="animate-spin" />
+              : <Plus size={18} />
+            }
+            <span className="text-[9px] font-semibold uppercase tracking-wider">
+              {uploading ? 'Enviando' : 'Adicionar'}
+            </span>
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden"
+            onChange={e => handleUpload(e.target.files?.[0])} />
+        </>
       )}
-      <input ref={ref} type="file" accept="image/*" className="hidden" onChange={e => onUpload(e.target.files?.[0])} />
     </div>
   );
 }
 
-// ─── InfoLine ─────────────────────────────────────────────────────────────────
-function InfoLine({ icon: Icon, label, value, mono = false, highlight }) {
-  const valCls = [
-    mono ? 'font-mono text-[11px]' : 'text-sm',
-    highlight === 'warn' ? 'text-amber-400' :
-    highlight === 'ok'   ? 'text-emerald-400' : 'text-slate-200',
-  ].join(' ');
-  return (
-    <div className="flex items-start gap-2.5 py-2 border-b border-white/[0.04] last:border-0">
-      <Icon size={13} className="text-slate-600 mt-0.5 shrink-0" />
-      <span className="text-[11px] text-slate-500 w-24 shrink-0 mt-0.5">{label}</span>
-      <span className={`flex-1 min-w-0 ${valCls}`}>{value || '—'}</span>
-    </div>
-  );
-}
+// ─── BinPhotoSlot ─────────────────────────────────────────────────────────────
+function BinPhotoSlot({ url, onUpload, onDelete }) {
+  const fileRef = useRef();
+  const [uploading, setUploading] = useState(false);
 
-// ─── Section Card ─────────────────────────────────────────────────────────────
-function SectionCard({ icon: Icon, title, badge, children, accent = 'emerald' }) {
-  const colors = {
-    emerald: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-    blue:    'text-blue-400 bg-blue-500/10 border-blue-500/20',
-    amber:   'text-amber-400 bg-amber-500/10 border-amber-500/20',
-    slate:   'text-slate-400 bg-slate-500/10 border-slate-500/20',
-  };
-  return (
-    <div className="rounded-xl border border-white/[0.07] bg-slate-900/60 overflow-hidden">
-      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-white/[0.06]">
-        <div className={`w-6 h-6 rounded-md flex items-center justify-center border ${colors[accent]}`}>
-          <Icon size={13} />
+  async function handleUpload(file) {
+    if (!file) return;
+    setUploading(true);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('kind', 'bin');
+    onUpload(fd, 'bin', setUploading);
+  }
+
+  if (url) {
+    return (
+      <div className="relative group w-full h-32 rounded-xl overflow-hidden border border-white/[0.08] bg-slate-800">
+        <img src={url} alt="Prateleira" className="w-full h-full object-cover" />
+        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+          <a href={url} target="_blank" rel="noreferrer"
+            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors">
+            <Eye size={14} />
+          </a>
+          <button onClick={() => onDelete('bin', 0)}
+            className="p-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-200 transition-colors">
+            <Trash2 size={14} />
+          </button>
         </div>
-        <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">{title}</span>
-        {badge && (
-          <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-500 border border-white/[0.05]">
-            {badge}
-          </span>
-        )}
       </div>
-      <div className="p-4">{children}</div>
-    </div>
+    );
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => fileRef.current?.click()}
+        disabled={uploading}
+        className="w-full h-24 rounded-xl border-2 border-dashed border-slate-700 hover:border-amber-500/50 hover:bg-amber-500/5 flex items-center justify-center gap-2 text-slate-600 hover:text-amber-400 transition-all disabled:opacity-40"
+      >
+        {uploading ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+        <span className="text-xs font-medium">{uploading ? 'Enviando…' : 'Tirar foto da prateleira'}</span>
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden"
+        onChange={e => handleUpload(e.target.files?.[0])} />
+    </>
   );
 }
 
-// ─── ProductListItem ──────────────────────────────────────────────────────────
-function ProductListItem({ p, active, onClick }) {
-  const img = p.displayImage || p.images?.[0] || p.stockPhotos?.[0] || null;
-  const score = calcScore(p);
+// ─── CheckItem ────────────────────────────────────────────────────────────────
+function CheckItem({ ok, label }) {
   return (
-    <button
-      onClick={onClick}
-      className={[
-        'w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors',
-        active
-          ? 'bg-blue-500/10 border-r-2 border-blue-400'
-          : 'hover:bg-white/[0.03] border-r-2 border-transparent',
-      ].join(' ')}
-    >
-      {/* Thumb */}
-      <div className="w-9 h-9 rounded-lg bg-slate-800 border border-white/[0.06] overflow-hidden shrink-0">
-        {img
-          ? <img src={img} alt="" className="w-full h-full object-contain p-0.5" />
-          : <div className="flex items-center justify-center h-full"><Image size={14} className="text-slate-700" /></div>
-        }
-      </div>
-
-      {/* Info */}
-      <div className="flex-1 min-w-0">
-        <p className="text-[10px] font-mono text-blue-400 leading-none">{p.sku}</p>
-        <p className="text-[11px] text-slate-300 truncate mt-0.5 leading-snug">{p.name}</p>
-      </div>
-
-      {/* Score */}
-      <ScorePill score={score} />
-    </button>
+    <div className={`flex items-center gap-2 text-xs ${ok ? 'text-emerald-400' : 'text-slate-600'}`}>
+      <CheckCircle2 size={12} className={ok ? '' : 'opacity-0'} />
+      {!ok && <span className="w-3 h-3 rounded-full border border-slate-700 shrink-0" />}
+      <span>{label}</span>
+    </div>
   );
 }
 
 // ─── AdminProdutos ────────────────────────────────────────────────────────────
 export default function AdminProdutos() {
-  // ── Left: search & list ──────────────────────────────────────────────────
-  const [query,       setQuery]       = useState('');
-  const [activeFilter, setFilter]     = useState('todos'); // todos|semfoto|semmarca|semlocal
-  const [results,     setResults]     = useState([]);
-  const [searching,   setSearching]   = useState(false);
-  const [page,        setPage]        = useState(0);
-  const PER_PAGE = 20;
+  const [searchParams] = useSearchParams();
 
-  // ── Right: product detail ─────────────────────────────────────────────────
-  const [selected,    setSelected]    = useState(null); // produto carregado
-  const [loadingProd, setLoadingProd] = useState(false);
-  const [saving,      setSaving]      = useState(false);
-  const [saved,       setSaved]       = useState(false);
+  // Left panel state
+  const [query,      setQuery]      = useState('');
+  const [results,    setResults]    = useState([]);
+  const [allProds,   setAllProds]   = useState([]); // /products/all para browse
+  const [loading,    setLoading]    = useState(true);
+  const [searching,  setSearching]  = useState(false);
+  const [filter,     setFilter]     = useState('todos');
+  const [page,       setPage]       = useState(0);
+  const PER = 20;
 
-  // Editable fields
-  const [binName,     setBinName]     = useState('');
-  const [notes,       setNotes]       = useState('');
-  const [stockPhotos, setStockPhotos] = useState([]);
-  const [boxPhotos,   setBoxPhotos]   = useState([]);
-  const [binPhoto,    setBinPhoto]    = useState('');
-  const [uploading,   setUploading]   = useState({}); // key → bool
+  // Right panel state
+  const [sku,        setSku]        = useState(searchParams.get('sku') || '');
+  const [produto,    setProduto]    = useState(null);
+  const [loadingP,   setLoadingP]   = useState(false);
+  const [saving,     setSaving]     = useState(false);
+  const [savedOk,    setSavedOk]    = useState(false);
+
+  // Editable overrides
+  const [binName,    setBinName]    = useState('');
+  const [notes,      setNotes]      = useState('');
+  const [stockPhotos,setStockPhotos]= useState([]);
+  const [boxPhotos,  setBoxPhotos]  = useState([]);
+  const [binPhoto,   setBinPhoto]   = useState('');
 
   // Embalagens
-  const [embalagens,  setEmbalagens]  = useState([]);
+  const [embs, setEmbs] = useState([]);
 
-  // Debounced search
-  const debounceRef = useRef(null);
+  const debRef = useRef(null);
 
-  const doSearch = useCallback(async (q, filter) => {
+  // ── Load all products (browse / filter) ──────────────────────────────────
+  useEffect(() => {
+    fetch('/products/all')
+      .then(r => r.json())
+      .then(d => {
+        const items = Array.isArray(d) ? d : (d.items || []);
+        setAllProds(items);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+
+    fetch('/embalagens/list')
+      .then(r => r.json())
+      .then(d => setEmbs(Array.isArray(d) ? d : (d.items || [])));
+  }, []);
+
+  // ── Load initial SKU from URL param ──────────────────────────────────────
+  useEffect(() => {
+    if (sku) loadProduct(sku);
+  }, []); // eslint-disable-line
+
+  // ── Search ───────────────────────────────────────────────────────────────
+  async function doSearch(q) {
+    if (!q.trim() || q.trim().length < 2) {
+      setResults([]);
+      return;
+    }
     setSearching(true);
     try {
-      let url = `/admin/products/search?q=${encodeURIComponent(q)}&limit=100`;
-      if (filter && filter !== 'todos') url += `&filter=${filter}`;
-      const data = await apiFetch(url);
-      setResults(Array.isArray(data) ? data : (data.items || data.results || []));
-      setPage(0);
-    } catch {
-      setResults([]);
-    } finally {
-      setSearching(false);
-    }
-  }, []);
+      const res = await fetch(`/admin/products/search?q=${encodeURIComponent(q.trim())}`);
+      const data = await res.json();
+      setResults(Array.isArray(data) ? data : (data.items || []));
+    } catch { setResults([]); }
+    setSearching(false);
+  }
 
-  // Load all on mount
-  useEffect(() => { doSearch('', 'todos'); }, [doSearch]);
-
-  // Load embalagens
-  useEffect(() => {
-    apiFetch('/embalagens/list').then(d => setEmbalagens(Array.isArray(d) ? d : (d.items || [])));
-  }, []);
-
-  function handleQueryChange(v) {
+  function handleQuery(v) {
     setQuery(v);
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => doSearch(v, activeFilter), 350);
+    setPage(0);
+    clearTimeout(debRef.current);
+    debRef.current = setTimeout(() => doSearch(v), 320);
   }
 
-  function handleFilterChange(f) {
-    setFilter(f);
-    doSearch(query, f);
-  }
+  // ── Filtered list ─────────────────────────────────────────────────────────
+  const list = (() => {
+    const base = query.trim().length >= 2 ? results : allProds;
+    let arr = [...base];
+    if (filter === 'semfoto')   arr = arr.filter(p => !p.displayImage && !p.images?.length && !p.stockPhotos?.length);
+    if (filter === 'semmarca')  arr = arr.filter(p => !p.marca);
+    if (filter === 'semlocal')  arr = arr.filter(p => !p.bin && !p.customBinName);
+    return arr;
+  })();
 
-  // ── Load product ──────────────────────────────────────────────────────────
-  async function loadProduct(sku) {
-    setLoadingProd(true);
-    setSaved(false);
+  const pageItems = list.slice(page * PER, (page + 1) * PER);
+  const totalPages = Math.ceil(list.length / PER);
+
+  // ── Load product detail ───────────────────────────────────────────────────
+  async function loadProduct(s) {
+    setSku(s);
+    setLoadingP(true);
+    setSavedOk(false);
     try {
-      const data = await apiFetch(`/admin/products/${sku}`);
-      const p = data.produto || data;
-      setSelected(p);
+      const res = await fetch(`/admin/products/${encodeURIComponent(s)}`);
+      const data = await res.json();
+      const p = data.item || data.produto || data;
+      setProduto(p);
       setBinName(p.customBinName || p.bin || '');
       setNotes(p.notes || '');
       setStockPhotos(p.stockPhotos || []);
       setBoxPhotos(p.boxPhotos || []);
       setBinPhoto(p.binPhoto || '');
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingProd(false);
-    }
+    } catch {}
+    setLoadingP(false);
   }
 
   // ── Save overrides ────────────────────────────────────────────────────────
   async function handleSave() {
-    if (!selected) return;
+    if (!produto) return;
     setSaving(true);
     try {
-      await apiFetch(`/admin/products/${selected.sku}`, {
+      await apiJson(`/admin/products/${encodeURIComponent(produto.sku)}`, {
         method: 'PATCH',
         body: JSON.stringify({ customBinName: binName, notes, stockPhotos, boxPhotos, binPhoto }),
       });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-      // Refresh na lista
-      doSearch(query, activeFilter);
-    } catch {}
+      setSavedOk(true);
+      setTimeout(() => setSavedOk(false), 2500);
+    } catch (e) {
+      alert('Erro ao salvar: ' + e.message);
+    }
     setSaving(false);
   }
 
   // ── Photo upload ──────────────────────────────────────────────────────────
-  async function uploadPhoto(file, kind, index) {
-    if (!file || !selected) return;
-    const key = `${kind}-${index}`;
-    setUploading(u => ({ ...u, [key]: true }));
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('kind', kind);
+  async function handlePhotoUpload(fd, kind, setUploading) {
+    if (!produto) return;
     try {
-      const token = localStorage.getItem('expedicao_token') || '';
-      const r = await fetch(`/admin/save-photo-cloudinary/${selected.sku}`, {
+      const res = await apiFetch(`/admin/save-photo-cloudinary/${encodeURIComponent(produto.sku)}`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });
-      const data = await r.json();
+      const data = await res.json();
       if (data.ok && data.url) {
-        if (kind === 'stock') {
-          const next = [...stockPhotos];
-          if (index < next.length) next[index] = data.url; else next.push(data.url);
-          setStockPhotos(next);
-        } else if (kind === 'box') {
-          const next = [...boxPhotos];
-          if (index < next.length) next[index] = data.url; else next.push(data.url);
-          setBoxPhotos(next);
-        } else if (kind === 'bin') {
-          setBinPhoto(data.url);
-        }
+        if (kind === 'stock') setStockPhotos(p => [...p, data.url]);
+        if (kind === 'box')   setBoxPhotos(p => [...p, data.url]);
+        if (kind === 'bin')   setBinPhoto(data.url);
+      } else {
+        alert(data.error || 'Erro no upload');
       }
-    } catch {}
-    setUploading(u => ({ ...u, [key]: false }));
+    } catch (e) {
+      alert('Erro no upload: ' + e.message);
+    } finally {
+      setUploading(false);
+    }
   }
 
-  function removePhoto(kind, index) {
-    if (kind === 'stock') { const n = [...stockPhotos]; n.splice(index, 1); setStockPhotos(n); }
-    if (kind === 'box')   { const n = [...boxPhotos];   n.splice(index, 1); setBoxPhotos(n); }
+  function handleDeletePhoto(kind, idx) {
+    if (kind === 'stock') setStockPhotos(p => p.filter((_, i) => i !== idx));
+    if (kind === 'box')   setBoxPhotos(p => p.filter((_, i) => i !== idx));
     if (kind === 'bin')   setBinPhoto('');
   }
 
   // ── Compatible packaging ──────────────────────────────────────────────────
-  const embalagensFit = embalagens.filter(e => {
-    if (!selected?.width || !selected?.height || !selected?.depth) return false;
-    const fits = (dim, box) => box === 0 || dim <= box;
-    return fits(selected.width, e.largura || 0)
-        && fits(selected.height, e.altura || 0)
-        && fits(selected.depth, e.profundidade || 0);
-  }).slice(0, 6);
+  const embsFit = embs.filter(e => {
+    if (!produto?.width || !produto?.height || !produto?.depth) return false;
+    const fits = (prod, box) => !box || prod <= box;
+    return fits(produto.width, e.largura) && fits(produto.height, e.altura) && fits(produto.depth, e.profundidade);
+  }).slice(0, 8);
 
-  // ── Pagination ────────────────────────────────────────────────────────────
-  const pageResults = results.slice(page * PER_PAGE, (page + 1) * PER_PAGE);
-  const totalPages  = Math.ceil(results.length / PER_PAGE);
+  const score = produto ? calcScore(produto) : 0;
+  const thumbUrl = produto?.displayImage || produto?.images?.[0] || stockPhotos[0] || null;
 
-  const FILTERS = [
-    { id: 'todos',     label: 'Todos' },
-    { id: 'semfoto',   label: 'Sem foto' },
-    { id: 'semmarca',  label: 'Sem marca' },
-    { id: 'semlocal',  label: 'Sem local' },
-  ];
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="flex h-full min-h-0 overflow-hidden bg-slate-950 animate-fade-in">
 
-      {/* ── Left: Search + List ─────────────────────────────────────────── */}
-      <div className="flex flex-col w-72 shrink-0 border-r border-white/[0.06] bg-slate-950 overflow-hidden">
+      {/* ══ LEFT: Search + List ═══════════════════════════════════════════════ */}
+      <aside className="flex flex-col w-[260px] shrink-0 border-r border-white/[0.06] overflow-hidden">
 
-        {/* Header */}
-        <div className="shrink-0 px-3 pt-3 pb-2 border-b border-white/[0.05]">
-          <div className="flex items-center gap-1.5 mb-2">
-            <div className="w-6 h-6 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
-              <Layers size={13} className="text-blue-400" />
-            </div>
+        {/* Header + busca */}
+        <div className="shrink-0 border-b border-white/[0.05] px-3 pt-3 pb-2 space-y-2">
+          <div className="flex items-center gap-2">
             <span className="text-[12px] font-bold text-slate-200">Admin Produtos</span>
-            <span className="ml-auto text-[10px] text-slate-600">{results.length} produtos</span>
+            <span className="ml-auto text-[10px] text-slate-700 tabular-nums">{list.length}</span>
           </div>
 
-          {/* Search */}
+          {/* Search input */}
           <div className="relative">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600" />
-            {searching && <Loader2 size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-600 animate-spin" />}
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
             <input
               value={query}
-              onChange={e => handleQueryChange(e.target.value)}
+              onChange={e => handleQuery(e.target.value)}
               placeholder="SKU, EAN ou nome…"
-              className="w-full pl-7 pr-7 py-1.5 rounded-lg bg-slate-800/80 border border-white/[0.07] text-[12px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/15 transition-all"
+              className="w-full pl-7 pr-6 py-1.5 rounded-lg bg-slate-800 border border-white/[0.07] text-[12px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20 transition-all"
             />
-            {query && (
-              <button onClick={() => { setQuery(''); doSearch('', activeFilter); }}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300">
-                <X size={12} />
+            {searching && <Loader2 size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 animate-spin" />}
+            {query && !searching && (
+              <button onClick={() => { setQuery(''); setResults([]); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300 transition-colors">
+                <X size={11} />
               </button>
             )}
           </div>
+          {query.length > 0 && query.length < 2 && (
+            <p className="text-[10px] text-slate-700 px-1">Digite ao menos 2 letras</p>
+          )}
 
-          {/* Filters */}
-          <div className="flex gap-1 mt-2 flex-wrap">
-            {FILTERS.map(f => (
-              <button
-                key={f.id}
-                onClick={() => handleFilterChange(f.id)}
+          {/* Filter chips */}
+          <div className="flex flex-wrap gap-1">
+            {[
+              { id: 'todos',    label: 'Todos' },
+              { id: 'semfoto',  label: 'Sem foto' },
+              { id: 'semmarca', label: 'Sem marca' },
+              { id: 'semlocal', label: 'Sem local' },
+            ].map(f => (
+              <button key={f.id} onClick={() => { setFilter(f.id); setPage(0); }}
                 className={[
                   'text-[10px] px-2 py-0.5 rounded-full border font-semibold transition-colors',
-                  activeFilter === f.id
-                    ? 'bg-blue-500/15 text-blue-300 border-blue-500/35'
-                    : 'bg-slate-800 text-slate-500 border-white/[0.06] hover:border-slate-600',
+                  filter === f.id
+                    ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                    : 'bg-slate-800/60 text-slate-600 border-white/[0.06] hover:border-slate-600 hover:text-slate-400',
                 ].join(' ')}
               >
                 {f.label}
@@ -380,161 +439,211 @@ export default function AdminProdutos() {
           </div>
         </div>
 
-        {/* List */}
-        <div className="flex-1 overflow-y-auto divide-y divide-white/[0.04]">
-          {pageResults.length === 0 && !searching && (
-            <div className="flex flex-col items-center justify-center h-40 gap-2 text-slate-600">
-              <Package size={24} />
-              <p className="text-xs">Nenhum produto</p>
+        {/* Product list */}
+        <div className="flex-1 overflow-y-auto">
+          {loading && (
+            <div className="space-y-px p-2">
+              {[...Array(8)].map((_, i) => (
+                <div key={i} className="flex items-center gap-2 p-2.5 rounded-lg">
+                  <div className="w-8 h-8 rounded-lg bg-white/[0.04] animate-pulse shrink-0" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-2.5 bg-white/[0.04] rounded animate-pulse w-1/3" />
+                    <div className="h-2 bg-white/[0.03] rounded animate-pulse w-2/3" />
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-          {pageResults.map(p => (
-            <ProductListItem
-              key={p.sku}
-              p={p}
-              active={selected?.sku === p.sku}
-              onClick={() => loadProduct(p.sku)}
-            />
-          ))}
+
+          {!loading && pageItems.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 gap-2 text-slate-700">
+              <Package size={22} />
+              <p className="text-[11px]">Nenhum produto</p>
+            </div>
+          )}
+
+          {!loading && pageItems.map(p => {
+            const img = p.displayImage || p.images?.[0] || p.stockPhotos?.[0] || null;
+            const sc  = calcScore(p);
+            const isActive = p.sku === produto?.sku;
+            return (
+              <button key={p.sku} onClick={() => loadProduct(p.sku)}
+                className={[
+                  'w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors border-r-2',
+                  isActive
+                    ? 'bg-blue-500/[0.08] border-blue-400'
+                    : 'hover:bg-white/[0.025] border-transparent',
+                ].join(' ')}
+              >
+                {/* Thumb */}
+                <div className="w-9 h-9 rounded-lg bg-slate-800 border border-white/[0.06] overflow-hidden shrink-0">
+                  {img
+                    ? <img src={img} alt="" className="w-full h-full object-contain" />
+                    : <div className="flex h-full items-center justify-center"><Image size={13} className="text-slate-700" /></div>
+                  }
+                </div>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-mono text-blue-400 leading-none truncate">{p.sku}</p>
+                  <p className="text-[11px] text-slate-400 truncate mt-0.5 leading-snug">{p.name}</p>
+                </div>
+                <ScoreDot score={sc} />
+              </button>
+            );
+          })}
         </div>
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="shrink-0 flex items-center justify-between px-3 py-2 border-t border-white/[0.05] text-[10px] text-slate-500">
-            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-              className="p-1 rounded hover:bg-white/[0.05] disabled:opacity-30 transition-colors">
-              <ChevronLeft size={13} />
+          <div className="shrink-0 flex items-center justify-between px-3 py-2 border-t border-white/[0.05]">
+            <button disabled={page === 0} onClick={() => setPage(p => p - 1)}
+              className="p-1 rounded text-slate-600 hover:text-slate-300 disabled:opacity-30 transition-colors">
+              <ChevronLeft size={14} />
             </button>
-            <span>{page + 1} / {totalPages}</span>
-            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
-              className="p-1 rounded hover:bg-white/[0.05] disabled:opacity-30 transition-colors">
-              <ChevronRight size={13} />
+            <span className="text-[10px] text-slate-600">{page + 1} / {totalPages}</span>
+            <button disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}
+              className="p-1 rounded text-slate-600 hover:text-slate-300 disabled:opacity-30 transition-colors">
+              <ChevronRight size={14} />
             </button>
           </div>
         )}
-      </div>
+      </aside>
 
-      {/* ── Right: Product Detail ───────────────────────────────────────── */}
+      {/* ══ RIGHT: Product Panel ══════════════════════════════════════════════ */}
       <div className="flex-1 min-w-0 overflow-y-auto">
 
-        {/* Empty state */}
-        {!selected && !loadingProd && (
-          <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-700 p-8">
-            <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-white/[0.06] flex items-center justify-center">
-              <Search size={28} />
+        {/* Empty */}
+        {!produto && !loadingP && (
+          <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-700 p-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-white/[0.05] flex items-center justify-center">
+              <Search size={26} />
             </div>
-            <div className="text-center">
-              <p className="text-sm text-slate-500 font-medium">Selecione um produto</p>
-              <p className="text-xs text-slate-700 mt-1">Busque pelo SKU, EAN ou nome na lista ao lado</p>
-            </div>
+            <p className="text-sm text-slate-500 font-medium">Selecione um produto</p>
+            <p className="text-xs text-slate-700 max-w-xs">Busque por SKU, EAN ou nome na lista ao lado — ou use o filtro rápido</p>
           </div>
         )}
 
-        {/* Loading skeleton */}
-        {loadingProd && (
-          <div className="p-5 space-y-4 max-w-3xl">
-            <div className="space-y-2"><Sk h="h-7" w="w-3/4" /><Sk h="h-4" w="w-1/2" /></div>
-            <div className="space-y-2">{[...Array(5)].map((_, i) => <Sk key={i} h="h-4" />)}</div>
-            <Sk h="h-32" />
-            <Sk h="h-24" />
+        {/* Loading */}
+        {loadingP && (
+          <div className="p-5 max-w-2xl space-y-4">
+            <div className="h-8 bg-white/[0.04] rounded-xl animate-pulse w-2/3" />
+            <div className="h-5 bg-white/[0.03] rounded animate-pulse w-1/3" />
+            <div className="h-32 bg-white/[0.03] rounded-xl animate-pulse" />
+            <div className="h-24 bg-white/[0.03] rounded-xl animate-pulse" />
           </div>
         )}
 
-        {/* Product Panel */}
-        {selected && !loadingProd && (
-          <div className="p-4 max-w-3xl space-y-3 animate-fade-in">
+        {/* Panel */}
+        {produto && !loadingP && (
+          <div className="max-w-2xl p-4 space-y-3 animate-fade-in">
 
-            {/* ── Header ── */}
+            {/* ── Product header ─────────────────────────────────────────── */}
             <div className="flex items-start gap-4 p-4 rounded-xl bg-slate-900 border border-white/[0.07]">
-              {/* Thumbnail */}
-              <div className="w-16 h-16 rounded-xl bg-slate-800 border border-white/[0.06] overflow-hidden shrink-0">
-                {(selected.displayImage || selected.images?.[0] || selected.stockPhotos?.[0])
-                  ? <img src={selected.displayImage || selected.images?.[0] || selected.stockPhotos?.[0]} alt="" className="w-full h-full object-contain p-1" />
-                  : <div className="flex items-center justify-center h-full"><Image size={22} className="text-slate-700" /></div>
+
+              {/* Thumb grande */}
+              <div className="w-20 h-20 rounded-xl bg-slate-800 border border-white/[0.07] overflow-hidden shrink-0">
+                {thumbUrl
+                  ? <img src={thumbUrl} alt="" className="w-full h-full object-contain p-1" />
+                  : <div className="flex h-full items-center justify-center"><Image size={24} className="text-slate-700" /></div>
                 }
               </div>
 
               {/* Info */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <span className="text-[11px] font-mono font-bold text-blue-400">{selected.sku}</span>
-                  {selected.situacao && (
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${
-                      selected.situacao.toLowerCase().includes('ativo')
-                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
-                        : 'bg-slate-700 text-slate-400 border-slate-600'
-                    }`}>{selected.situacao}</span>
-                  )}
-                  {selected.marca && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-400 border border-white/[0.06]">{selected.marca}</span>
-                  )}
-                  <ScorePill score={calcScore(selected)} />
-                </div>
-                <p className="text-sm font-semibold text-slate-100 leading-snug">{selected.name}</p>
-              </div>
+                <p className="text-base font-bold text-slate-100 leading-snug">{produto.name}</p>
 
-              {/* Actions */}
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={`/admin?sku=${selected.sku}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="p-1.5 rounded-lg text-slate-600 hover:text-slate-300 hover:bg-white/[0.05] transition-colors"
-                  title="Abrir admin legado"
-                >
-                  <ExternalLink size={14} />
-                </a>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className={[
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
-                    saved
-                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                      : 'bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:bg-blue-500/25',
-                  ].join(' ')}
-                >
-                  {saving ? <Loader2 size={12} className="animate-spin" /> : saved ? <CheckCircle2 size={12} /> : <Save size={12} />}
-                  {saved ? 'Salvo!' : 'Salvar'}
-                </button>
+                {/* Tags: SKU, EAN, bin, marca */}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    <Barcode size={9}/>{produto.sku}
+                  </span>
+                  {produto.ean && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-700/60 text-slate-400 border border-white/[0.06]">
+                      {produto.ean}
+                    </span>
+                  )}
+                  {produto.eanBox && produto.eanBox !== produto.ean && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-700/40 text-slate-500 border border-white/[0.05]">
+                      cx: {produto.eanBox}
+                    </span>
+                  )}
+                  {(binName || produto.bin) && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                      <MapPin size={9}/>{binName || produto.bin}
+                    </span>
+                  )}
+                  {produto.stock != null && (
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${
+                      produto.stock === 0 ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                      produto.stock < 5  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                      'bg-slate-700/50 text-slate-400 border-white/[0.06]'
+                    }`}>
+                      <Boxes size={9}/>{produto.stock}
+                    </span>
+                  )}
+                  {produto.marca && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-slate-700/40 text-slate-500 border border-white/[0.05]">
+                      <Tag size={9}/>{produto.marca}
+                    </span>
+                  )}
+                </div>
+
+                {/* Completude inline */}
+                <div className="flex items-center gap-3 mt-3">
+                  <div className="flex gap-2">
+                    <CheckItem ok={!!thumbUrl}                               label="Foto" />
+                    <CheckItem ok={!!produto.ean}                            label="EAN" />
+                    <CheckItem ok={!!(produto.width && produto.height && produto.depth)} label="Dims" />
+                    <CheckItem ok={!!produto.preco}                          label="Preço" />
+                    <CheckItem ok={!!produto.weight}                         label="Peso" />
+                  </div>
+                  <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                    <a href={`/admin?sku=${produto.sku}`} target="_blank" rel="noreferrer"
+                      className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors underline">
+                      legado
+                    </a>
+                    <button onClick={handleSave} disabled={saving}
+                      className={[
+                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all',
+                        savedOk
+                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:bg-blue-500/25 active:scale-95',
+                      ].join(' ')}
+                    >
+                      {saving ? <Loader2 size={12} className="animate-spin" /> : savedOk ? <CheckCircle2 size={12} /> : <Save size={12} />}
+                      {savedOk ? 'Salvo!' : 'Salvar'}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* ── Dados do Bling (read-only) ── */}
-            <SectionCard icon={Info} title="Dados do Bling" badge="somente leitura" accent="slate">
-              <div className="divide-y divide-white/[0.04]">
-                <InfoLine icon={Barcode}     label="EAN"         value={selected.ean}    mono />
-                <InfoLine icon={Hash}        label="EAN Caixa"   value={selected.eanBox} mono />
-                <InfoLine icon={DollarSign}  label="Preço"       value={fmtBrl(selected.preco)}
-                  highlight={selected.preco ? 'ok' : 'warn'} />
-                <InfoLine icon={DollarSign}  label="Custo"       value={fmtBrl(selected.precoCusto)} />
-                <InfoLine icon={Boxes}       label="Estoque"     value={fmtNum(selected.stock, ' un')}
-                  highlight={selected.stock === 0 ? 'warn' : selected.stock < 5 ? 'warn' : undefined} />
-                <InfoLine icon={Weight}      label="Peso líq."   value={fmtNum(selected.weight, ' kg')} />
-                <InfoLine icon={Weight}      label="Peso bruto"  value={fmtNum(selected.weightBruto, ' kg')} />
-                <InfoLine icon={Ruler}       label="Dimensões"
-                  value={(selected.width && selected.height && selected.depth)
-                    ? `${selected.width} × ${selected.height} × ${selected.depth} cm`
-                    : null}
-                  highlight={(!selected.width || !selected.height || !selected.depth) ? 'warn' : undefined}
-                />
-                <InfoLine icon={ShoppingBag} label="Itens/cx"   value={fmtNum(selected.itensPorCaixa)} />
-              </div>
-
-              {selected.tagsRaw && (
-                <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-white/[0.04]">
-                  {selected.tagsRaw.split(',').map(t => t.trim()).filter(Boolean).map(tag => (
-                    <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-500 border border-white/[0.05]">{tag}</span>
-                  ))}
+            {/* ── Dados do Bling (read-only) ─────────────────────────────── */}
+            <Section emoji="📋" title="Dados do Bling" muted="somente leitura — reimporte o CSV para atualizar">
+              <div className="grid grid-cols-2 gap-x-8">
+                <div>
+                  <DataRow label="Peso líq."   value={fmtKg(produto.weight)} warn={!produto.weight} />
+                  <DataRow label="Peso bruto"  value={fmtKg(produto.weightBruto)} />
+                  <DataRow label="Largura"     value={fmtCm(produto.width)}  warn={!produto.width} />
+                  <DataRow label="Altura"      value={fmtCm(produto.height)} warn={!produto.height} />
+                  <DataRow label="Profund."    value={fmtCm(produto.depth)}  warn={!produto.depth} />
                 </div>
-              )}
-            </SectionCard>
+                <div>
+                  <DataRow label="Local Bling" value={produto.bin} />
+                  <DataRow label="Estoque"     value={produto.stock != null ? String(produto.stock) : null}
+                    warn={produto.stock === 0} />
+                  <DataRow label="Itens/cx"    value={produto.itensPorCaixa ? String(produto.itensPorCaixa) : null} />
+                  <DataRow label="Preço"       value={fmtBrl(produto.preco)} warn={!produto.preco} />
+                  <DataRow label="Custo"       value={fmtBrl(produto.precoCusto)} />
+                </div>
+              </div>
+            </Section>
 
-            {/* ── Localização ── */}
-            <SectionCard icon={MapPin} title="Localização" accent="amber">
+            {/* ── Localização ──────────────────────────────────────────────── */}
+            <Section emoji="📍" title="Localização" badge="Sistema">
               <div className="space-y-3">
                 <div>
-                  <label className="text-[10px] text-slate-500 block mb-1.5 uppercase tracking-widest font-semibold">
+                  <label className="block text-[10px] text-slate-600 uppercase tracking-widest font-bold mb-1.5">
                     Nome do local (prateleira, rua, caixa…)
                   </label>
                   <input
@@ -546,117 +655,96 @@ export default function AdminProdutos() {
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-slate-500 block mb-1.5 uppercase tracking-widest font-semibold">
+                  <label className="block text-[10px] text-slate-600 uppercase tracking-widest font-bold mb-1.5">
                     Foto da prateleira
                   </label>
-                  <PhotoSlot
+                  <BinPhotoSlot
                     url={binPhoto}
-                    label="Prateleira"
-                    onUpload={f => uploadPhoto(f, 'bin', 0)}
-                    onDelete={() => removePhoto('bin', 0)}
-                    uploading={uploading['bin-0']}
+                    onUpload={handlePhotoUpload}
+                    onDelete={handleDeletePhoto}
                   />
                 </div>
               </div>
-            </SectionCard>
+            </Section>
 
-            {/* ── Fotos do Produto ── */}
-            <SectionCard icon={Camera} title="Fotos do Produto" accent="blue">
+            {/* ── Fotos do Produto ─────────────────────────────────────────── */}
+            <Section emoji="📦" title="Fotos do Produto" badge="Sistema"
+              muted={`${stockPhotos.length + boxPhotos.length}/20`}>
               <div className="space-y-4">
                 <div>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mb-2">Produto (sem embalagem)</p>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[...Array(4)].map((_, i) => (
-                      <PhotoSlot
-                        key={i}
-                        url={stockPhotos[i] || null}
-                        label={`Foto ${i + 1}`}
-                        onUpload={f => uploadPhoto(f, 'stock', i)}
-                        onDelete={() => removePhoto('stock', i)}
-                        uploading={uploading[`stock-${i}`]}
-                      />
-                    ))}
-                  </div>
+                  <p className="text-[10px] text-slate-600 uppercase tracking-widest font-bold mb-2">
+                    📦 Produto (sem embalagem)
+                  </p>
+                  <PhotoStrip
+                    photos={stockPhotos}
+                    kind="stock"
+                    onUpload={handlePhotoUpload}
+                    onDelete={handleDeletePhoto}
+                  />
                 </div>
-
                 <div>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mb-2">Produto embalado</p>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[...Array(4)].map((_, i) => (
-                      <PhotoSlot
-                        key={i}
-                        url={boxPhotos[i] || null}
-                        label={`Foto ${i + 1}`}
-                        onUpload={f => uploadPhoto(f, 'box', i)}
-                        onDelete={() => removePhoto('box', i)}
-                        uploading={uploading[`box-${i}`]}
-                      />
-                    ))}
-                  </div>
+                  <p className="text-[10px] text-slate-600 uppercase tracking-widest font-bold mb-2">
+                    🎁 Produto embalado
+                  </p>
+                  <PhotoStrip
+                    photos={boxPhotos}
+                    kind="box"
+                    onUpload={handlePhotoUpload}
+                    onDelete={handleDeletePhoto}
+                  />
                 </div>
               </div>
-            </SectionCard>
+            </Section>
 
-            {/* ── Notas Operacionais ── */}
-            <SectionCard icon={StickyNote} title="Notas Operacionais" accent="emerald">
+            {/* ── Notas Operacionais ────────────────────────────────────────── */}
+            <Section emoji="📝" title="Notas Operacionais" badge="Sistema">
               <textarea
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 rows={3}
-                placeholder="Instruções para o separador — fragilidade, orientação de embalagem, atenção especial…"
+                placeholder="Instruções para o separador — fragilidade, orientação, embalagem especial…"
                 className="w-full px-3 py-2.5 rounded-lg bg-slate-800 border border-white/[0.07] text-sm text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/15 transition-all leading-relaxed"
               />
-              {notes && (
-                <p className="text-[10px] text-slate-600 mt-1.5">
-                  {notes.length} caracteres
-                </p>
-              )}
-            </SectionCard>
+            </Section>
 
-            {/* ── Embalagens Compatíveis ── */}
-            {(selected.width || selected.height || selected.depth) && (
-              <SectionCard icon={Box} title="Embalagens Compatíveis" badge={`${embalagensFit.length} opções`} accent="slate">
-                {embalagensFit.length === 0 ? (
-                  <p className="text-xs text-slate-600">
-                    Nenhuma embalagem cadastrada com dimensões compatíveis.
-                  </p>
+            {/* ── Embalagens Compatíveis ────────────────────────────────────── */}
+            {(produto.width || produto.height) && (
+              <Section emoji="📐" title="Embalagens Compatíveis" badge={`${embsFit.length} opções`}>
+                {embsFit.length === 0 ? (
+                  <p className="text-xs text-slate-600">Nenhuma embalagem compatível com estas dimensões.</p>
                 ) : (
-                  <div className="space-y-1.5">
-                    {embalagensFit.map((e, i) => (
-                      <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-slate-800/60 border border-white/[0.05]">
-                        <Box size={13} className="text-slate-500 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[11px] font-medium text-slate-300 truncate">{e.nome || e.name}</p>
-                          {(e.largura || e.altura || e.profundidade) && (
+                  <div className="flex flex-wrap gap-2">
+                    {embsFit.map((e, i) => (
+                      <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-slate-800/60 border border-white/[0.05]">
+                        <Box size={13} className="text-slate-600 shrink-0" />
+                        <div>
+                          <p className="text-[11px] font-medium text-slate-300">{e.nome || e.name}</p>
+                          {(e.largura || e.altura) && (
                             <p className="text-[10px] text-slate-600">{e.largura}×{e.altura}×{e.profundidade} cm</p>
                           )}
                         </div>
-                        <span className={`text-[10px] font-semibold tabular-nums ${
-                          (e.estoque || e.stock) > 0 ? 'text-emerald-400' : 'text-red-400'
-                        }`}>
-                          {e.estoque ?? e.stock ?? 0} un
-                        </span>
+                        <span className={`text-[11px] font-bold ml-auto tabular-nums ${
+                          (e.estoque ?? e.stock) > 0 ? 'text-emerald-400' : 'text-red-400'
+                        }`}>{e.estoque ?? e.stock ?? 0}</span>
                       </div>
                     ))}
                   </div>
                 )}
-              </SectionCard>
+              </Section>
             )}
 
-            {/* Save floating button (mobile) */}
-            <div className="pb-4">
-              <button
-                onClick={handleSave}
-                disabled={saving}
+            {/* Save bottom */}
+            <div className="pb-6">
+              <button onClick={handleSave} disabled={saving}
                 className={[
-                  'w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all',
-                  saved
+                  'w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all',
+                  savedOk
                     ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                    : 'bg-blue-500 hover:bg-blue-400 text-white shadow-lg shadow-blue-900/30',
+                    : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-[0.99]',
                 ].join(' ')}
               >
-                {saving ? <Loader2 size={15} className="animate-spin" /> : saved ? <CheckCircle2 size={15} /> : <Save size={15} />}
-                {saved ? 'Alterações salvas!' : 'Salvar alterações'}
+                {saving ? <Loader2 size={15} className="animate-spin" /> : savedOk ? <CheckCircle2 size={15} /> : <Save size={15} />}
+                {savedOk ? 'Alterações salvas!' : 'Salvar alterações'}
               </button>
             </div>
           </div>

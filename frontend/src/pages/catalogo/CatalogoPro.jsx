@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { getAuthToken } from '../../utils/getAuthToken';
 import {
   Search, LayoutGrid, LayoutList, SlidersHorizontal, X, ChevronRight,
   Package, Image, Tag, Weight, Ruler, DollarSign, Barcode,
@@ -242,7 +243,7 @@ function StudioPanel({ produto, onClose }) {
     fd.append('file', file);
     fd.append('kind', 'stock');
     try {
-      const token = localStorage.getItem('expedicao_token') || '';
+      const token = await getAuthToken();
       const r = await fetch(`/admin/save-photo-cloudinary/${produto.sku}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -251,6 +252,8 @@ function StudioPanel({ produto, onClose }) {
       const data = await r.json();
       if (data.ok) {
         alert('Foto enviada! Recarregue o catálogo para ver.');
+      } else {
+        alert(data.error || 'Erro no upload');
       }
     } catch (err) {
       alert('Erro ao enviar foto: ' + err.message);
