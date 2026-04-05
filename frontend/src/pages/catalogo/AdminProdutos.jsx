@@ -18,8 +18,10 @@ import {
   CheckCircle2, ChevronLeft, ChevronRight, Plus, Trash2,
   Eye, Hash, Boxes, Ruler, ShoppingBag, Tag, RefreshCw,
   AlertTriangle, Layers, ArrowUpDown, ExternalLink,
+  Sparkles, Crop, Eraser, Wand2,
 } from 'lucide-react';
 import { getAuthToken } from '../../utils/getAuthToken';
+import { ImageEditor } from '../../components/ImageEditor';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
@@ -114,8 +116,9 @@ function ProdListItem({ p, active, onClick }) {
 }
 
 // ── Photo Strip ───────────────────────────────────────────────────────────────
-function PhotoStrip({ photos, kind, sku, onUploaded, onDelete }) {
-  const [uploading, setUploading] = useState(false);
+function PhotoStrip({ photos, kind, sku, onUploaded, onDelete, onReplace }) {
+  const [uploading,  setUploading]  = useState(false);
+  const [editorOpen, setEditorOpen] = useState(null); // url being edited
   const fileRef = useRef();
 
   async function handleUpload(file) {
@@ -141,35 +144,55 @@ function PhotoStrip({ photos, kind, sku, onUploaded, onDelete }) {
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
-      {photos.map((url, i) => (
-        <div key={i} className="relative group w-[88px] h-[88px] rounded-xl overflow-hidden border border-white/[0.08] bg-slate-800 shrink-0">
-          <img src={url} alt="" className="w-full h-full object-contain p-0.5"
-            onError={e => { e.target.style.opacity = '0.3'; }} />
-          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-            <a href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors">
-              <Eye size={12} />
-            </a>
-            <button onClick={() => onDelete(kind, i)}
-              className="p-1.5 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-200 transition-colors">
-              <Trash2 size={12} />
-            </button>
-          </div>
-        </div>
-      ))}
-      {photos.length < 10 && (
-        <>
-          <button onClick={() => fileRef.current?.click()} disabled={uploading}
-            className="w-[88px] h-[88px] rounded-xl border-2 border-dashed border-slate-700 hover:border-emerald-500/60 hover:bg-emerald-500/[0.04] flex flex-col items-center justify-center gap-1 text-slate-700 hover:text-emerald-400 transition-all shrink-0 disabled:opacity-40">
-            {uploading ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
-            <span className="text-[9px] font-semibold uppercase tracking-wide">{uploading ? 'Enviando' : 'Adicionar'}</span>
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden"
-            onChange={e => handleUpload(e.target.files?.[0])} />
-        </>
+    <>
+      {/* Image editor modal */}
+      {editorOpen && (
+        <ImageEditor
+          url={editorOpen}
+          sku={sku}
+          kind={kind}
+          onSaved={newUrl => { onReplace && onReplace(kind, editorOpen, newUrl); }}
+          onClose={() => setEditorOpen(null)}
+        />
       )}
-    </div>
+
+      <div className="flex flex-wrap gap-2">
+        {photos.map((url, i) => (
+          <div key={i} className="relative group w-[88px] h-[88px] rounded-xl overflow-hidden border border-white/[0.08] bg-slate-800 shrink-0">
+            <img src={url} alt="" className="w-full h-full object-contain p-0.5"
+              onError={e => { e.target.style.opacity = '0.3'; }} />
+            <div className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+              {/* Top row: ver + editar */}
+              <div className="flex gap-1">
+                <a href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                  className="p-1 rounded-md bg-white/10 hover:bg-white/20 text-white transition-colors" title="Ver original">
+                  <Eye size={11} />
+                </a>
+                <button onClick={e => { e.stopPropagation(); setEditorOpen(url); }}
+                  className="p-1 rounded-md bg-blue-500/30 hover:bg-blue-500/50 text-blue-200 transition-colors" title="Editar imagem">
+                  <Wand2 size={11} />
+                </button>
+                <button onClick={() => onDelete(kind, i)}
+                  className="p-1 rounded-md bg-red-500/30 hover:bg-red-500/50 text-red-200 transition-colors" title="Remover">
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {photos.length < 10 && (
+          <>
+            <button onClick={() => fileRef.current?.click()} disabled={uploading}
+              className="w-[88px] h-[88px] rounded-xl border-2 border-dashed border-slate-700 hover:border-emerald-500/60 hover:bg-emerald-500/[0.04] flex flex-col items-center justify-center gap-1 text-slate-700 hover:text-emerald-400 transition-all shrink-0 disabled:opacity-40">
+              {uploading ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+              <span className="text-[9px] font-semibold uppercase tracking-wide">{uploading ? 'Enviando' : 'Adicionar'}</span>
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden"
+              onChange={e => handleUpload(e.target.files?.[0])} />
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -498,6 +521,28 @@ export default function AdminProdutos() {
     showToast('Foto salva ✓');
   }
 
+  async function replacePhoto(kind, oldUrl, newUrl) {
+    if (!produto) return;
+    let patch = {};
+    if (kind === 'stock') {
+      const n = stockPhotos.map(u => u === oldUrl ? newUrl : u);
+      patch.stockPhotos = n;
+      setStockPhotos(n);
+    }
+    if (kind === 'box') {
+      const n = boxPhotos.map(u => u === oldUrl ? newUrl : u);
+      patch.boxPhotos = n;
+      setBoxPhotos(n);
+    }
+    if (kind === 'bin') { patch.binPhoto = newUrl; setBinPhoto(newUrl); }
+    try {
+      await apiFetch(`/admin/products/${encodeURIComponent(produto.sku)}`, {
+        method: 'PATCH', body: JSON.stringify(patch),
+      });
+      showToast('Imagem atualizada ✓');
+    } catch (e) { showToast('Erro: ' + e.message, 'err'); }
+  }
+
   async function deletePhoto(kind, idx) {
     if (!produto) return;
     let patch = {};
@@ -510,6 +555,47 @@ export default function AdminProdutos() {
       });
       showToast('Foto removida', 'info');
     } catch (e) { showToast('Erro: ' + e.message, 'err'); }
+  }
+
+  // ── Buscar fotos no Bling ────────────────────────────────────────────────
+  const [blingImgs,       setBlingImgs]       = useState([]);
+  const [loadingBlingImg, setLoadingBlingImg] = useState(false);
+  const [blingImgOpen,    setBlingImgOpen]    = useState(false);
+
+  async function fetchBlingImages() {
+    if (!produto) return;
+    setLoadingBlingImg(true); setBlingImgs([]);
+    try {
+      const ean = produto.ean || produto.eanBox;
+      const q   = ean ? `ean=${encodeURIComponent(ean)}` : `sku=${encodeURIComponent(produto.sku)}`;
+      const data = await apiFetch(`/bling/product-images?${q}`);
+      setBlingImgs(data.images || []);
+      setBlingImgOpen(true);
+      if (!(data.images || []).length) showToast('Nenhuma imagem encontrada no Bling', 'info');
+    } catch (e) {
+      if (e.message?.includes('não autenticado')) showToast('Bling não conectado — acesse /bling/auth', 'err');
+      else showToast('Erro: ' + e.message, 'err');
+    }
+    setLoadingBlingImg(false);
+  }
+
+  async function importBlingImage(url) {
+    try {
+      // Fetch image and upload to Cloudinary
+      const token = await getAuthToken();
+      const imgRes = await fetch(url);
+      const blob   = await imgRes.blob();
+      const fd = new FormData();
+      fd.append('file', blob, 'bling_import.jpg');
+      fd.append('kind', 'stock');
+      const res  = await fetch(`/admin/save-photo-cloudinary/${encodeURIComponent(produto.sku)}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      onPhotoUploaded('stock', data.url);
+      showToast('Imagem importada do Bling ✓');
+    } catch (e) { showToast('Erro ao importar: ' + e.message, 'err'); }
   }
 
   // ── Marca modal ───────────────────────────────────────────────────────────
@@ -921,17 +1007,60 @@ export default function AdminProdutos() {
 
             {/* ── Fotos do Produto ── */}
             <Section emoji="📦" title="Fotos do Produto" badge="Sistema"
-              right={<span className="text-[10px] text-slate-600">{stockPhotos.length + boxPhotos.length}/20</span>}>
+              right={
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600">{stockPhotos.length + boxPhotos.length}/20</span>
+                  <button
+                    onClick={fetchBlingImages}
+                    disabled={loadingBlingImg}
+                    className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/20 bg-blue-500/[0.06] text-blue-400 hover:bg-blue-500/15 transition-colors disabled:opacity-40"
+                    title="Buscar imagens no Bling por EAN/SKU"
+                  >
+                    {loadingBlingImg
+                      ? <Loader2 size={9} className="animate-spin" />
+                      : <Sparkles size={9} />
+                    }
+                    Importar do Bling
+                  </button>
+                </div>
+              }
+            >
+              {/* Modal Bling images picker */}
+              {blingImgOpen && blingImgs.length > 0 && (
+                <div className="mb-4 p-3 rounded-xl border border-blue-500/20 bg-blue-500/[0.04] animate-fade-in">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">
+                      {blingImgs.length} imagem{blingImgs.length !== 1 ? 's' : ''} encontrada{blingImgs.length !== 1 ? 's' : ''} no Bling
+                    </p>
+                    <button onClick={() => setBlingImgOpen(false)} className="text-slate-600 hover:text-slate-300">
+                      <X size={12} />
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {blingImgs.map((img, i) => (
+                      <button key={i} onClick={() => importBlingImage(img.url)}
+                        className="relative group w-[72px] h-[72px] rounded-lg overflow-hidden border border-white/[0.08] bg-slate-800 hover:border-blue-400/50 transition-colors"
+                        title="Clique para importar">
+                        <img src={img.url} alt="" className="w-full h-full object-contain p-0.5" />
+                        <div className="absolute inset-0 bg-blue-500/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <Plus size={16} className="text-white" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-4">
                 <div>
                   <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">📦 Produto (sem embalagem)</p>
                   <PhotoStrip photos={stockPhotos} kind="stock" sku={produto.sku}
-                    onUploaded={onPhotoUploaded} onDelete={deletePhoto} />
+                    onUploaded={onPhotoUploaded} onDelete={deletePhoto} onReplace={replacePhoto} />
                 </div>
                 <div>
                   <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">🎁 Produto embalado</p>
                   <PhotoStrip photos={boxPhotos} kind="box" sku={produto.sku}
-                    onUploaded={onPhotoUploaded} onDelete={deletePhoto} />
+                    onUploaded={onPhotoUploaded} onDelete={deletePhoto} onReplace={replacePhoto} />
                 </div>
               </div>
             </Section>

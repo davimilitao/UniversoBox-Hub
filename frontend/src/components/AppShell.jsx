@@ -1,13 +1,14 @@
 /**
  * @file AppShell.jsx
- * @description Layout wrapper com sidebar React. Envolve todas as rotas do SPA.
- *              Sidebar filtra itens pelo perfil do usuário (/api/perfis/:role),
- *              mantendo compatibilidade total com o config.html legado.
- * @version 1.0.0
- * @date 2026-04-02
+ * @description Layout principal — sidebar React + ThemeBackground por tema.
+ *   • Rotas não migradas: locked=true → bloqueadas visualmente, sem navegação
+ *   • Sistema de temas via CSS custom properties (data-theme no <html>)
+ *   • ThemeBackground: animações por tema (portal Rick, sparkles Marvel, etc.)
+ * @version 2.0.0
+ * @date 2026-04-05
  */
 
-import { useState }                      from 'react';
+import { useState, useEffect }           from 'react';
 import { Link, useLocation, Outlet }     from 'react-router-dom';
 import { signOut }                       from 'firebase/auth';
 import { auth }                          from '../firebase';
@@ -17,44 +18,285 @@ import {
   BookOpen, Settings2, Box, PlusCircle, FileCode,
   Receipt, TrendingUp, LayoutDashboard, ShoppingBag, Upload,
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
-  Menu, X, LogOut, Boxes,
+  Menu, X, LogOut, Boxes, Lock,
   FlaskConical, Search, LayoutGrid, FileUp, Truck,
 } from 'lucide-react';
 
-// ─── Mapa completo de módulos ──────────────────────────────────────────────────
-// moduleId  → ID usado no sistema de perfis (config.html / Firestore)
-// react     → true = Link interno; false = <a href> (página HTML legada)
+// ─── Mapa de módulos ──────────────────────────────────────────────────────────
+// locked: true → item visível mas bloqueado — tela ainda não migrada
 const ROTAS = [
-  // ── Expedição ────────────────────────────────────────────────────────────
-  { key: 'pedidos',        moduleId: 'pedidos',        label: 'Entregas do Dia',   secao: 'Expedição',  Icon: Package,          react: true,  href: '/expedicao/pedidos'    },
-  { key: 'manual',         moduleId: 'manual',         label: 'Expedir Manual',    secao: 'Expedição',  Icon: ClipboardList,    react: false, href: '/manual'               },
-  { key: 'ml-dashboard',   moduleId: 'ml-dashboard',   label: 'Dashboard Meli',    secao: 'Expedição',  Icon: BarChart2,        react: false, href: '/ml-dashboard'         },
-  { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,              react: true,  href: '/expedicao/bling'      },
-  { key: 'exp-insumos',    moduleId: 'insumos',        label: 'Gestão Insumos',    secao: 'Expedição',  Icon: FlaskConical,     react: true,  href: '/expedicao/insumos'    },
-
-  // ── Catálogo ─────────────────────────────────────────────────────────────
-  { key: 'catalogo-pro',   moduleId: 'catalogo',       label: 'Catálogo Pro',      secao: 'Catálogo',   Icon: LayoutGrid,       react: true,  href: '/catalogo/produtos'    },
-  { key: 'busca-produto',  moduleId: 'catalogo',       label: 'Busca SKU / EAN',   secao: 'Catálogo',   Icon: Search,           react: true,  href: '/catalogo/automacao'   },
-  { key: 'admin',          moduleId: 'admin',          label: 'Admin Produtos',    secao: 'Catálogo',   Icon: Settings2,        react: true,  href: '/catalogo/admin'       },
-  { key: 'embalagens',     moduleId: 'embalagens',     label: 'Embalagens',        secao: 'Catálogo',   Icon: Box,              react: false, href: '/embalagens'           },
-  { key: 'cadastrar',      moduleId: 'cadastrar',      label: 'Cadastro Rápido',   secao: 'Catálogo',   Icon: PlusCircle,       react: false, href: '/cadastrar'            },
-  { key: 'enriquecer-xml', moduleId: 'enriquecer-xml', label: 'Cadastro XML',      secao: 'Catálogo',   Icon: FileCode,         react: false, href: '/enriquecer-xml'       },
-  { key: 'importar',       moduleId: 'importar',       label: 'Importar CSV',      secao: 'Catálogo',   Icon: FileUp,           react: true,  href: '/catalogo/importar'    },
-
-  // ── Financeiro ───────────────────────────────────────────────────────────
-  { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Receipt,          react: true,  href: '/financeiro/despesas'  },
-  { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,       react: true,  href: '/financeiro/margem'    },
-  { key: 'fin-painel',     moduleId: 'financas',       label: 'Painel',            secao: 'Financeiro', Icon: LayoutDashboard,  react: true,  href: '/financeiro/painel'    },
-  { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Financeiro', Icon: ShoppingBag,      react: false, href: '/compras'              },
-  // ── Sistema ──────────────────────────────────────────────────────────────
-  { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,             react: false, href: '/'                     },
-  { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal,react: true,  href: '/sistema/config'       },
+  // Expedição
+  { key: 'pedidos',        moduleId: 'pedidos',        label: 'Entregas do Dia',   secao: 'Expedição',  Icon: Package,           react: true,  href: '/expedicao/pedidos'    },
+  { key: 'manual',         moduleId: 'manual',         label: 'Expedir Manual',    secao: 'Expedição',  Icon: ClipboardList,     react: false, href: '/manual',              locked: true },
+  { key: 'ml-dashboard',   moduleId: 'ml-dashboard',   label: 'Dashboard Meli',    secao: 'Expedição',  Icon: BarChart2,         react: false, href: '/ml-dashboard',        locked: true },
+  { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,               react: true,  href: '/expedicao/bling'      },
+  { key: 'exp-insumos',    moduleId: 'insumos',        label: 'Gestão Insumos',    secao: 'Expedição',  Icon: FlaskConical,      react: true,  href: '/expedicao/insumos'    },
+  // Catálogo
+  { key: 'catalogo-pro',   moduleId: 'catalogo',       label: 'Catálogo Pro',      secao: 'Catálogo',   Icon: LayoutGrid,        react: true,  href: '/catalogo/produtos'    },
+  { key: 'busca-produto',  moduleId: 'catalogo',       label: 'Busca SKU / EAN',   secao: 'Catálogo',   Icon: Search,            react: true,  href: '/catalogo/automacao'   },
+  { key: 'admin',          moduleId: 'admin',          label: 'Admin Produtos',    secao: 'Catálogo',   Icon: Settings2,         react: true,  href: '/catalogo/admin'       },
+  { key: 'embalagens',     moduleId: 'embalagens',     label: 'Embalagens',        secao: 'Catálogo',   Icon: Box,               react: false, href: '/embalagens',          locked: true },
+  { key: 'cadastrar',      moduleId: 'cadastrar',      label: 'Cadastro Rápido',   secao: 'Catálogo',   Icon: PlusCircle,        react: false, href: '/cadastrar',           locked: true },
+  { key: 'enriquecer-xml', moduleId: 'enriquecer-xml', label: 'Cadastro XML',      secao: 'Catálogo',   Icon: FileCode,          react: false, href: '/enriquecer-xml',      locked: true },
+  { key: 'importar',       moduleId: 'importar',       label: 'Importar CSV',      secao: 'Catálogo',   Icon: FileUp,            react: true,  href: '/catalogo/importar'    },
+  // Financeiro
+  { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Receipt,           react: true,  href: '/financeiro/despesas'  },
+  { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/margem'    },
+  { key: 'fin-painel',     moduleId: 'financas',       label: 'Painel',            secao: 'Financeiro', Icon: LayoutDashboard,   react: true,  href: '/financeiro/painel'    },
+  { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Financeiro', Icon: ShoppingBag,       react: false, href: '/compras',             locked: true },
+  // Sistema
+  { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: false, href: '/',                    locked: true },
+  { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal, react: true,  href: '/sistema/config'       },
 ];
 
 const SECOES = ['Expedição', 'Catálogo', 'Financeiro', 'Sistema'];
 
+// ─── THEME BACKGROUND ─────────────────────────────────────────────────────────
+
+function MarvelSparkles() {
+  const sparks = [
+    { top: '8%',  left: '18%', s: 3, d: '0s',    dur: '3.2s', gold: false },
+    { top: '22%', left: '78%', s: 2, d: '0.8s',  dur: '2.8s', gold: true  },
+    { top: '45%', left: '88%', s: 4, d: '1.5s',  dur: '4.1s', gold: false },
+    { top: '65%', left: '12%', s: 2, d: '0.3s',  dur: '3.6s', gold: true  },
+    { top: '78%', left: '55%', s: 3, d: '2.1s',  dur: '2.5s', gold: false },
+    { top: '35%', left: '42%', s: 2, d: '1.1s',  dur: '3.9s', gold: true  },
+    { top: '12%', left: '62%', s: 3, d: '0.5s',  dur: '4.4s', gold: false },
+    { top: '90%', left: '30%', s: 4, d: '1.7s',  dur: '3.0s', gold: true  },
+    { top: '55%', left: '70%', s: 2, d: '2.4s',  dur: '2.7s', gold: false },
+    { top: '30%', left: '5%',  s: 3, d: '0.9s',  dur: '3.4s', gold: true  },
+  ];
+  return (
+    <>
+      {sparks.map((s, i) => (
+        <div key={i}
+          className="absolute rounded-sm animate-marvel-spark"
+          style={{
+            top: s.top, left: s.left,
+            width: s.s + 'px', height: s.s + 'px',
+            background: s.gold ? '#F0A500' : '#ED1D24',
+            boxShadow: `0 0 ${s.s * 3}px ${s.s}px ${s.gold ? 'rgba(240,165,0,0.6)' : 'rgba(237,29,36,0.5)'}`,
+            animationDelay: s.d,
+            animationDuration: s.dur,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+function ThemeBackground({ tema }) {
+  if (!tema || tema === 'dark') return null;
+
+  /* ── UBER ── pure black, scan line ───────────────────────────── */
+  if (tema === 'uber') {
+    return (
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        {/* Subtle scan line */}
+        <div
+          className="absolute left-0 right-0 h-[1px] animate-uber-scan"
+          style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent)' }}
+        />
+        {/* Grid dots */}
+        <div
+          className="absolute inset-0 opacity-[0.025]"
+          style={{
+            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.5) 1px, transparent 1px)',
+            backgroundSize: '32px 32px',
+          }}
+        />
+      </div>
+    );
+  }
+
+  /* ── IFOOD ── warm red glows ──────────────────────────────────── */
+  if (tema === 'ifood') {
+    return (
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        <div
+          className="absolute animate-ifood-glow"
+          style={{
+            bottom: '-10%', right: '-5%',
+            width: '55vw', height: '55vw',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(234,29,44,0.10) 0%, rgba(234,29,44,0.04) 40%, transparent 70%)',
+          }}
+        />
+        <div
+          className="absolute animate-ifood-glow"
+          style={{
+            top: '-15%', left: '-10%',
+            width: '40vw', height: '40vw',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(234,29,44,0.06) 0%, transparent 65%)',
+            animationDelay: '2s',
+          }}
+        />
+        {/* Subtle warm vignette */}
+        <div
+          className="absolute inset-0"
+          style={{ background: 'radial-gradient(ellipse at 80% 110%, rgba(234,29,44,0.06) 0%, transparent 55%)' }}
+        />
+      </div>
+    );
+  }
+
+  /* ── 99 ── diagonal yellow taxi stripes ───────────────────────── */
+  if (tema === '99') {
+    return (
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        {/* Animated diagonal stripes */}
+        <div
+          className="absolute inset-0 animate-taxi-drift"
+          style={{
+            opacity: 0.04,
+            backgroundImage: 'repeating-linear-gradient(45deg, #FFD100 0px, #FFD100 1px, transparent 1px, transparent 28px)',
+          }}
+        />
+        {/* Yellow glow bottom-left (headlight) */}
+        <div
+          className="absolute"
+          style={{
+            bottom: '-5%', left: '-5%',
+            width: '45vw', height: '45vw',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(255,209,0,0.07) 0%, transparent 65%)',
+          }}
+        />
+        {/* Subtle horizon line */}
+        <div
+          className="absolute bottom-0 left-0 right-0"
+          style={{ height: '1px', background: 'linear-gradient(90deg, transparent 0%, rgba(255,209,0,0.12) 50%, transparent 100%)' }}
+        />
+      </div>
+    );
+  }
+
+  /* ── MARVEL ── red/gold epic atmosphere ───────────────────────── */
+  if (tema === 'marvel') {
+    return (
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        {/* Red glow top-left */}
+        <div
+          className="absolute"
+          style={{
+            top: '-20%', left: '-10%',
+            width: '60vw', height: '60vw',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(237,29,36,0.08) 0%, transparent 60%)',
+          }}
+        />
+        {/* Gold glow bottom-right */}
+        <div
+          className="absolute"
+          style={{
+            bottom: '-15%', right: '-10%',
+            width: '50vw', height: '50vw',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(240,165,0,0.07) 0%, transparent 60%)',
+          }}
+        />
+        {/* Subtle comic halftone dots */}
+        <div
+          className="absolute inset-0 opacity-[0.025]"
+          style={{
+            backgroundImage: 'radial-gradient(circle, rgba(237,29,36,0.8) 1px, transparent 1px)',
+            backgroundSize: '20px 20px',
+          }}
+        />
+        {/* Sparkles */}
+        <MarvelSparkles />
+      </div>
+    );
+  }
+
+  /* ── RICK & MORTY ── portal interestelar ──────────────────────── */
+  if (tema === 'rick') {
+    return (
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        {/* Main portal glow */}
+        <div
+          className="absolute animate-rick-portal"
+          style={{
+            top: '-25%', right: '-15%',
+            width: '65vw', height: '65vw',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(111,208,140,0.12) 0%, rgba(0,180,216,0.06) 35%, transparent 62%)',
+          }}
+        />
+        {/* Portal ring spinning */}
+        <div
+          className="absolute animate-rick-spin"
+          style={{
+            top: '-28%', right: '-18%',
+            width: '68vw', height: '68vw',
+            borderRadius: '50%',
+            border: '1px solid rgba(111,208,140,0.06)',
+            boxShadow: '0 0 60px rgba(111,208,140,0.04)',
+          }}
+        />
+        {/* Secondary cyan portal far left */}
+        <div
+          className="absolute animate-rick-portal"
+          style={{
+            bottom: '-30%', left: '-20%',
+            width: '50vw', height: '50vw',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(0,180,216,0.06) 0%, transparent 55%)',
+            animationDelay: '2.5s',
+          }}
+        />
+        {/* Star field dots */}
+        <div
+          className="absolute inset-0 opacity-[0.3]"
+          style={{
+            backgroundImage: [
+              'radial-gradient(circle, rgba(111,208,140,0.8) 1px, transparent 1px)',
+              'radial-gradient(circle, rgba(0,180,216,0.6) 1px, transparent 1px)',
+            ].join(', '),
+            backgroundSize: '80px 80px, 120px 120px',
+            backgroundPosition: '0 0, 40px 40px',
+          }}
+        />
+      </div>
+    );
+  }
+
+  return null;
+}
+
 // ─── NavItem ──────────────────────────────────────────────────────────────────
 function NavItem({ rota, ativo, collapsed, onClick }) {
+  // ── LOCKED — tela ainda não migrada ───────────────────────────────────────
+  if (rota.locked) {
+    return (
+      <div
+        className={[
+          'group relative flex items-center gap-2.5 rounded-md text-[13px] font-medium select-none',
+          'opacity-30 cursor-not-allowed',
+          collapsed ? 'px-2 py-2 justify-center' : 'px-2.5 py-1.5',
+        ].join(' ')}
+        title={`${rota.label} — aguardando migração`}
+      >
+        <rota.Icon size={15} className="shrink-0 text-slate-700" />
+        {!collapsed && (
+          <>
+            <span className="truncate leading-none text-slate-700">{rota.label}</span>
+            <span className="ml-auto flex items-center gap-0.5 text-[8px] font-bold text-slate-800 bg-slate-800/60 border border-slate-700/50 px-1.5 py-0.5 rounded uppercase tracking-wider">
+              <Lock size={7} />em breve
+            </span>
+          </>
+        )}
+        {collapsed && (
+          <span className="pointer-events-none absolute left-full ml-2.5 z-[60] px-2.5 py-1.5 rounded-lg bg-slate-800 border border-white/[0.08] text-xs font-medium text-slate-500 whitespace-nowrap shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            {rota.label} <span className="text-slate-700 ml-1">— em migração</span>
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  // ── NORMAL ────────────────────────────────────────────────────────────────
   const cls = [
     'group relative flex items-center gap-2.5 rounded-md text-[13px] font-medium select-none cursor-pointer',
     'transition-colors duration-100',
@@ -66,27 +308,23 @@ function NavItem({ rota, ativo, collapsed, onClick }) {
 
   const conteudo = (
     <>
-      {/* Indicator bar */}
+      {/* Indicator bar — usa var(--accent) */}
       {ativo && !collapsed && (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-r bg-emerald-500" />
+        <span
+          className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-r"
+          style={{ background: 'var(--accent, #10b981)' }}
+        />
       )}
-
       <rota.Icon
         size={15}
-        className={`shrink-0 transition-colors ${
-          ativo ? 'text-emerald-400' : 'text-slate-600 group-hover:text-slate-400'
-        }`}
+        className="shrink-0 transition-colors"
+        style={ativo ? { color: 'var(--accent-text, #34d399)' } : undefined}
       />
       {!collapsed && <span className="truncate leading-none">{rota.label}</span>}
 
-      {/* Tooltip no modo colapsado */}
+      {/* Tooltip colapsado */}
       {collapsed && (
-        <span className="
-          pointer-events-none absolute left-full ml-2.5 z-[60]
-          px-2.5 py-1.5 rounded-lg bg-slate-800 border border-white/[0.08]
-          text-xs font-medium text-slate-200 whitespace-nowrap shadow-2xl
-          opacity-0 group-hover:opacity-100 transition-opacity duration-150
-        ">
+        <span className="pointer-events-none absolute left-full ml-2.5 z-[60] px-2.5 py-1.5 rounded-lg bg-slate-800 border border-white/[0.08] text-xs font-medium text-slate-200 whitespace-nowrap shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-150">
           {rota.label}
         </span>
       )}
@@ -112,34 +350,38 @@ function SidebarContent({ perfil, loading, collapsed, setCollapsed, mobile, onCl
   const location = useLocation();
 
   const rotasVisiveis = ROTAS.filter(r =>
-    // Sem perfil carregado → mostra tudo (evita tela vazia)
     !perfil || perfil.modulos.includes(r.moduleId)
   );
 
   function isAtivo(rota) {
-    if (!rota.react) return false;
-    return location.pathname === rota.href
-      || location.pathname.startsWith(rota.href + '/');
+    if (!rota.react || rota.locked) return false;
+    return location.pathname === rota.href || location.pathname.startsWith(rota.href + '/');
   }
 
   async function handleLogout() {
     try { await signOut(auth); } catch {}
     localStorage.removeItem('expedicao_user');
     localStorage.removeItem('expedicao_token');
+    // Reset theme
+    document.documentElement.removeAttribute('data-theme');
     window.location.href = '/login';
   }
 
   return (
-    <aside className={[
-      'flex flex-col h-full',
-      'bg-slate-950 border-r border-white/[0.05]',
-      'transition-[width] duration-200 ease-in-out',
-      collapsed ? 'w-[52px]' : 'w-[220px]',
-    ].join(' ')}>
+    <aside
+      className={[
+        'flex flex-col h-full border-r transition-[width] duration-200 ease-in-out',
+        collapsed ? 'w-[52px]' : 'w-[220px]',
+      ].join(' ')}
+      style={{ background: 'var(--bg-sidebar, #020617)', borderColor: 'var(--border, rgba(255,255,255,0.05))' }}
+    >
 
-      {/* ── Logo ────────────────────────────────────────────────────────── */}
+      {/* ── Logo ── */}
       <div className={`flex items-center h-12 shrink-0 gap-2 ${collapsed ? 'justify-center px-2' : 'px-3'}`}>
-        <div className="w-7 h-7 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-900/40">
+        <div
+          className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 shadow-lg"
+          style={{ background: 'var(--accent, #10b981)', boxShadow: '0 4px 12px var(--accent-glow, rgba(16,185,129,0.3))' }}
+        >
           <Boxes size={14} className="text-white" />
         </div>
         {!collapsed && (
@@ -148,16 +390,13 @@ function SidebarContent({ perfil, loading, collapsed, setCollapsed, mobile, onCl
           </span>
         )}
         {mobile && (
-          <button
-            onClick={onClose}
-            className="ml-auto p-1 rounded text-slate-600 hover:text-slate-300 transition-colors"
-          >
+          <button onClick={onClose} className="ml-auto p-1 rounded text-slate-600 hover:text-slate-300 transition-colors">
             <X size={16} />
           </button>
         )}
       </div>
 
-      {/* ── Navegação ───────────────────────────────────────────────────── */}
+      {/* ── Navegação ── */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 px-1.5 space-y-5">
         {loading && (
           <div className="space-y-1 px-1">
@@ -174,7 +413,7 @@ function SidebarContent({ perfil, loading, collapsed, setCollapsed, mobile, onCl
             <div key={secao}>
               {!collapsed
                 ? <p className="text-[9px] font-bold text-slate-700 uppercase tracking-[0.12em] px-2.5 mb-1">{secao}</p>
-                : <div className="h-px bg-white/[0.05] mx-1 mb-2" />
+                : <div className="h-px mx-1 mb-2" style={{ background: 'var(--border, rgba(255,255,255,0.05))' }} />
               }
               <div className="space-y-px">
                 {itens.map(rota => (
@@ -192,20 +431,17 @@ function SidebarContent({ perfil, loading, collapsed, setCollapsed, mobile, onCl
         })}
       </nav>
 
-      {/* ── Footer: usuário + collapse ───────────────────────────────────── */}
-      <div className="shrink-0 border-t border-white/[0.05] mt-auto">
-
-        {/* Info do usuário */}
+      {/* ── Footer ── */}
+      <div className="shrink-0 border-t mt-auto" style={{ borderColor: 'var(--border, rgba(255,255,255,0.05))' }}>
         {perfil && (
           <div className={`flex items-center gap-2 p-2 ${collapsed ? 'justify-center' : ''}`}>
             <div
               className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 ring-1 ring-white/10"
-              style={{ background: perfil.cor || '#10b981' }}
+              style={{ background: perfil.cor || 'var(--accent, #10b981)' }}
               title={perfil.nome}
             >
               {(perfil.avatar || perfil.nome?.slice(0, 2) || '??').toUpperCase()}
             </div>
-
             {!collapsed && (
               <>
                 <div className="flex-1 min-w-0">
@@ -224,11 +460,11 @@ function SidebarContent({ perfil, loading, collapsed, setCollapsed, mobile, onCl
           </div>
         )}
 
-        {/* Botão collapse (só desktop) */}
         {!mobile && (
           <button
             onClick={() => setCollapsed(c => !c)}
-            className={`w-full flex items-center py-2 text-slate-700 hover:text-slate-400 transition-colors border-t border-white/[0.05] ${collapsed ? 'justify-center' : 'justify-end px-3 gap-1'}`}
+            className="w-full flex items-center py-2 text-slate-700 hover:text-slate-400 transition-colors border-t"
+            style={{ borderColor: 'var(--border, rgba(255,255,255,0.05))', justifyContent: collapsed ? 'center' : 'flex-end', paddingRight: collapsed ? undefined : '0.75rem', gap: collapsed ? undefined : '0.25rem' }}
             title={collapsed ? 'Expandir menu' : 'Recolher menu'}
           >
             {!collapsed && <span className="text-[10px]">Recolher</span>}
@@ -240,7 +476,7 @@ function SidebarContent({ perfil, loading, collapsed, setCollapsed, mobile, onCl
   );
 }
 
-// ─── AppShell (exportado) ─────────────────────────────────────────────────────
+// ─── AppShell ─────────────────────────────────────────────────────────────────
 export function AppShell() {
   const { perfil, loading } = usePerfil();
 
@@ -248,6 +484,12 @@ export function AppShell() {
     try { return localStorage.getItem('erp_sidebar_collapsed') === 'true'; } catch { return false; }
   });
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // ── Aplicar tema quando perfil carrega ──────────────────────────────────
+  useEffect(() => {
+    const tema = perfil?.tema || 'dark';
+    document.documentElement.setAttribute('data-theme', tema);
+  }, [perfil?.tema]);
 
   function toggleCollapsed() {
     setCollapsed(prev => {
@@ -260,10 +502,15 @@ export function AppShell() {
   const sidebarProps = { perfil, loading };
 
   return (
-    <div className="flex h-screen bg-slate-950 overflow-hidden">
+    <div
+      className="flex h-screen overflow-hidden relative"
+      style={{ background: 'var(--bg-app, #020617)' }}
+    >
+      {/* Theme decorative background (z-0, pointer-events-none) */}
+      <ThemeBackground tema={perfil?.tema} />
 
-      {/* ── Sidebar desktop ──────────────────────────────────────────────── */}
-      <div className="hidden lg:flex shrink-0">
+      {/* Sidebar desktop (z-10) */}
+      <div className="hidden lg:flex shrink-0 relative z-10">
         <SidebarContent
           {...sidebarProps}
           collapsed={collapsed}
@@ -272,7 +519,7 @@ export function AppShell() {
         />
       </div>
 
-      {/* ── Overlay mobile ───────────────────────────────────────────────── */}
+      {/* Overlay mobile */}
       {mobileOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/70 backdrop-blur-[2px] lg:hidden animate-fade-in"
@@ -280,12 +527,8 @@ export function AppShell() {
         />
       )}
 
-      {/* ── Drawer mobile ────────────────────────────────────────────────── */}
-      <div className={`
-        fixed inset-y-0 left-0 z-50 lg:hidden flex
-        transition-transform duration-200 ease-in-out
-        ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
+      {/* Drawer mobile */}
+      <div className={`fixed inset-y-0 left-0 z-50 lg:hidden flex transition-transform duration-200 ease-in-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <SidebarContent
           {...sidebarProps}
           collapsed={false}
@@ -295,24 +538,19 @@ export function AppShell() {
         />
       </div>
 
-      {/* ── Conteúdo principal ───────────────────────────────────────────── */}
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-
-        {/* Topbar mobile — mais compacta */}
-        <header className="lg:hidden flex items-center gap-2.5 h-11 px-3 bg-slate-950 border-b border-white/[0.05] shrink-0">
-          <button
-            onClick={() => setMobileOpen(true)}
-            className="p-1.5 rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] transition-colors"
-          >
+      {/* Conteúdo principal (z-10) */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden relative z-10">
+        {/* Topbar mobile */}
+        <header className="lg:hidden flex items-center gap-2.5 h-11 px-3 border-b shrink-0" style={{ background: 'var(--bg-sidebar, #020617)', borderColor: 'var(--border, rgba(255,255,255,0.05))' }}>
+          <button onClick={() => setMobileOpen(true)} className="p-1.5 rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] transition-colors">
             <Menu size={18} />
           </button>
-          <div className="w-5 h-5 rounded bg-emerald-600 flex items-center justify-center">
+          <div className="w-5 h-5 rounded flex items-center justify-center" style={{ background: 'var(--accent, #10b981)' }}>
             <Boxes size={11} className="text-white" />
           </div>
           <span className="text-[13px] font-semibold text-slate-300">UniversoBox</span>
         </header>
 
-        {/* Páginas React via Outlet */}
         <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <Outlet />
         </main>

@@ -2537,6 +2537,57 @@ app.post('/orders/:id/etiqueta-bin', async (req, res) => {
 });
 
 // ── DEBUG: ver resposta bruta da API do Bling ────────────────────
+// ── GET /bling/product-images — busca imagens de produto no Bling por EAN ou SKU
+// Query: ?ean=7891234567890  ou  ?sku=PROD-001
+// Retorna array de URLs de imagem extraídas do Bling (não requer auth Firebase — só Bling token)
+app.get('/bling/product-images', async (req, res, next) => {
+  try {
+    const { ean, sku, nome } = req.query;
+    if (!ean && !sku && !nome) {
+      return res.status(400).json({ error: 'Informe ean, sku ou nome como query param' });
+    }
+
+    const pesquisa = ean || sku || nome;
+
+    // Bling API v3: GET /produtos?pesquisa=...&limite=5
+    const data = await blingFetch(`/produtos?pesquisa=${encodeURIComponent(pesquisa)}&limite=5`);
+    const produtos = data?.data || [];
+
+    if (!produtos.length) {
+      return res.json({ images: [], total: 0, pesquisa });
+    }
+
+    // Para cada produto encontrado, busca detalhes para pegar as imagens
+    const imageResults = [];
+    for (const p of produtos.slice(0, 3)) {
+      try {
+        const detail = await blingFetch(`/produtos/${p.id}`);
+        const item = detail?.data || {};
+        const imagens = (item.imagens || item.midia?.imagens || [])
+          .map(img => img.link || img.url)
+          .filter(u => u && /^https?:\/\//i.test(u));
+        imageResults.push({
+          id:      item.id,
+          sku:     item.codigo || p.codigo,
+          nome:    item.nome || p.nome,
+          imagens,
+        });
+      } catch {
+        // produto individual pode falhar — ignorar e continuar
+      }
+    }
+
+    const allImages = imageResults.flatMap(p => p.imagens.map(url => ({ url, sku: p.sku, nome: p.nome })));
+    res.json({ ok: true, images: allImages, produtos: imageResults, total: allImages.length });
+  } catch (err) {
+    console.error('[GET /bling/product-images]', err.message);
+    if (err.message === 'bling_not_authorized') {
+      return res.status(401).json({ error: 'Bling não autenticado — acesse /bling/auth para conectar' });
+    }
+    next(err);
+  }
+});
+
 // GET /bling/debug/nfe/:id  (usar id interno do Bling, não o numero da NF)
 // GET /bling/debug/lista?data=2026-03-17  (ver listagem com IDs reais)
 app.get('/bling/debug/nfe/:id', async (req, res, next) => {

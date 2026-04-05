@@ -53,10 +53,12 @@ const CORES = [
 ];
 
 const TEMAS = [
-  { id: 'dark',  label: 'Dark Navy',      dot: '#1e293b', desc: 'Escuro padrão' },
-  { id: 'light', label: 'Claro',          dot: '#f1f5f9', desc: 'Tema claro' },
-  { id: 'ml',    label: 'Mercado Livre',  dot: '#ffe600', desc: 'Azul MeLi' },
-  { id: 'hc',    label: 'Alto Contraste', dot: '#ffffff', desc: 'Acessibilidade' },
+  { id: 'dark',   label: 'Dark Navy',    dot: '#020617', accent: '#10b981', desc: 'Padrão escuro (Emerald)',  emoji: '🌑' },
+  { id: 'uber',   label: 'Uber',         dot: '#000000', accent: '#ffffff', desc: 'Preto absoluto + branco',  emoji: '⚫' },
+  { id: 'ifood',  label: 'iFood',        dot: '#0f0404', accent: '#EA1D2C', desc: 'Vermelho quente, energia', emoji: '🔴' },
+  { id: '99',     label: '99',           dot: '#090800', accent: '#FFD100', desc: 'Amarelo táxi, urbano',     emoji: '🟡' },
+  { id: 'marvel', label: 'Marvel',       dot: '#0d0508', accent: '#ED1D24', desc: 'Vermelho + ouro, épico',   emoji: '⚡' },
+  { id: 'rick',   label: 'Rick & Morty', dot: '#06080f', accent: '#6FD08C', desc: 'Portal verde, interestelar', emoji: '🌀' },
 ];
 
 const ROLE_COLORS = {
@@ -255,6 +257,8 @@ function TabPerfis({ showToast }) {
       });
       showToast('Perfil salvo ✓');
       setPerfis(ps => ps.map(p => p.id === draft.id ? { ...p, ...draft } : p));
+      // Aplica o tema imediatamente no sistema
+      document.documentElement.setAttribute('data-theme', draft.tema || 'dark');
     } catch (e) { showToast('Erro: ' + e.message, 'err'); }
     setSaving(false);
   }
@@ -450,21 +454,28 @@ function TabPerfis({ showToast }) {
             <SectionCard icon={null} title="Tema de interface">
               <div className="grid grid-cols-2 gap-2">
                 {TEMAS.map(t => (
-                  <button key={t.id} onClick={() => setDraft(d => ({ ...d, tema: t.id }))}
+                  <button key={t.id}
+                    onClick={() => {
+                      setDraft(d => ({ ...d, tema: t.id }));
+                      // Preview live no sistema
+                      document.documentElement.setAttribute('data-theme', t.id);
+                    }}
                     className={[
-                      'flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border transition-all text-left',
+                      'flex items-center gap-2.5 px-3 py-2.5 rounded-xl border transition-all text-left relative overflow-hidden',
                       draft.tema === t.id
-                        ? 'bg-blue-500/10 border-blue-500/30 text-blue-300'
-                        : 'bg-slate-800/50 border-white/[0.06] text-slate-500 hover:border-slate-600 hover:text-slate-300',
+                        ? 'border-blue-500/30 text-blue-300'
+                        : 'border-white/[0.06] text-slate-500 hover:border-slate-600 hover:text-slate-300',
                     ].join(' ')}
+                    style={draft.tema === t.id ? { background: `${t.dot}cc` } : { background: 'rgba(30,41,59,0.5)' }}
                   >
-                    <span
-                      className="w-4 h-4 rounded-full border border-white/20 shrink-0 shadow-inner"
-                      style={{ background: t.dot }}
-                    />
+                    {/* Color swatch */}
+                    <div className="flex -space-x-1 shrink-0">
+                      <span className="w-4 h-4 rounded-full border-2 border-black/30 shadow-inner" style={{ background: t.dot }} />
+                      <span className="w-4 h-4 rounded-full border-2 border-black/30 shadow-inner" style={{ background: t.accent }} />
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[12px] font-semibold leading-tight truncate">{t.label}</p>
-                      <p className="text-[10px] opacity-60 leading-tight">{t.desc}</p>
+                      <p className="text-[11px] font-bold leading-tight">{t.emoji} {t.label}</p>
+                      <p className="text-[9px] opacity-60 leading-tight mt-0.5">{t.desc}</p>
                     </div>
                     {draft.tema === t.id && <CheckCircle2 size={13} className="ml-auto text-blue-400 shrink-0" />}
                   </button>
