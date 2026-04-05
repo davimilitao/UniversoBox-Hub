@@ -15,10 +15,11 @@ import { BlingPedidos }     from './pages/expedicao/BlingPedidos';
 import { AppShell }         from './components/AppShell';
 import GestaoInsumos from './pages/expedicao/GestaoInsumos';
 import PedidosDoDia from './pages/expedicao/PedidosDoDia';
-import AutomacaoCadastro from './pages/catalogo/AutomacaoCadastro';
-import CatalogoPro       from './pages/catalogo/CatalogoPro';
-import AdminProdutos     from './pages/catalogo/AdminProdutos';
-import ImportarCSV       from './pages/catalogo/ImportarCSV';
+import AutomacaoCadastro      from './pages/catalogo/AutomacaoCadastro';
+import CatalogoPro             from './pages/catalogo/CatalogoPro';
+import AdminProdutos           from './pages/catalogo/AdminProdutos';
+import ImportarCSV             from './pages/catalogo/ImportarCSV';
+import ConfiguracoesSistema    from './pages/sistema/ConfiguracoesSistema';
 
 export default function App() {
   return (
@@ -42,6 +43,8 @@ export default function App() {
         <Route path="/financeiro/despesas" element={<GestaoDespesas />} />
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />
         <Route path="/financeiro/painel"   element={<PainelFinanceiro />} />
+        {/* Sistema */}
+        <Route path="/sistema/config"      element={<ConfiguracoesSistema />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/login" replace />} />

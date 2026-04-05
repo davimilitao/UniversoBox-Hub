@@ -48,7 +48,7 @@ const ROTAS = [
   { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Financeiro', Icon: ShoppingBag,      react: false, href: '/compras'              },
   // ── Sistema ──────────────────────────────────────────────────────────────
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,             react: false, href: '/'                     },
-  { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal,react: false, href: '/config'               },
+  { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal,react: true,  href: '/sistema/config'       },
 ];
 
 const SECOES = ['Expedição', 'Catálogo', 'Financeiro', 'Sistema'];
