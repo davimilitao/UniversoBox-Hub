@@ -257,8 +257,11 @@ function TabPerfis({ showToast }) {
       });
       showToast('Perfil salvo ✓');
       setPerfis(ps => ps.map(p => p.id === draft.id ? { ...p, ...draft } : p));
-      // Aplica o tema imediatamente no sistema
-      document.documentElement.setAttribute('data-theme', draft.tema || 'dark');
+      // Aplica o tema imediatamente no sistema com transição suave
+      const _html = document.documentElement;
+      _html.classList.add('theme-transitioning');
+      _html.setAttribute('data-theme', draft.tema || 'dark');
+      setTimeout(() => _html.classList.remove('theme-transitioning'), 400);
     } catch (e) { showToast('Erro: ' + e.message, 'err'); }
     setSaving(false);
   }
@@ -457,8 +460,11 @@ function TabPerfis({ showToast }) {
                   <button key={t.id}
                     onClick={() => {
                       setDraft(d => ({ ...d, tema: t.id }));
-                      // Preview live no sistema
-                      document.documentElement.setAttribute('data-theme', t.id);
+                      // Preview live com transição suave
+                      const _h = document.documentElement;
+                      _h.classList.add('theme-transitioning');
+                      _h.setAttribute('data-theme', t.id);
+                      setTimeout(() => _h.classList.remove('theme-transitioning'), 400);
                     }}
                     className={[
                       'flex items-center gap-2.5 px-3 py-2.5 rounded-xl border transition-all text-left relative overflow-hidden',
