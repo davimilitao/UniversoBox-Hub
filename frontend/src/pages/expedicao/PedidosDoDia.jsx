@@ -145,6 +145,58 @@ async function printDanfe(blingNfId, onStatus) {
   await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: data.pdf }]);
 }
 
+/**
+ * Imprime etiqueta de transporte do Mercado Livre via QZ Tray.
+ * Suporta ZPL (impressoras térmicas) e PDF (impressoras comuns).
+ * @param {string} mlOrderId  — número do pedido ML (numeroPedido / mlOrderId do order)
+ * @param {Function} onStatus — callback de status para exibir progresso no UI
+ */
+async function printShippingLabel(mlOrderId, onStatus) {
+  const qz = await qzConnect();
+  onStatus?.('Buscando etiqueta no ML…');
+
+  const token = localStorage.getItem('expedicao_token') || '';
+  const res   = await fetch(`/api/ml/orders/${encodeURIComponent(mlOrderId)}/label`, {
+    headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
+  });
+  const data  = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta`);
+  }
+
+  onStatus?.('Enviando para impressora…');
+  const printer = await qz.printers.getDefault();
+
+  // ── ZPL — impressora térmica (zebra, argox, etc.) ──────────────────────
+  if (data.format === 'zpl' && data.zpl) {
+    const config = qz.configs.create(printer, { language: { type: 'ZPL' } });
+    await qz.print(config, [{ type: 'raw', format: 'plain', data: data.zpl }]);
+    return;
+  }
+
+  // ── PDF base64 ────────────────────────────────────────────────────────
+  if (data.format === 'pdf' && data.pdf) {
+    const config = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
+    await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: data.pdf }]);
+    return;
+  }
+
+  // ── URL do PDF — baixa e imprime ──────────────────────────────────────
+  if (data.pdfUrl) {
+    onStatus?.('Baixando PDF da etiqueta…');
+    const pdfRes = await fetch(data.pdfUrl);
+    const buf    = await pdfRes.arrayBuffer();
+    const b64    = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    onStatus?.('Enviando para impressora…');
+    const config = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
+    await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64 }]);
+    return;
+  }
+
+  throw new Error('Etiqueta não disponível — verifique se o pedido tem envio associado no ML.');
+}
+
 async function printBinLabel(orderId, item, onStatus) {
   const qz = await qzConnect();
   onStatus?.('Gerando etiqueta ZPL…');
@@ -585,6 +637,43 @@ function DanfeButton({ blingNfId }) {
   );
 }
 
+// ─── Botão Etiqueta de Transporte (ZPL/PDF via ML) ───────────────────────────
+function ShippingLabelButton({ mlOrderId, marketplace }) {
+  const [st,  setSt]  = useState(null);
+  const [msg, setMsg] = useState('');
+
+  // Só ML por enquanto — outros marketplaces sem endpoint de etiqueta
+  if (!mlOrderId || marketplace !== 'MERCADO_LIVRE') return null;
+
+  async function handle() {
+    setSt('loading'); setMsg('Conectando…');
+    try {
+      await printShippingLabel(mlOrderId, m => setMsg(m));
+      setSt('ok'); setMsg('Impresso ✓');
+      setTimeout(() => { setSt(null); setMsg(''); }, 4000);
+    } catch(e) {
+      setSt('err'); setMsg(e.message);
+    }
+  }
+
+  return (
+    <button
+      onClick={handle}
+      disabled={st === 'loading'}
+      className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl border text-sm font-bold transition-all
+        ${st === 'loading' ? 'border-slate-600 bg-slate-800/60 text-slate-500 cursor-wait' :
+          st === 'ok'      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' :
+          st === 'err'     ? 'border-red-500/30 bg-red-500/5 text-red-400' :
+          'border-blue-500/30 bg-blue-500/5 text-blue-400 hover:border-blue-400/60 hover:bg-blue-500/10'}`}
+    >
+      {st === 'loading' ? <><Loader2 size={14} className="animate-spin"/><span className="text-xs font-normal">{msg}</span></> :
+       st === 'ok'      ? <><CircleCheck size={14}/><span>{msg}</span></> :
+       st === 'err'     ? <><span className="text-sm">⚠️</span><span className="text-xs font-normal truncate max-w-[260px]">{msg}</span><span className="ml-auto text-[10px] underline shrink-0" onClick={e=>{e.stopPropagation();setSt(null);}}>tentar</span></> :
+       <><Tag size={14}/> Imprimir Etiqueta de Envio</>}
+    </button>
+  );
+}
+
 // ─── Modal Separação ──────────────────────────────────────────────────────────
 function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
   if (!order) return null;
@@ -640,7 +729,10 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
             </div>
           )}
         </div>
-        <div className="px-4 pb-3"><DanfeButton blingNfId={order.blingNfId} /></div>
+        <div className="px-4 pb-1 space-y-2">
+          <ShippingLabelButton mlOrderId={order.mlOrderId || order.numeroPedido} marketplace={order.marketplace} />
+          <DanfeButton blingNfId={order.blingNfId} />
+        </div>
         <div className="flex gap-2 p-4 border-t border-white/5">
           <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>
           <button onClick={() => onConfirmar(proximo?.id || '')} disabled={confirmando}
@@ -700,7 +792,10 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
             </div>
           </div>
         )}
-        <div className="px-4 pb-3"><DanfeButton blingNfId={order.blingNfId} /></div>
+        <div className="px-4 pb-1 space-y-2">
+          <ShippingLabelButton mlOrderId={order.mlOrderId || order.numeroPedido} marketplace={order.marketplace} />
+          <DanfeButton blingNfId={order.blingNfId} />
+        </div>
         <div className="flex gap-2 p-4 border-t border-white/5">
           <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>
           <button onClick={() => onConfirmar(proximo?.id || '')} disabled={confirmando}
