@@ -19,7 +19,7 @@ import {
   Receipt, TrendingUp, LayoutDashboard, ShoppingBag, Upload,
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Boxes, Lock,
-  FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera,
+  FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
 } from 'lucide-react';
 
 // ─── Mapa de módulos ──────────────────────────────────────────────────────────
@@ -41,6 +41,7 @@ const ROTAS = [
   { key: 'importar',       moduleId: 'importar',       label: 'Importar CSV',      secao: 'Catálogo',   Icon: FileUp,            react: true,  href: '/catalogo/importar'    },
   { key: 'image-studio',   moduleId: 'catalogo',       label: 'Image Studio',      secao: 'Catálogo',   Icon: Camera,            react: true,  href: '/catalogo/fotos'       },
   // Financeiro
+  { key: 'fin-contas',     moduleId: 'financas',       label: 'Contas a Pagar',    secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/contas'    },
   { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Receipt,           react: true,  href: '/financeiro/despesas'  },
   { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/margem'    },
   { key: 'fin-painel',     moduleId: 'financas',       label: 'Painel',            secao: 'Financeiro', Icon: LayoutDashboard,   react: true,  href: '/financeiro/painel'    },

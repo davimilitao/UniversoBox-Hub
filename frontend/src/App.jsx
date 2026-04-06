@@ -22,6 +22,7 @@ import AdminProdutos           from './pages/catalogo/AdminProdutos';
 import ImportarCSV             from './pages/catalogo/ImportarCSV';
 import ImageStudio             from './pages/catalogo/ImageStudio';
 import ConfiguracoesSistema    from './pages/sistema/ConfiguracoesSistema';
+import Contas                  from './pages/financeiro/Contas';
 
 export default function App() {
   return (
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="/catalogo/automacao"  element={<AutomacaoCadastro />} />
         <Route path="/catalogo/fotos"      element={<ImageStudio />} />
         {/* Financeiro */}
+        <Route path="/financeiro/contas"    element={<Contas />} />
         <Route path="/financeiro/despesas" element={<GestaoDespesas />} />
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />
         <Route path="/financeiro/painel"   element={<PainelFinanceiro />} />
