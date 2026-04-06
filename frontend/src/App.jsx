@@ -20,6 +20,7 @@ import AutomacaoCadastro       from './pages/catalogo/AutomacaoCadastro';
 import CatalogoPro             from './pages/catalogo/CatalogoPro';
 import AdminProdutos           from './pages/catalogo/AdminProdutos';
 import ImportarCSV             from './pages/catalogo/ImportarCSV';
+import ImageStudio             from './pages/catalogo/ImageStudio';
 import ConfiguracoesSistema    from './pages/sistema/ConfiguracoesSistema';
 
 export default function App() {
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/catalogo/admin"      element={<AdminProdutos />} />
         <Route path="/catalogo/importar"   element={<ImportarCSV />} />
         <Route path="/catalogo/automacao"  element={<AutomacaoCadastro />} />
+        <Route path="/catalogo/fotos"      element={<ImageStudio />} />
         {/* Financeiro */}
         <Route path="/financeiro/despesas" element={<GestaoDespesas />} />
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />
