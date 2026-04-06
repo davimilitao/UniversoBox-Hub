@@ -45,7 +45,7 @@ const ROTAS = [
   { key: 'fin-painel',     moduleId: 'financas',       label: 'Painel',            secao: 'Financeiro', Icon: LayoutDashboard,   react: true,  href: '/financeiro/painel'    },
   { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Financeiro', Icon: ShoppingBag,       react: false, href: '/compras',             locked: true },
   // Sistema
-  { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: false, href: '/',                    locked: true },
+  { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },
   { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal, react: true,  href: '/sistema/config'       },
 ];
 
