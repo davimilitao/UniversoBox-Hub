@@ -3964,6 +3964,213 @@ app.post('/api/ml/scan-baixa', async (req, res, next) => {
 
 
 // ════════════════════════════════════════════════════════════════════════════
+// GET /api/ml/dashboard
+// Endpoint agregado para o DashboardPage — retorna em uma única chamada:
+//   • orders: pedidos do dia com logística + status local
+//   • summary: contagens por modalidade (flex/agency/fulfillment/cancelados)
+//   • claims: reclamações abertas + em mediação
+//   • cutoffSchedule: horário de corte diário da semana (fixo por seller config)
+//   • authCode: código de autorização do dia (flex/agência) — quando disponível
+//   • mlConnected: se a autenticação ML está ativa
+// ════════════════════════════════════════════════════════════════════════════
+app.get('/api/ml/dashboard', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    let mlConnected = false;
+    let orders = [];
+    let claims = [];
+    let authCode = null;
+    let cutoffSchedule = null;
+
+    // ── Tenta conectar ao ML ──────────────────────────────────────────────
+    let token = null;
+    try {
+      token = await mlEnsureToken();
+      mlConnected = true;
+    } catch (_) {
+      // ML não autorizado — retorna dados parciais (sem ML)
+      return res.json({
+        mlConnected: false,
+        orders: [],
+        claims: [],
+        summary: { flex: 0, agency: 0, fulfillment: 0, cancelados: 0, total: 0, semEtiqueta: 0 },
+        authCode: null,
+        cutoffSchedule: null,
+        date: getTodayBR(),
+      });
+    }
+
+    const headers = {
+      'Authorization': `Bearer ${token}`,
+      'Accept':        'application/json',
+    };
+
+    // ── userId do vendedor ────────────────────────────────────────────────
+    const meRes  = await fetchWithTimeout(`${ML_API_BASE}/users/me`, { headers }, 8000);
+    const meData = await meRes.json();
+    const userId = meData.id;
+    if (!userId) throw new Error('Não foi possível obter userId do ML');
+
+    const today = getTodayBR();
+
+    // ── Busca paralela: pedidos + claims ──────────────────────────────────
+    const [rPaid, rReady, rClaims, rClaimsMed] = await Promise.allSettled([
+      fetchWithTimeout(
+        `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&order.date_created.from=${today}T00:00:00.000-03:00&limit=50`,
+        { headers }, 12000
+      ),
+      fetchWithTimeout(
+        `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=ready_to_ship&limit=50`,
+        { headers }, 12000
+      ),
+      fetchWithTimeout(
+        `${ML_API_BASE}/post-purchase/claims/search?role=seller&status=opened&limit=20&caller.id=${userId}`,
+        { headers }, 10000
+      ),
+      fetchWithTimeout(
+        `${ML_API_BASE}/post-purchase/claims/search?role=seller&status=in_mediation&limit=20&caller.id=${userId}`,
+        { headers }, 10000
+      ),
+    ]);
+
+    // ── Consolida pedidos (deduplica) ─────────────────────────────────────
+    const seen = new Set();
+    const rawOrders = [];
+    for (const settled of [rPaid, rReady]) {
+      if (settled.status !== 'fulfilled' || !settled.value.ok) continue;
+      const data = await settled.value.json();
+      for (const o of (data.results || [])) {
+        if (seen.has(o.id)) continue;
+        seen.add(o.id);
+        rawOrders.push(o);
+      }
+    }
+
+    // ── Status local em paralelo ──────────────────────────────────────────
+    const statusList = await Promise.all(rawOrders.map(o => resolveLocalStatus(o.id)));
+    orders = rawOrders.map((o, i) => ({
+      id:           o.id,
+      logistica:    detectLogistica(o),
+      _localStatus: statusList[i],
+      _createdTime: formatTimeBR(o.date_created),
+      buyer:        o.buyer?.nickname || null,
+      total:        o.total_amount   || 0,
+      items:        (o.order_items   || []).map(it => ({
+        sku:   it.item?.seller_sku || null,
+        name:  it.item?.title     || null,
+        qty:   it.quantity        || 1,
+      })),
+      tracking:     o.shipping?.tracking_number || null,
+      needsLabel:   !o.shipping?.tracking_number,
+      orderId:      o.id,
+    }));
+
+    // Ordena: imprimir → expedir → enviado → cancelado, depois hora desc
+    const statusOrder = { imprimir: 0, expedir: 1, enviado: 2, cancelado: 3 };
+    orders.sort((a, b) =>
+      (statusOrder[a._localStatus] ?? 9) - (statusOrder[b._localStatus] ?? 9)
+    );
+
+    // ── Summary por modalidade ────────────────────────────────────────────
+    const summary = { flex: 0, agency: 0, fulfillment: 0, cancelados: 0, total: orders.length, semEtiqueta: 0 };
+    for (const o of orders) {
+      if (o._localStatus === 'cancelado') { summary.cancelados++; continue; }
+      if (o.logistica === 'flex')        summary.flex++;
+      else if (o.logistica === 'fulfillment') summary.fulfillment++;
+      else summary.agency++;
+      if (o.needsLabel && o._localStatus !== 'enviado') summary.semEtiqueta++;
+    }
+
+    // ── Claims ────────────────────────────────────────────────────────────
+    for (const settled of [rClaims, rClaimsMed]) {
+      if (settled.status !== 'fulfilled' || !settled.value.ok) continue;
+      const d = await settled.value.json();
+      const list = d.data || d.results || [];
+      claims.push(...list.map(c => ({
+        id:     c.id,
+        status: c.status,
+        reason: c.reason || c.type || null,
+        orderId: c.resource_id || null,
+      })));
+    }
+
+    // ── Código de autorização do dia (seller shipping packs) ──────────────
+    // O endpoint correto para o código diário de coleta é /users/{id}/shipping_packs
+    try {
+      const packRes = await fetchWithTimeout(
+        `${ML_API_BASE}/users/${userId}/shipping_packs?date=${today}`,
+        { headers }, 8000
+      );
+      if (packRes.ok) {
+        const packData = await packRes.json();
+        // O código pode estar em authorization_code, code, ou pack_code
+        authCode = packData.authorization_code
+          || packData.code
+          || packData.pack_code
+          || (Array.isArray(packData) && packData[0]?.authorization_code)
+          || null;
+      }
+    } catch (_) {}
+
+    // Fallback: tenta shipping_preferences/flex
+    if (!authCode) {
+      try {
+        const flexRes = await fetchWithTimeout(
+          `${ML_API_BASE}/users/${userId}/shipping_preferences/flex`,
+          { headers }, 6000
+        );
+        if (flexRes.ok) {
+          const flexData = await flexRes.json();
+          authCode = flexData.authorization_code || flexData.code || null;
+        }
+      } catch (_) {}
+    }
+
+    // ── Horário de corte — tabela semanal fixa por seller ─────────────────
+    // O ML não expõe a tabela semanal via API pública; o cut_off vem por envio
+    // individual. Aqui buscamos das shipping_preferences para extrair o do dia.
+    try {
+      const prefRes = await fetchWithTimeout(
+        `${ML_API_BASE}/users/${userId}/shipping_preferences`,
+        { headers }, 8000
+      );
+      if (prefRes.ok) {
+        const pref = await prefRes.json();
+        const opts = pref.custom_shipping_options || pref.modes || [];
+        const cutoffs = {};
+        const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+        for (const opt of opts) {
+          if (opt.cut_off_time) {
+            // Tenta mapear por dia
+            const day = opt.day || opt.week_day || null;
+            if (day !== null && DAYS[day]) {
+              cutoffs[DAYS[day]] = opt.cut_off_time.slice(0, 5); // "HH:MM"
+            } else if (!cutoffs.default) {
+              cutoffs.default = opt.cut_off_time.slice(0, 5);
+            }
+          }
+        }
+        if (Object.keys(cutoffs).length > 0) cutoffSchedule = cutoffs;
+      }
+    } catch (_) {}
+
+    res.json({
+      mlConnected,
+      orders,
+      claims,
+      summary,
+      authCode,
+      cutoffSchedule,
+      date: today,
+      userId,
+    });
+
+  } catch (err) {
+    console.error('[GET /api/ml/dashboard]', err.message);
+    next(err);
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // FIM — Mercado Livre
 // ════════════════════════════════════════════════════════════════════════════
 
