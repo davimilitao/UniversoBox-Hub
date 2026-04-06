@@ -33,25 +33,49 @@ async function blingEnsureToken() {
 }
 
 // Normaliza produto Bling v3 para o formato do Studio
-function normalizarProduto(p) {
-  // Extrai imagens do campo midia (Bling V3)
-  // tipo pode ser: 'imagens', 'I', 'image', '1', ou sem filtro — aceita qualquer coisa com link
+// listItem: objeto resumido do endpoint de lista (tem imagemURL como fallback)
+function normalizarProduto(p, listItem = null) {
   let imagens = [];
+
+  // 1. midia[] — endpoint de detalhe V3
   if (Array.isArray(p.midia) && p.midia.length > 0) {
-    // Log para diagnóstico
-    console.log(`[normalizarProduto] midia raw:`, JSON.stringify(p.midia).slice(0, 400));
-    // Aceita qualquer item que tenha link e cujo tipo não seja explicitamente vídeo
+    // Diagnóstico: loga estrutura completa do primeiro item para entender os campos
+    console.log(`[normalizarProduto] midia[0] keys:`, Object.keys(p.midia[0] || {}));
+    console.log(`[normalizarProduto] midia raw:`, JSON.stringify(p.midia).slice(0, 600));
     imagens = p.midia
-      .filter(m => m.link && !String(m.tipo || '').toLowerCase().includes('video'))
-      .map(m => m.link)
+      .filter(m => {
+        const url = m.link || m.url || m.linkThumbnail || '';
+        const tipo = String(m.tipo || m.tipoArquivo || '').toLowerCase();
+        return url && !tipo.includes('video');
+      })
+      .map(m => m.link || m.url || m.linkThumbnail || '')
       .filter(Boolean);
-  } else if (Array.isArray(p.imagens) && p.imagens.length > 0) {
-    imagens = p.imagens.map(i => (typeof i === 'string' ? i : i.link || i.url || '')).filter(Boolean);
-  } else if (p.imagemURL) {
-    // Fallback: campo imagemURL da lista (versão resumida da API)
+  }
+
+  // 2. imagens[] — campo alternativo
+  if (!imagens.length && Array.isArray(p.imagens) && p.imagens.length > 0) {
+    console.log(`[normalizarProduto] usando p.imagens, length=${p.imagens.length}`);
+    imagens = p.imagens
+      .map(i => (typeof i === 'string' ? i : i.link || i.url || i.linkThumbnail || ''))
+      .filter(Boolean);
+  }
+
+  // 3. imagemURL do próprio detalhe
+  if (!imagens.length && p.imagemURL) {
+    console.log(`[normalizarProduto] usando p.imagemURL`);
     imagens = [p.imagemURL];
   }
-  console.log(`[normalizarProduto] sku=${p.codigo} imagens encontradas:`, imagens.length);
+
+  // 4. imagemURL do item de lista (passado como fallback)
+  if (!imagens.length && listItem?.imagemURL) {
+    console.log(`[normalizarProduto] usando listItem.imagemURL`);
+    imagens = [listItem.imagemURL];
+  }
+
+  // Diagnóstico final
+  console.log(`[normalizarProduto] sku=${p.codigo} imagens=${imagens.length}`, imagens.slice(0, 2));
+  // Loga keys do objeto detalhe para entender a estrutura completa
+  console.log(`[normalizarProduto] detail keys:`, Object.keys(p || {}));
 
   return {
     id:           p.id,
@@ -161,7 +185,7 @@ router.get('/buscar', async (req, res) => {
     });
 
     const raw = det?.data || produto;
-    res.json(normalizarProduto(raw));
+    res.json(normalizarProduto(raw, produto)); // produto = list item → fallback imagemURL
   } catch (e) {
     console.error('[GET /buscar]', e.response?.data || e.message);
     res.status(500).json({ error: e.message });
