@@ -3866,15 +3866,76 @@ app.get('/api/ml/orders/:orderId/label', async (req, res, next) => {
       }
     }
 
-    // ── 4. Nada funcionou ─────────────────────────────────────────────────
+    // ── 4. Nada funcionou — retorna URL web do ML como último recurso ──────
+    // O usuário pode clicar para abrir a página de impressão do ML diretamente
+    const mlWebPrintUrl = `https://www.mercadolibre.com.br/envios/label/print?shipmentIds=${shipmentId}&caller=SP&label_type=forward`;
+    console.log(`[ml/label] todas tentativas falharam — fallback URL web: ${mlWebPrintUrl}`);
     return res.status(422).json({
-      error:   'label_indisponivel',
-      message: 'Não foi possível obter a etiqueta ML. Verifique se ela já foi gerada no painel.',
-      debug:   { shipmentId, orderId, attemptsCount: attempts.length },
+      error:      'label_indisponivel',
+      message:    'Não foi possível obter a etiqueta via API. Clique em "Abrir no ML" para imprimir pelo site.',
+      mlWebUrl:   mlWebPrintUrl,
+      shipmentId,
+      orderId,
     });
 
   } catch (err) {
     console.error('[GET /api/ml/orders/:orderId/label]', err.message);
+    next(err);
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// GET /api/ml/debug/label/:orderId
+// Diagnóstico — testa cada variante do endpoint de etiqueta e retorna raw.
+// ════════════════════════════════════════════════════════════════════════════
+app.get('/api/ml/debug/label/:orderId', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const orderId = safeTrim(req.params.orderId);
+    const token   = await mlEnsureToken();
+    const h       = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+
+    // Busca shipment_id
+    const orderRes = await fetchWithTimeout(`${ML_API_BASE}/orders/${orderId}`, { headers: h }, 8000);
+    const orderData = await orderRes.json().catch(() => ({}));
+    const shipmentId = orderData.shipping?.id || null;
+
+    if (!shipmentId) {
+      return res.json({ orderId, shipmentId: null, orderStatus: orderRes.status, orderBody: orderData });
+    }
+
+    // Detalhe do shipment
+    const shipRes  = await fetchWithTimeout(`${ML_API_BASE}/shipments/${shipmentId}`, { headers: h }, 8000);
+    const shipData = await shipRes.json().catch(() => ({}));
+
+    // Testa cada variante
+    const variants = [
+      `${ML_API_BASE}/shipments/${shipmentId}/labels`,
+      `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=zpl2`,
+      `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf2`,
+      `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf`,
+      `${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}&response_type=zpl2`,
+      `${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}&response_type=pdf2`,
+      `${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}`,
+    ];
+
+    const results = [];
+    for (const url of variants) {
+      const r  = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${token}` } }, 10000).catch(e => ({ _err: e.message }));
+      if (r._err) { results.push({ url, error: r._err }); continue; }
+      const ct   = r.headers.get('content-type') || '';
+      const body = await r.text().catch(() => '');
+      results.push({ url, status: r.status, ct, body: body.slice(0, 500) });
+    }
+
+    res.json({
+      orderId, shipmentId,
+      shipment: { status: shipData.status, substatus: shipData.substatus, tracking_method: shipData.tracking_method, type: shipData.type, logistic_type: shipData.logistic_type },
+      mlWebPrintUrl: `https://www.mercadolibre.com.br/envios/label/print?shipmentIds=${shipmentId}&caller=SP&label_type=forward`,
+      variants: results,
+    });
+  } catch (err) {
+    console.error('[GET /api/ml/debug/label]', err.message);
     next(err);
   }
 });

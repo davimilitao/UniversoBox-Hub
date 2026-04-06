@@ -161,6 +161,12 @@ async function printShippingLabel(mlOrderId, onStatus) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    // Se o backend retornou mlWebUrl, abre no browser como último recurso
+    if (data.mlWebUrl) {
+      onStatus?.('Abrindo impressão no ML…');
+      window.open(data.mlWebUrl, '_blank');
+      return; // não lança erro — usuário verá a página do ML
+    }
     throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta`);
   }
 
