@@ -7,7 +7,7 @@
 import { useState, useMemo } from 'react';
 import {
   ArrowUp, ArrowDown, CheckCircle2, Clock, Trash2, Inbox,
-  MessageCircle, Copy, X, Check,
+  MessageCircle, Copy, X, Check, Loader2,
 } from 'lucide-react';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -21,11 +21,12 @@ function fmtWhats(despesas) {
   return `*Despesas selecionadas*\n${linhas.join('\n')}\n\n*Total: ${BRL.format(total)}*`;
 }
 
-export function TabelaDespesas({ despesas, isAdmin, onDelete }) {
-  const [ordem,     setOrdem]     = useState('desc');
-  const [deletando, setDeletando] = useState(null);
+export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) {
+  const [ordem,        setOrdem]        = useState('desc');
+  const [deletando,    setDeletando]    = useState(null);
+  const [toggling,     setToggling]     = useState(null);
   const [selecionados, setSelecionados] = useState(new Set());
-  const [copiado, setCopiado] = useState(false);
+  const [copiado,      setCopiado]      = useState(false);
 
   const sorted = useMemo(() =>
     [...despesas].sort((a, b) => ordem === 'desc' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp),
@@ -68,6 +69,14 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete }) {
     await navigator.clipboard.writeText(texto).catch(() => {});
     setCopiado(true);
     setTimeout(() => setCopiado(false), 2000);
+  }
+
+  async function handleToggle(id, situacaoAtual) {
+    if (!onToggleStatus) return;
+    const nova = situacaoAtual?.toLowerCase().includes('pago') ? 'Pendente' : 'Pago';
+    setToggling(id);
+    await onToggleStatus(id, nova);
+    setToggling(null);
   }
 
   async function handleDelete(id, label) {
@@ -135,11 +144,24 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete }) {
                     <td className="px-4 py-3 text-right font-semibold text-slate-200 whitespace-nowrap tabular-nums">
                       {BRL.format(d.valor)}
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      {isPago
-                        ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><CheckCircle2 size={11}/> Pago</span>
-                        : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20"><Clock size={11}/> Pendente</span>
-                      }
+                    <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                      {toggling === d.id ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs text-slate-500">
+                          <Loader2 size={11} className="animate-spin" /> …
+                        </span>
+                      ) : isPago ? (
+                        <button onClick={() => handleToggle(d.id, d.situacao)}
+                          title="Clique para marcar como Pendente"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-orange-500/10 hover:text-orange-400 hover:border-orange-500/20 transition-colors cursor-pointer">
+                          <CheckCircle2 size={11}/> Pago
+                        </button>
+                      ) : (
+                        <button onClick={() => handleToggle(d.id, d.situacao)}
+                          title="Clique para marcar como Pago"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/20 transition-colors cursor-pointer">
+                          <Clock size={11}/> Pendente
+                        </button>
+                      )}
                     </td>
                     {isAdmin && (
                       <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>

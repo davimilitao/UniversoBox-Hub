@@ -1745,6 +1745,35 @@ app.delete('/api/despesas/:rowIndex', requireFirebaseAuth, requireFirebaseRole([
   }
 });
 
+// ── PATCH /api/despesas/:rowIndex — atualiza situação (pago ↔ pendente) ───────
+app.patch('/api/despesas/:rowIndex', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    if (!SPREADSHEET_ID) return res.status(500).json({ error: 'SPREADSHEET_ID não configurado' });
+
+    const rowIndex = parseInt(req.params.rowIndex, 10);
+    if (isNaN(rowIndex) || rowIndex < 0) return res.status(400).json({ error: 'rowIndex inválido' });
+
+    const { situacao } = req.body;
+    if (!situacao) return res.status(400).json({ error: 'Campo situacao obrigatório' });
+
+    // Linha real na planilha: rowIndex é 0-based nos dados; +2 por causa do header (row 1)
+    const sheetRow = rowIndex + 2; // 1-based + 1 header
+    const range = `${SHEET_NAME}!E${sheetRow}`; // Coluna E = situacao
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range,
+      valueInputOption: 'RAW',
+      requestBody: { values: [[situacao]] },
+    });
+
+    res.json({ ok: true, situacao });
+  } catch (err) {
+    console.error('[PATCH /api/despesas/:rowIndex]', err);
+    next(err);
+  }
+});
+
 // ================================================================
 // MARGEM — lê aba "Margem" da planilha Controle Financeiro
 // ================================================================
