@@ -2463,148 +2463,127 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
   // Sanitiza: remove tudo que não for dígito (ex: traços, espaços, letras)
   const nfId = String(req.params.id).replace(/\D/g, '');
   if (!nfId) return res.status(400).json({ error: 'id_invalido', message: 'ID da NF deve ser numérico.' });
+
+  // Helper: baixa URL e retorna base64, ou null se falhar
+  async function downloadPdf(url, via) {
+    try {
+      const r = await fetch(url, { redirect: 'follow' });
+      if (!r.ok) return null;
+      const ct = r.headers.get('content-type') || '';
+      const buf = await r.arrayBuffer();
+      // Verifica assinatura %PDF
+      if (buf.byteLength < 50) return null;
+      return { pdf: Buffer.from(buf).toString('base64'), via };
+    } catch { return null; }
+  }
+
   try {
     const token = await blingEnsureToken();
 
-    // ── Passo 1: buscar o link/pdf do DANFE sem Accept restritivo ────────
-    // NUNCA enviar Accept: application/pdf — o Bling V3 retorna JSON com link.
-    // redirect: 'manual' para capturar redirects e tratar manualmente.
+    // ══════════════════════════════════════════════════════════════════════
+    // PASSO 1 — Detalhe da NF: o Bling retorna linkDanfe / linkDanfeFull
+    // diretamente no campo data da resposta. É a forma mais confiável.
+    // ══════════════════════════════════════════════════════════════════════
+    try {
+      const detResp = await fetch(`${BLING_API_BASE}/nfe/${nfId}`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+      });
+      if (detResp.ok) {
+        const det = await detResp.json().catch(() => ({}));
+        const nf  = det?.data || det;
+
+        console.log(`[danfe/${nfId}] detalhe sit=${nf?.situacao} campos=[${Object.keys(nf).join(',')}]`);
+
+        // Extrai qualquer link DANFE presente no objeto
+        const linkDanfe =
+          nf?.linkDanfe || nf?.linkDanfeFull ||
+          nf?.linkDanfeSimplificado || nf?.danfe?.link ||
+          nf?.urls?.danfe || nf?.url;
+
+        if (linkDanfe) {
+          console.log(`[danfe/${nfId}] linkDanfe=${linkDanfe}`);
+          const result = await downloadPdf(linkDanfe, 'linkDanfe_detalhe');
+          if (result) return res.json({ ok: true, ...result, nfId });
+          // URL existe mas PDF não baixou — retorna a URL pro frontend abrir
+          return res.json({ ok: true, pdfUrl: linkDanfe, nfId, via: 'linkDanfe_url' });
+        }
+
+        // chaveAcesso → tenta serviço público da Receita Federal
+        const chave = nf?.chaveAcesso?.replace(/\D/g, '');
+        if (chave && chave.length === 44) {
+          console.log(`[danfe/${nfId}] tentando SEFAZ com chave ${chave.slice(0,10)}…`);
+          const sefazUrl = `https://www.nfe.fazenda.gov.br/portal/downloadNFe.aspx?chave=${chave}&tipoDownload=2`;
+          const result = await downloadPdf(sefazUrl, 'sefaz_chave');
+          if (result) return res.json({ ok: true, ...result, nfId });
+        }
+      } else {
+        const errTxt = await detResp.text().catch(() => '');
+        console.warn(`[danfe/${nfId}] detalhe retornou ${detResp.status}: ${errTxt.slice(0, 200)}`);
+      }
+    } catch (detErr) {
+      console.warn(`[danfe/${nfId}] detalhe exception: ${detErr.message}`);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // PASSO 2 — Endpoint /nfe/{id}/danfe com redirect manual
+    // ══════════════════════════════════════════════════════════════════════
     const danfeResp = await fetch(`${BLING_API_BASE}/nfe/${nfId}/danfe`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept':        'application/json, */*;q=0.8',
-      },
-      redirect: 'manual',   // não seguir redirect automaticamente
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json, */*;q=0.8' },
+      redirect: 'manual',
     });
 
-    console.log(`[/bling/danfe/${nfId}] Bling status=${danfeResp.status} ct=${danfeResp.headers.get('content-type')} location=${danfeResp.headers.get('location')}`);
+    const dSt  = danfeResp.status;
+    const dCt  = danfeResp.headers.get('content-type') || '';
+    const dLoc = danfeResp.headers.get('location') || '';
+    console.log(`[danfe/${nfId}] /danfe endpoint status=${dSt} ct=${dCt} location=${dLoc}`);
 
-    // ── 401 ──────────────────────────────────────────────────────────────
-    if (danfeResp.status === 401) {
-      return res.status(401).json({ error: 'bling_not_authorized' });
+    if (dSt === 401) return res.status(401).json({ error: 'bling_not_authorized' });
+
+    // Redirect → segue
+    if ([301, 302, 307, 308].includes(dSt) && dLoc) {
+      const result = await downloadPdf(dLoc, 'redirect');
+      if (result) return res.json({ ok: true, ...result, nfId });
+      return res.json({ ok: true, pdfUrl: dLoc, nfId, via: 'redirect_url' });
     }
 
-    // ── Redirect (302/301) — Bling redirecionou para URL do PDF ──────────
-    if (danfeResp.status === 301 || danfeResp.status === 302 || danfeResp.status === 307 || danfeResp.status === 308) {
-      const location = danfeResp.headers.get('location');
-      if (!location) {
-        return res.status(422).json({ error: 'danfe_redirect_sem_location', message: 'Bling retornou redirect sem Location.' });
+    if (danfeResp.ok) {
+      // PDF binário
+      if (dCt.includes('pdf') || dCt.includes('octet')) {
+        const buf = await danfeResp.arrayBuffer();
+        return res.json({ ok: true, pdf: Buffer.from(buf).toString('base64'), nfId, via: 'binary' });
       }
-      console.log(`[/bling/danfe/${nfId}] Seguindo redirect para: ${location}`);
-      // Baixa o PDF da URL de redirect e faz proxy
-      const pdfResp = await fetch(location, { redirect: 'follow' });
-      if (!pdfResp.ok) {
-        return res.status(422).json({ error: 'danfe_redirect_erro', message: `PDF URL retornou ${pdfResp.status}` });
-      }
-      const buf = await pdfResp.arrayBuffer();
-      const b64 = Buffer.from(buf).toString('base64');
-      return res.json({ ok: true, pdf: b64, nfId, via: 'redirect' });
-    }
-
-    // ── 4xx/5xx — DANFE não disponível ───────────────────────────────────
-    if (!danfeResp.ok) {
-      const ct  = danfeResp.headers.get('content-type') || '';
-      let errBody = {};
-      if (ct.includes('json')) {
-        errBody = await danfeResp.json().catch(() => ({}));
-      } else {
-        const txt = await danfeResp.text().catch(() => '');
-        errBody = { rawText: txt.slice(0, 300) };
-      }
-
-      console.error(`[/bling/danfe/${nfId}] Bling error ${danfeResp.status}`, JSON.stringify(errBody).slice(0, 300));
-
-      // Tenta extrair mensagem legível
-      const msg = errBody?.error?.message
-        || errBody?.data?.[0]?.message
-        || errBody?.message
-        || errBody?.rawText
-        || `Bling ${danfeResp.status}`;
-
-      // Só retorna 404 para "não autorizada" / "não encontrada"
-      const isNotAuthorized = danfeResp.status === 404
-        || danfeResp.status === 422
-        || String(msg).toLowerCase().includes('não autoriza')
-        || String(msg).toLowerCase().includes('not found')
-        || (errBody.error?.type || '').includes('NOT_FOUND');
-
-      if (isNotAuthorized) {
-        return res.status(404).json({
-          error:   'danfe_nao_disponivel',
-          message: 'DANFE não disponível — NF ainda não autorizada no Bling.',
-          detail:  msg,
-        });
-      }
-
-      return res.status(422).json({ error: 'bling_danfe_error', message: msg });
-    }
-
-    // ── 200 OK — lê o body ───────────────────────────────────────────────
-    const ct = danfeResp.headers.get('content-type') || '';
-    console.log(`[/bling/danfe/${nfId}] 200 OK, content-type=${ct}`);
-
-    // ── Caso A: JSON com URL ou link do PDF ───────────────────────────────
-    if (ct.includes('json') || ct.includes('text/plain')) {
-      const raw  = await danfeResp.text();
-      console.log(`[/bling/danfe/${nfId}] JSON body (primeiros 500): ${raw.slice(0, 500)}`);
-
+      // JSON com URL
+      const raw = await danfeResp.text();
+      console.log(`[danfe/${nfId}] /danfe body: ${raw.slice(0, 400)}`);
       let data = {};
       try { data = JSON.parse(raw); } catch {}
-
-      // Bling V3 pode retornar em vários formatos:
-      // { data: { url: "..." } }  |  { data: "https://..." }  |  { url: "..." }  |  { link: "..." }
-      const pdfUrl = data?.data?.url
-        || data?.data?.link
-        || data?.data?.danfe
-        || (typeof data?.data === 'string' && data.data.startsWith('http') ? data.data : null)
-        || data?.url
-        || data?.link
-        || data?.danfe
-        || null;
-
+      const pdfUrl =
+        data?.data?.url || data?.data?.link || data?.data?.danfe ||
+        (typeof data?.data === 'string' && data.data.startsWith('http') ? data.data : null) ||
+        data?.url || data?.link || data?.danfe || null;
       if (pdfUrl) {
-        console.log(`[/bling/danfe/${nfId}] URL encontrada: ${pdfUrl}`);
-        // Baixa o PDF e faz proxy (para evitar CORS no frontend)
-        try {
-          const pdfResp = await fetch(pdfUrl, { redirect: 'follow' });
-          if (pdfResp.ok) {
-            const buf = await pdfResp.arrayBuffer();
-            const b64 = Buffer.from(buf).toString('base64');
-            return res.json({ ok: true, pdf: b64, nfId, via: 'json_url' });
-          }
-        } catch (e) {
-          console.warn(`[/bling/danfe/${nfId}] Falha ao baixar PDF da URL, retornando pdfUrl diretamente:`, e.message);
-        }
-        // Fallback: retorna a URL para o frontend baixar
+        const result = await downloadPdf(pdfUrl, 'json_url');
+        if (result) return res.json({ ok: true, ...result, nfId });
         return res.json({ ok: true, pdfUrl, nfId, via: 'json_url_fallback' });
       }
-
-      // JSON sem URL conhecida — loga e retorna erro com o body para debug
-      console.error(`[/bling/danfe/${nfId}] JSON sem URL reconhecida:`, raw.slice(0, 500));
-      return res.status(422).json({
-        error:   'danfe_json_sem_url',
-        message: 'Bling retornou JSON mas não encontramos a URL do PDF.',
-        rawBody: raw.slice(0, 500),
-      });
+      // ZPL ou texto desconhecido
+      return res.status(422).json({ error: 'danfe_json_sem_url', rawBody: raw.slice(0, 400) });
     }
 
-    // ── Caso B: PDF binário direto ────────────────────────────────────────
-    if (ct.includes('pdf') || ct.includes('octet')) {
-      const buf = await danfeResp.arrayBuffer();
-      const b64 = Buffer.from(buf).toString('base64');
-      console.log(`[/bling/danfe/${nfId}] PDF binário direto, tamanho=${buf.byteLength}`);
-      return res.json({ ok: true, pdf: b64, nfId, via: 'binary' });
-    }
+    // Erro do Bling — loga o body real para debug
+    const errRaw = await danfeResp.text().catch(() => '');
+    console.error(`[danfe/${nfId}] /danfe error ${dSt}: ${errRaw.slice(0, 400)}`);
 
-    // ── Caso C: outro content-type — tenta tratar como PDF binário ────────
-    console.warn(`[/bling/danfe/${nfId}] Content-type inesperado: ${ct} — tentando como binário`);
-    const buf = await danfeResp.arrayBuffer();
-    if (buf.byteLength > 100) {
-      const b64 = Buffer.from(buf).toString('base64');
-      return res.json({ ok: true, pdf: b64, nfId, via: 'binary_fallback' });
-    }
-
-    return res.status(422).json({ error: 'danfe_formato_desconhecido', message: `Content-type inesperado: ${ct}` });
+    // ══════════════════════════════════════════════════════════════════════
+    // PASSO 3 — Fallback: URL Bling simplificada pelo número da NF
+    // ══════════════════════════════════════════════════════════════════════
+    // (Tenta buscar número da NF do detalhe para montar URL alternativa)
+    return res.status(404).json({
+      error:   'danfe_nao_disponivel',
+      message: 'DANFE indisponível via API. Verifique se a NF está autorizada no Bling.',
+      detail:  errRaw.slice(0, 300),
+      nfId,
+    });
 
   } catch(err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
@@ -2656,17 +2635,23 @@ app.get('/bling/debug/danfe/:id', async (req, res, next) => {
       };
     } catch(e) { results.accept_json = { erro: e.message }; }
 
-    // Teste 3: detalhe da NF para ver situacao e campos
+    // Teste 3: detalhe da NF para ver situacao e TODOS os campos (linkDanfe!)
     try {
       const r = await blingFetch(`/nfe/${nfId}`);
       const n = r.data || r;
       results.nf_detalhe = {
-        id:         n.id,
-        numero:     n.numero,
-        situacao:   n.situacao,
-        dataEmissao: n.dataEmissao,
-        chaveAcesso: n.chaveAcesso ? n.chaveAcesso.slice(0, 20) + '…' : null,
-        campos:     Object.keys(n),
+        id:           n.id,
+        numero:       n.numero,
+        situacao:     n.situacao,
+        dataEmissao:  n.dataEmissao,
+        chaveAcesso:  n.chaveAcesso ? n.chaveAcesso.slice(0, 20) + '…' : null,
+        linkDanfe:    n.linkDanfe || null,
+        linkDanfeFull: n.linkDanfeFull || null,
+        linkDanfeSimplificado: n.linkDanfeSimplificado || null,
+        linkXml:      n.linkXml || null,
+        urlsDanfe:    n.urls?.danfe || null,
+        todosOsCampos: Object.keys(n),
+        rawData:      JSON.stringify(n).slice(0, 1000),
       };
     } catch(e) { results.nf_detalhe = { erro: e.message }; }
 
@@ -3866,15 +3851,76 @@ app.get('/api/ml/orders/:orderId/label', async (req, res, next) => {
       }
     }
 
-    // ── 4. Nada funcionou ─────────────────────────────────────────────────
+    // ── 4. Nada funcionou — retorna URL web do ML como último recurso ──────
+    // O usuário pode clicar para abrir a página de impressão do ML diretamente
+    const mlWebPrintUrl = `https://www.mercadolibre.com.br/envios/label/print?shipmentIds=${shipmentId}&caller=SP&label_type=forward`;
+    console.log(`[ml/label] todas tentativas falharam — fallback URL web: ${mlWebPrintUrl}`);
     return res.status(422).json({
-      error:   'label_indisponivel',
-      message: 'Não foi possível obter a etiqueta ML. Verifique se ela já foi gerada no painel.',
-      debug:   { shipmentId, orderId, attemptsCount: attempts.length },
+      error:      'label_indisponivel',
+      message:    'Não foi possível obter a etiqueta via API. Clique em "Abrir no ML" para imprimir pelo site.',
+      mlWebUrl:   mlWebPrintUrl,
+      shipmentId,
+      orderId,
     });
 
   } catch (err) {
     console.error('[GET /api/ml/orders/:orderId/label]', err.message);
+    next(err);
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// GET /api/ml/debug/label/:orderId
+// Diagnóstico — testa cada variante do endpoint de etiqueta e retorna raw.
+// ════════════════════════════════════════════════════════════════════════════
+app.get('/api/ml/debug/label/:orderId', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const orderId = safeTrim(req.params.orderId);
+    const token   = await mlEnsureToken();
+    const h       = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+
+    // Busca shipment_id
+    const orderRes = await fetchWithTimeout(`${ML_API_BASE}/orders/${orderId}`, { headers: h }, 8000);
+    const orderData = await orderRes.json().catch(() => ({}));
+    const shipmentId = orderData.shipping?.id || null;
+
+    if (!shipmentId) {
+      return res.json({ orderId, shipmentId: null, orderStatus: orderRes.status, orderBody: orderData });
+    }
+
+    // Detalhe do shipment
+    const shipRes  = await fetchWithTimeout(`${ML_API_BASE}/shipments/${shipmentId}`, { headers: h }, 8000);
+    const shipData = await shipRes.json().catch(() => ({}));
+
+    // Testa cada variante
+    const variants = [
+      `${ML_API_BASE}/shipments/${shipmentId}/labels`,
+      `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=zpl2`,
+      `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf2`,
+      `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf`,
+      `${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}&response_type=zpl2`,
+      `${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}&response_type=pdf2`,
+      `${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}`,
+    ];
+
+    const results = [];
+    for (const url of variants) {
+      const r  = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${token}` } }, 10000).catch(e => ({ _err: e.message }));
+      if (r._err) { results.push({ url, error: r._err }); continue; }
+      const ct   = r.headers.get('content-type') || '';
+      const body = await r.text().catch(() => '');
+      results.push({ url, status: r.status, ct, body: body.slice(0, 500) });
+    }
+
+    res.json({
+      orderId, shipmentId,
+      shipment: { status: shipData.status, substatus: shipData.substatus, tracking_method: shipData.tracking_method, type: shipData.type, logistic_type: shipData.logistic_type },
+      mlWebPrintUrl: `https://www.mercadolibre.com.br/envios/label/print?shipmentIds=${shipmentId}&caller=SP&label_type=forward`,
+      variants: results,
+    });
+  } catch (err) {
+    console.error('[GET /api/ml/debug/label]', err.message);
     next(err);
   }
 });
