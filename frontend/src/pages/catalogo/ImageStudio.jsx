@@ -199,7 +199,7 @@ export default function ImageStudio() {
     setBuscando(true); setSearchErr(''); setProduto(null); setSalvoOk(false); setSaveErr('');
     try {
       const token = await getAuthToken();
-      const res = await fetch(`/catalogo/buscar?q=${encodeURIComponent(term)}`, {
+      const res = await fetch(`/api/catalogo/buscar?q=${encodeURIComponent(term)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -217,7 +217,7 @@ export default function ImageStudio() {
     setSalvando(true); setSaveErr(''); setSalvoOk(false);
     try {
       const token = await getAuthToken();
-      const res = await fetch(`/catalogo/produto/${produto.id}`, {
+      const res = await fetch(`/api/catalogo/produto/${produto.id}`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(produto),
