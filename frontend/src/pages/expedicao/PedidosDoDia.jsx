@@ -638,17 +638,24 @@ function DanfeButton({ blingNfId }) {
 }
 
 // ─── Botão Etiqueta de Transporte (ZPL/PDF via ML) ───────────────────────────
-function ShippingLabelButton({ mlOrderId, marketplace }) {
+function ShippingLabelButton({ mlOrderId, numeroPedido, marketplace }) {
   const [st,  setSt]  = useState(null);
   const [msg, setMsg] = useState('');
 
-  // Só ML por enquanto — outros marketplaces sem endpoint de etiqueta
-  if (!mlOrderId || marketplace !== 'MERCADO_LIVRE') return null;
+  // Usa mlOrderId se disponível, fallback para numeroPedido (formato ML: 18 dígitos)
+  const orderId = mlOrderId || (
+    marketplace === 'MERCADO_LIVRE' && /^\d{10,20}$/.test(String(numeroPedido || ''))
+      ? String(numeroPedido)
+      : null
+  );
+
+  // Só ML com ID identificável
+  if (!orderId || marketplace !== 'MERCADO_LIVRE') return null;
 
   async function handle() {
     setSt('loading'); setMsg('Conectando…');
     try {
-      await printShippingLabel(mlOrderId, m => setMsg(m));
+      await printShippingLabel(orderId, m => setMsg(m));
       setSt('ok'); setMsg('Impresso ✓');
       setTimeout(() => { setSt(null); setMsg(''); }, 4000);
     } catch(e) {
@@ -730,7 +737,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
           )}
         </div>
         <div className="px-4 pb-1 space-y-2">
-          <ShippingLabelButton mlOrderId={order.mlOrderId || order.numeroPedido} marketplace={order.marketplace} />
+          <ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} />
           <DanfeButton blingNfId={order.blingNfId} />
         </div>
         <div className="flex gap-2 p-4 border-t border-white/5">
@@ -793,7 +800,7 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
           </div>
         )}
         <div className="px-4 pb-1 space-y-2">
-          <ShippingLabelButton mlOrderId={order.mlOrderId || order.numeroPedido} marketplace={order.marketplace} />
+          <ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} />
           <DanfeButton blingNfId={order.blingNfId} />
         </div>
         <div className="flex gap-2 p-4 border-t border-white/5">

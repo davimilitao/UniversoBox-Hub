@@ -4684,14 +4684,20 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
     const resp = await blingFetch(`/nfe/${req.params.id}`);
     const n    = resp.data || resp;
 
+    const numeroPedido = n.numeroPedidoLoja || n.numeroPedido || null;
+    const mkt2         = detectarMkt(n);
+    // mlOrderId: numeroPedidoLoja do Bling para pedidos ML é o order_id do ML
+    const mlOrderId2   = (mkt2 === 'MERCADO_LIVRE' && numeroPedido) ? String(numeroPedido) : null;
+
     const item = {
       id:           n.id,
       numero:       n.numero,
-      numeroPedido: n.numeroPedidoLoja || n.numeroPedido || null,
+      numeroPedido,
+      mlOrderId:    mlOrderId2,
       dataEmissao:  n.dataEmissao,
       situacao:     n.situacao?.descricao || '',
       cliente:      { nome: n.contato?.nome || '', email: n.contato?.email || '' },
-      marketplace:  detectarMkt(n),
+      marketplace:  mkt2,
       valorTotal:   n.valorTotal || n.totalProdutos || 0,
       detalhado:    true,
       itens: (n.itens || []).map(it => ({
