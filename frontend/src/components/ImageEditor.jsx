@@ -25,7 +25,7 @@ import { getAuthToken } from '../utils/getAuthToken';
  */
 export function cloudinaryStandardize(url) {
   if (!url || !url.includes('res.cloudinary.com')) return url;
-  const params = 'c_pad,b_white,w_800,h_800,e_improve,e_sharpen:60,f_auto,q_auto:best';
+  const params = 'c_pad,b_white,w_1200,h_1200,e_improve,e_sharpen:60,f_auto,q_auto:best';
   // Evita dupla aplicação: remove transformações anteriores (tudo entre /upload/ e o public_id base)
   const match = url.match(/^(https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(.+)$/);
   if (!match) return url;
@@ -160,8 +160,30 @@ export function ImageEditor({ url, sku, kind = 'stock', onSaved, onClose }) {
 
   async function saveBgResult() {
     if (!bgBlob) return;
-    setStatus('loading'); setStatusMsg('Enviando para o servidor…');
-    await uploadBlob(bgBlob);
+    setStatus('loading'); setStatusMsg('Aplicando fundo branco 1200×1200…');
+    try {
+      // Compõe: fundo branco + imagem sem fundo → 1200×1200
+      const img = new Image();
+      img.src = bgObjUrl;
+      await new Promise(r => { img.onload = r; });
+      const SIZE = 1200;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = SIZE;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, SIZE, SIZE);
+      // Centraliza a imagem mantendo proporção com padding 5%
+      const pad = SIZE * 0.05;
+      const maxSide = SIZE - pad * 2;
+      const scale = Math.min(maxSide / img.naturalWidth, maxSide / img.naturalHeight);
+      const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+      ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
+      const finalBlob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.92));
+      setStatusMsg('Enviando para o servidor…');
+      await uploadBlob(finalBlob);
+    } catch (e) {
+      setStatus('err'); setStatusMsg('Erro ao compor imagem: ' + e.message);
+    }
   }
 
   // ── Upload ─────────────────────────────────────────────────────────────────
@@ -258,7 +280,7 @@ export function ImageEditor({ url, sku, kind = 'stock', onSaved, onClose }) {
           {activeTab === 'padrao' && (
             <div className="space-y-4">
               <div className="text-[12px] text-slate-500 leading-relaxed">
-                Gera uma versão <strong className="text-slate-300">800×800px com fundo branco</strong>, melhoria automática de qualidade e nitidez via Cloudinary. Perfeito para marketplace.
+                Gera uma versão <strong className="text-slate-300">1200×1200px com fundo branco</strong>, melhoria automática de qualidade e nitidez via Cloudinary. Padrão marketplace.
               </div>
               {/* Before / After preview */}
               <div className="grid grid-cols-2 gap-3">
@@ -333,7 +355,7 @@ export function ImageEditor({ url, sku, kind = 'stock', onSaved, onClose }) {
           {activeTab === 'bg' && (
             <div className="space-y-4">
               <div className="text-[12px] text-slate-500 leading-relaxed">
-                Remove o fundo da imagem <strong className="text-slate-300">100% no navegador</strong> com IA (sem enviar para servidores externos). O modelo fica em cache após a 1ª vez.
+                Remove o fundo <strong className="text-slate-300">100% no navegador</strong> com IA, aplica fundo branco e salva em <strong className="text-slate-300">1200×1200px</strong>. Modelo em cache após 1ª vez.
               </div>
 
               {!bgObjUrl && (

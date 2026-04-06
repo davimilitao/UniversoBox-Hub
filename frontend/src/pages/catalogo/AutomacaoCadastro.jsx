@@ -8,8 +8,9 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Search, Loader2, Save, CheckCircle, AlertCircle,
   ArrowLeft, Package, Tag, Hash, Truck, Image,
-  RefreshCw, ExternalLink, Plus,
+  RefreshCw, ExternalLink, Plus, Sparkles,
 } from 'lucide-react';
+import { ImageEditor } from '../../components/ImageEditor';
 
 // ── Campo de texto genérico ───────────────────────────────────────────────────
 function Campo({ label, value, onChange, mono, placeholder, area, hint }) {
@@ -90,6 +91,7 @@ function TelaBusca({ onBuscar, carregando, erro }) {
 function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, onVoltar, isNovo }) {
   const p = produto;
   const set = (campo) => (val) => setProduto(prev => ({ ...prev, [campo]: val }));
+  const [editorImg, setEditorImg] = useState(null); // { url, idx }
   const setCategoria = (id) => {
     const cat = categorias.find(c => String(c.id) === String(id));
     setProduto(prev => ({ ...prev, categoria: cat ? { id: cat.id, nome: cat.nome } : null }));
@@ -233,10 +235,18 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               <Image size={12} /> Fotos
             </h2>
 
-            {/* Preview da primeira foto */}
-            <div className="bg-slate-800 rounded-xl aspect-square flex items-center justify-center overflow-hidden">
+            {/* Preview da primeira foto + botão editar */}
+            <div className="relative bg-slate-800 rounded-xl aspect-square flex items-center justify-center overflow-hidden group">
               {p.imagens?.[0]
-                ? <img src={p.imagens[0]} alt="Foto principal" className="w-full h-full object-contain" />
+                ? <>
+                    <img src={p.imagens[0]} alt="Foto principal" className="w-full h-full object-contain" />
+                    <button
+                      onClick={() => setEditorImg({ url: p.imagens[0], idx: 0 })}
+                      className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity gap-1.5 text-white text-xs font-bold"
+                    >
+                      <Sparkles size={14} /> Editar
+                    </button>
+                  </>
                 : <div className="text-slate-600 text-sm text-center px-4">
                     <Image size={32} className="mx-auto mb-2 opacity-30" />
                     Sem imagem
@@ -258,6 +268,13 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
                     }}
                     placeholder="https://..."
                   />
+                  {url && (
+                    <button
+                      onClick={() => setEditorImg({ url, idx: i })}
+                      title="Editar imagem"
+                      className="text-slate-600 hover:text-blue-400 transition-colors shrink-0"
+                    ><Sparkles size={14} /></button>
+                  )}
                   <button
                     onClick={() => setProduto(prev => ({ ...prev, imagens: prev.imagens.filter((_, j) => j !== i) }))}
                     className="text-slate-600 hover:text-red-400 transition-colors shrink-0"
@@ -271,6 +288,21 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
                 <Plus size={12} /> Adicionar URL de imagem
               </button>
             </div>
+
+            {/* ImageEditor modal */}
+            {editorImg && (
+              <ImageEditor
+                url={editorImg.url}
+                sku={p.codigo || 'produto'}
+                kind="stock"
+                onSaved={(newUrl) => {
+                  const arr = [...(p.imagens || [])];
+                  arr[editorImg.idx] = newUrl;
+                  setProduto(prev => ({ ...prev, imagens: arr }));
+                }}
+                onClose={() => setEditorImg(null)}
+              />
+            )}
           </section>
 
           {/* Resumo rápido */}
