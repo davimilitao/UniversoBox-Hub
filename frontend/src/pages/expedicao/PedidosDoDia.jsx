@@ -108,7 +108,7 @@ async function qzConnect() {
 }
 
 async function printDanfe(blingNfId, onStatus) {
-  const qz = await qzConnect();
+  // ── 1. Busca DANFE no backend PRIMEIRO (antes de conectar ao QZ) ──────
   onStatus?.('Buscando DANFE no Bling…');
   const token = localStorage.getItem('expedicao_token') || '';
   const res = await fetch(`/bling/danfe/${encodeURIComponent(blingNfId)}`, {
@@ -117,32 +117,65 @@ async function printDanfe(blingNfId, onStatus) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    // Mensagem amigável para NF sem DANFE disponível
     if (res.status === 404 || data.error === 'danfe_nao_disponivel') {
-      throw new Error('DANFE não disponível — NF ainda não autorizada no Bling.');
+      throw new Error('DANFE não disponível via API. Verifique no Bling.');
     }
     throw new Error(data.message || data.error || `Erro ${res.status}`);
   }
 
-  // Bling pode retornar PDF base64 ou URL direta
-  if (data.pdfUrl) {
-    // Baixa o PDF pela URL e converte para base64
+  let b64pdf = data.pdf || null;
+
+  // ── 2. Se veio pdfUrl (viewer HTML ou URL direta) ────────────────────
+  if (!b64pdf && data.pdfUrl) {
+    // Se for URL do viewer Bling (doc.view.php) → abre no browser diretamente
+    if (data.pdfUrl.includes('doc.view.php') || data.via === 'linkDanfe_browser') {
+      onStatus?.('Abrindo DANFE no navegador…');
+      window.open(data.pdfUrl, '_blank');
+      return;
+    }
+    // URL de PDF direta → tenta baixar
     onStatus?.('Baixando PDF…');
-    const pdfRes = await fetch(data.pdfUrl);
-    const buf    = await pdfRes.arrayBuffer();
-    const b64    = btoa(String.fromCharCode(...new Uint8Array(buf)));
-    onStatus?.('Enviando para impressora…');
-    const printer = await qz.printers.getDefault();
-    const config  = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
-    await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64 }]);
-    return;
+    try {
+      const pdfRes = await fetch(data.pdfUrl);
+      const buf    = await pdfRes.arrayBuffer();
+      // Verifica assinatura %PDF
+      const sig = String.fromCharCode(...new Uint8Array(buf.slice(0, 4)));
+      if (sig === '%PDF') {
+        b64pdf = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      } else {
+        // Não é PDF — abre no browser
+        window.open(data.pdfUrl, '_blank');
+        return;
+      }
+    } catch {
+      window.open(data.pdfUrl, '_blank');
+      return;
+    }
   }
 
-  if (!data?.pdf) throw new Error('Bling não retornou o PDF da DANFE.');
-  onStatus?.('Enviando para impressora…');
-  const printer = await qz.printers.getDefault();
-  const config = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
-  await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: data.pdf }]);
+  if (!b64pdf) throw new Error('Bling não retornou PDF da DANFE.');
+
+  // ── 3. Tenta imprimir via QZ Tray ────────────────────────────────────
+  onStatus?.('Conectando à impressora…');
+  let qzOk = false;
+  try {
+    const qz      = await qzConnect();
+    const printer  = await qz.printers.getDefault();
+    const config   = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
+    await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64pdf }]);
+    qzOk = true;
+  } catch (qzErr) {
+    console.warn('[printDanfe] QZ indisponível:', qzErr.message);
+  }
+
+  // ── 4. Fallback: abre blob PDF no browser ────────────────────────────
+  if (!qzOk) {
+    onStatus?.('Abrindo PDF no navegador…');
+    const blob = new Blob([Uint8Array.from(atob(b64pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
+    const url  = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
 }
 
 /**
