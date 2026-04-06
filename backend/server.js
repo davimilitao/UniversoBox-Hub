@@ -2451,62 +2451,225 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
 
 
 // ── DANFE PDF (proxy → QZ Tray) ──────────────────────────────────
-// GET /bling/danfe/:id  → { ok, pdf: base64 }
+// GET /bling/danfe/:id  → { ok, pdf: base64 } ou { ok, pdfUrl }
+//
+// IMPORTANTE: NÃO enviar Accept: application/pdf — o Bling V3 retorna
+// JSON com URL do PDF ou faz redirect. O header errado causa 404.
+// Fluxo: 1) busca link via /nfe/:id/danfe sem Accept restritivo
+//         2) se vier redirect → segue e baixa o PDF
+//         3) se vier JSON → extrai URL e faz proxy do PDF
+//         4) se vier binário PDF direto → converte para base64
 app.get('/bling/danfe/:id', async (req, res, next) => {
+  const nfId = req.params.id;
   try {
     const token = await blingEnsureToken();
-    const resp = await fetch(`${BLING_API_BASE}/nfe/${req.params.id}/danfe`, {
-      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/pdf' },
+
+    // ── Passo 1: buscar o link/pdf do DANFE sem Accept restritivo ────────
+    // NUNCA enviar Accept: application/pdf — o Bling V3 retorna JSON com link.
+    // redirect: 'manual' para capturar redirects e tratar manualmente.
+    const danfeResp = await fetch(`${BLING_API_BASE}/nfe/${nfId}/danfe`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept':        'application/json, */*;q=0.8',
+      },
+      redirect: 'manual',   // não seguir redirect automaticamente
     });
 
-    if (resp.status === 401) return res.status(401).json({ error: 'bling_not_authorized' });
+    console.log(`[/bling/danfe/${nfId}] Bling status=${danfeResp.status} ct=${danfeResp.headers.get('content-type')} location=${danfeResp.headers.get('location')}`);
 
-    // Bling retorna 4xx com JSON quando a NF não tem DANFE (ex: não autorizada ainda)
-    if (!resp.ok) {
-      let errBody = {};
-      const ct = resp.headers.get('content-type') || '';
-      if (ct.includes('json')) {
-        errBody = await resp.json().catch(() => ({}));
-      } else {
-        const txt = await resp.text().catch(() => '');
-        errBody = { message: txt.slice(0, 120) };
+    // ── 401 ──────────────────────────────────────────────────────────────
+    if (danfeResp.status === 401) {
+      return res.status(401).json({ error: 'bling_not_authorized' });
+    }
+
+    // ── Redirect (302/301) — Bling redirecionou para URL do PDF ──────────
+    if (danfeResp.status === 301 || danfeResp.status === 302 || danfeResp.status === 307 || danfeResp.status === 308) {
+      const location = danfeResp.headers.get('location');
+      if (!location) {
+        return res.status(422).json({ error: 'danfe_redirect_sem_location', message: 'Bling retornou redirect sem Location.' });
       }
-      const isNotFound = resp.status === 404
-        || (errBody.error?.type || '').includes('NOT_FOUND')
-        || (errBody.data?.[0]?.type || '').includes('NOT_FOUND');
+      console.log(`[/bling/danfe/${nfId}] Seguindo redirect para: ${location}`);
+      // Baixa o PDF da URL de redirect e faz proxy
+      const pdfResp = await fetch(location, { redirect: 'follow' });
+      if (!pdfResp.ok) {
+        return res.status(422).json({ error: 'danfe_redirect_erro', message: `PDF URL retornou ${pdfResp.status}` });
+      }
+      const buf = await pdfResp.arrayBuffer();
+      const b64 = Buffer.from(buf).toString('base64');
+      return res.json({ ok: true, pdf: b64, nfId, via: 'redirect' });
+    }
 
-      if (isNotFound) {
+    // ── 4xx/5xx — DANFE não disponível ───────────────────────────────────
+    if (!danfeResp.ok) {
+      const ct  = danfeResp.headers.get('content-type') || '';
+      let errBody = {};
+      if (ct.includes('json')) {
+        errBody = await danfeResp.json().catch(() => ({}));
+      } else {
+        const txt = await danfeResp.text().catch(() => '');
+        errBody = { rawText: txt.slice(0, 300) };
+      }
+
+      console.error(`[/bling/danfe/${nfId}] Bling error ${danfeResp.status}`, JSON.stringify(errBody).slice(0, 300));
+
+      // Tenta extrair mensagem legível
+      const msg = errBody?.error?.message
+        || errBody?.data?.[0]?.message
+        || errBody?.message
+        || errBody?.rawText
+        || `Bling ${danfeResp.status}`;
+
+      // Só retorna 404 para "não autorizada" / "não encontrada"
+      const isNotAuthorized = danfeResp.status === 404
+        || danfeResp.status === 422
+        || String(msg).toLowerCase().includes('não autoriza')
+        || String(msg).toLowerCase().includes('not found')
+        || (errBody.error?.type || '').includes('NOT_FOUND');
+
+      if (isNotAuthorized) {
         return res.status(404).json({
-          error: 'danfe_nao_disponivel',
-          message: 'DANFE não disponível para esta NF — verifique se foi autorizada no Bling.',
+          error:   'danfe_nao_disponivel',
+          message: 'DANFE não disponível — NF ainda não autorizada no Bling.',
+          detail:  msg,
         });
       }
 
-      console.error('[GET /bling/danfe/:id] Bling error', resp.status, errBody);
+      return res.status(422).json({ error: 'bling_danfe_error', message: msg });
+    }
+
+    // ── 200 OK — lê o body ───────────────────────────────────────────────
+    const ct = danfeResp.headers.get('content-type') || '';
+    console.log(`[/bling/danfe/${nfId}] 200 OK, content-type=${ct}`);
+
+    // ── Caso A: JSON com URL ou link do PDF ───────────────────────────────
+    if (ct.includes('json') || ct.includes('text/plain')) {
+      const raw  = await danfeResp.text();
+      console.log(`[/bling/danfe/${nfId}] JSON body (primeiros 500): ${raw.slice(0, 500)}`);
+
+      let data = {};
+      try { data = JSON.parse(raw); } catch {}
+
+      // Bling V3 pode retornar em vários formatos:
+      // { data: { url: "..." } }  |  { data: "https://..." }  |  { url: "..." }  |  { link: "..." }
+      const pdfUrl = data?.data?.url
+        || data?.data?.link
+        || data?.data?.danfe
+        || (typeof data?.data === 'string' && data.data.startsWith('http') ? data.data : null)
+        || data?.url
+        || data?.link
+        || data?.danfe
+        || null;
+
+      if (pdfUrl) {
+        console.log(`[/bling/danfe/${nfId}] URL encontrada: ${pdfUrl}`);
+        // Baixa o PDF e faz proxy (para evitar CORS no frontend)
+        try {
+          const pdfResp = await fetch(pdfUrl, { redirect: 'follow' });
+          if (pdfResp.ok) {
+            const buf = await pdfResp.arrayBuffer();
+            const b64 = Buffer.from(buf).toString('base64');
+            return res.json({ ok: true, pdf: b64, nfId, via: 'json_url' });
+          }
+        } catch (e) {
+          console.warn(`[/bling/danfe/${nfId}] Falha ao baixar PDF da URL, retornando pdfUrl diretamente:`, e.message);
+        }
+        // Fallback: retorna a URL para o frontend baixar
+        return res.json({ ok: true, pdfUrl, nfId, via: 'json_url_fallback' });
+      }
+
+      // JSON sem URL conhecida — loga e retorna erro com o body para debug
+      console.error(`[/bling/danfe/${nfId}] JSON sem URL reconhecida:`, raw.slice(0, 500));
       return res.status(422).json({
-        error: 'bling_danfe_error',
-        message: `Bling retornou ${resp.status}: ${errBody.message || JSON.stringify(errBody).slice(0, 100)}`,
+        error:   'danfe_json_sem_url',
+        message: 'Bling retornou JSON mas não encontramos a URL do PDF.',
+        rawBody: raw.slice(0, 500),
       });
     }
 
-    // Sucesso — pode vir como PDF binário ou JSON com URL
-    const ct = resp.headers.get('content-type') || '';
-    if (ct.includes('json')) {
-      // Bling retornou JSON com link para o PDF
-      const data = await resp.json();
-      const pdfUrl = data?.data?.url || data?.url;
-      if (pdfUrl) return res.json({ ok: true, pdfUrl, nfId: req.params.id });
-      return res.status(422).json({ error: 'danfe_sem_url', message: 'Bling retornou JSON sem URL do PDF.' });
+    // ── Caso B: PDF binário direto ────────────────────────────────────────
+    if (ct.includes('pdf') || ct.includes('octet')) {
+      const buf = await danfeResp.arrayBuffer();
+      const b64 = Buffer.from(buf).toString('base64');
+      console.log(`[/bling/danfe/${nfId}] PDF binário direto, tamanho=${buf.byteLength}`);
+      return res.json({ ok: true, pdf: b64, nfId, via: 'binary' });
     }
 
-    const buffer = await resp.arrayBuffer();
-    const b64 = Buffer.from(buffer).toString('base64');
-    res.json({ ok: true, pdf: b64, nfId: req.params.id });
+    // ── Caso C: outro content-type — tenta tratar como PDF binário ────────
+    console.warn(`[/bling/danfe/${nfId}] Content-type inesperado: ${ct} — tentando como binário`);
+    const buf = await danfeResp.arrayBuffer();
+    if (buf.byteLength > 100) {
+      const b64 = Buffer.from(buf).toString('base64');
+      return res.json({ ok: true, pdf: b64, nfId, via: 'binary_fallback' });
+    }
+
+    return res.status(422).json({ error: 'danfe_formato_desconhecido', message: `Content-type inesperado: ${ct}` });
+
   } catch(err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
-    console.error('[GET /bling/danfe/:id]', err.message);
+    console.error(`[GET /bling/danfe/${nfId}]`, err.message);
     next(err);
   }
+});
+
+// ── DEBUG: testa o endpoint de DANFE para um ID específico ───────
+// GET /bling/debug/danfe/:id  — retorna raw response do Bling
+app.get('/bling/debug/danfe/:id', async (req, res, next) => {
+  try {
+    const token = await blingEnsureToken();
+    const nfId  = req.params.id;
+
+    const results = {};
+
+    // Teste 1: sem Accept header
+    try {
+      const r = await fetch(`${BLING_API_BASE}/nfe/${nfId}/danfe`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        redirect: 'manual',
+      });
+      const ct  = r.headers.get('content-type') || '';
+      const loc = r.headers.get('location')     || '';
+      const txt = await r.text().catch(() => '');
+      results.sem_accept = {
+        status: r.status,
+        content_type: ct,
+        location: loc,
+        body_preview: txt.slice(0, 500),
+      };
+    } catch(e) { results.sem_accept = { erro: e.message }; }
+
+    // Teste 2: Accept: application/json
+    try {
+      const r = await fetch(`${BLING_API_BASE}/nfe/${nfId}/danfe`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+        redirect: 'manual',
+      });
+      const ct  = r.headers.get('content-type') || '';
+      const loc = r.headers.get('location')     || '';
+      const txt = await r.text().catch(() => '');
+      results.accept_json = {
+        status: r.status,
+        content_type: ct,
+        location: loc,
+        body_preview: txt.slice(0, 500),
+      };
+    } catch(e) { results.accept_json = { erro: e.message }; }
+
+    // Teste 3: detalhe da NF para ver situacao e campos
+    try {
+      const r = await blingFetch(`/nfe/${nfId}`);
+      const n = r.data || r;
+      results.nf_detalhe = {
+        id:         n.id,
+        numero:     n.numero,
+        situacao:   n.situacao,
+        dataEmissao: n.dataEmissao,
+        chaveAcesso: n.chaveAcesso ? n.chaveAcesso.slice(0, 20) + '…' : null,
+        campos:     Object.keys(n),
+      };
+    } catch(e) { results.nf_detalhe = { erro: e.message }; }
+
+    res.json(results);
+  } catch(err) { next(err); }
 });
 
 // ── ZPL Etiqueta de Prateleira (bin label) → QZ Tray ─────────────
@@ -3552,58 +3715,112 @@ app.post('/api/ml/orders/:orderId/status', async (req, res, next) => {
 
 // ════════════════════════════════════════════════════════════════════════════
 // GET /api/ml/orders/:orderId/label
-// Retorna a URL da etiqueta de transporte do ML para um pedido.
-// Se o ML retornar PDF diretamente, repassamos a URL.
+// Etiqueta de transporte ML — retorna ZPL (string) ou PDF (base64).
+// Aceita ?format=zpl (padrão) ou ?format=pdf
 // ════════════════════════════════════════════════════════════════════════════
 app.get('/api/ml/orders/:orderId/label', async (req, res, next) => {
   try {
-    const orderId = safeTrim(req.params.orderId);
-    const token   = await mlEnsureToken();
-    const headers = {
-      'Authorization': `Bearer ${token}`,
-      'Accept':        'application/json',
-    };
+    const orderId    = safeTrim(req.params.orderId);
+    const wantFormat = (req.query.format || 'zpl').toLowerCase(); // 'zpl' | 'pdf'
+    const token      = await mlEnsureToken();
+    const headers    = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
 
-    // 1. Busca o shipment_id do pedido
-    const orderRes  = await fetchWithTimeout(`${ML_API_BASE}/orders/${orderId}`, { headers }, 8000);
-    if (!orderRes.ok) throw Object.assign(new Error(`Pedido ${orderId} não encontrado`), { statusCode: 404 });
-    const orderData = await orderRes.json();
+    // 1. Busca shipment_id
+    const orderRes = await fetchWithTimeout(`${ML_API_BASE}/orders/${orderId}`, { headers }, 8000);
+    if (!orderRes.ok) {
+      const body = await orderRes.json().catch(() => ({}));
+      throw Object.assign(new Error(body.message || `Pedido ${orderId} não encontrado`), { statusCode: 404 });
+    }
+    const orderData  = await orderRes.json();
     const shipmentId = orderData.shipping?.id;
     if (!shipmentId) throw Object.assign(new Error('Pedido sem envio associado'), { statusCode: 400 });
 
-    // 2. Solicita a URL da etiqueta
-    const labelRes  = await fetchWithTimeout(
-      `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=zpl2&shipment_ids=${shipmentId}`,
-      { headers }, 10000
-    );
+    console.log(`[ml/label] orderId=${orderId} shipmentId=${shipmentId} format=${wantFormat}`);
 
-    // ML pode retornar application/pdf ou application/json com URL
-    const contentType = labelRes.headers.get('content-type') || '';
+    // 2. Tenta ZPL primeiro (para impressoras térmicas via QZ Tray)
+    const zplUrl = `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=zpl2&shipment_ids=${shipmentId}`;
+    const zplRes = await fetchWithTimeout(zplUrl, { headers }, 12000);
 
-    if (contentType.includes('pdf') || contentType.includes('octet')) {
-      // Retorna o PDF como stream
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="etiqueta-${orderId}.pdf"`);
-      const buf = await labelRes.arrayBuffer();
-      return res.send(Buffer.from(buf));
+    const zplCt  = zplRes.headers.get('content-type') || '';
+    console.log(`[ml/label] ZPL response: status=${zplRes.status} ct=${zplCt}`);
+
+    if (zplRes.ok) {
+      // ML retornou conteúdo ZPL direto
+      if (zplCt.includes('zpl') || zplCt.includes('plain') || zplCt.includes('octet')) {
+        const zplText = await zplRes.text();
+        if (zplText.trim().startsWith('^XA') || zplText.includes('^XA')) {
+          return res.json({ ok: true, format: 'zpl', zpl: zplText, shipmentId, orderId });
+        }
+      }
+
+      // ML retornou PDF binário
+      if (zplCt.includes('pdf')) {
+        const buf = await zplRes.arrayBuffer();
+        const b64 = Buffer.from(buf).toString('base64');
+        return res.json({ ok: true, format: 'pdf', pdf: b64, shipmentId, orderId });
+      }
+
+      // ML retornou JSON com URL ou ZPL inline
+      if (zplCt.includes('json') || zplCt.includes('text')) {
+        const raw  = await zplRes.text();
+        console.log(`[ml/label] JSON body preview: ${raw.slice(0, 400)}`);
+        let data = {};
+        try { data = JSON.parse(raw); } catch {}
+
+        // Tenta extrair ZPL inline
+        const zplInline = data?.zpl || data?.content || data?.label || data?.data?.zpl || null;
+        if (zplInline && (zplInline.includes('^XA') || zplInline.startsWith('%PDF'))) {
+          if (zplInline.includes('^XA')) {
+            return res.json({ ok: true, format: 'zpl', zpl: zplInline, shipmentId, orderId });
+          }
+        }
+
+        // Tenta extrair URL do PDF
+        const pdfUrl = data?.url || data?.data?.url || data?.link || data?.data?.link || null;
+        if (pdfUrl) {
+          // Baixa o PDF e converte para base64
+          try {
+            const pdfRes = await fetchWithTimeout(pdfUrl, {}, 10000);
+            if (pdfRes.ok) {
+              const buf = await pdfRes.arrayBuffer();
+              const b64 = Buffer.from(buf).toString('base64');
+              return res.json({ ok: true, format: 'pdf', pdf: b64, shipmentId, orderId, pdfUrl });
+            }
+          } catch (e) {
+            console.warn('[ml/label] Falha ao baixar PDF da URL:', e.message);
+          }
+          return res.json({ ok: true, format: 'pdf_url', pdfUrl, shipmentId, orderId });
+        }
+      }
     }
 
-    // Tenta como JSON
-    const labelData = await labelRes.json().catch(() => ({}));
-    const pdfUrl = labelData.url || null;
+    // 3. Fallback: tenta PDF direto (response_type=pdf)
+    const pdfFallbackUrl = `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf&shipment_ids=${shipmentId}`;
+    const pdfRes = await fetchWithTimeout(pdfFallbackUrl, { headers }, 12000);
+    const pdfCt  = pdfRes.headers.get('content-type') || '';
+    console.log(`[ml/label] PDF fallback: status=${pdfRes.status} ct=${pdfCt}`);
 
-    // Também retorna dados do destinatário para o preview
-    const shipping = orderData.shipping || {};
-    const buyer    = orderData.buyer   || {};
+    if (pdfRes.ok) {
+      if (pdfCt.includes('pdf') || pdfCt.includes('octet')) {
+        const buf = await pdfRes.arrayBuffer();
+        const b64 = Buffer.from(buf).toString('base64');
+        return res.json({ ok: true, format: 'pdf', pdf: b64, shipmentId, orderId, via: 'pdf_fallback' });
+      }
+      const raw = await pdfRes.text();
+      let data = {};
+      try { data = JSON.parse(raw); } catch {}
+      const pdfUrl = data?.url || data?.data?.url || null;
+      if (pdfUrl) {
+        return res.json({ ok: true, format: 'pdf_url', pdfUrl, shipmentId, orderId, via: 'pdf_fallback_url' });
+      }
+    }
 
-    res.json({
-      ok: true,
-      orderId,
-      shipmentId,
-      tracking_number: shipping.tracking_number || null,
-      pdfUrl,
-      buyer: buyer.nickname,
-      receiver: orderData.shipping?.receiver_address || null,
+    // 4. Nenhum formato funcionou — retorna debug info
+    const zplBodyPreview = await zplRes.text().catch(() => '');
+    return res.status(422).json({
+      error:   'label_formato_desconhecido',
+      message: 'ML não retornou etiqueta reconhecível (ZPL nem PDF).',
+      debug:   { zplStatus: zplRes.status, zplCt, zplBodyPreview: zplBodyPreview.slice(0, 300), shipmentId },
     });
 
   } catch (err) {
