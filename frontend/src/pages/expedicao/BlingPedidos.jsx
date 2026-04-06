@@ -607,6 +607,7 @@ export function BlingPedidos() {
           itens:        detalhe.itens,
           clienteNome:  nf.cliente?.nome || '',
           numeroPedido: detalhe.numeroPedido || '',
+          mlOrderId:    detalhe.mlOrderId   || null,
           logistica,
         }),
       });
