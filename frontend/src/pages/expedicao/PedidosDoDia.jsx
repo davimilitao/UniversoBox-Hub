@@ -152,46 +152,77 @@ async function printDanfe(blingNfId, onStatus) {
  * @param {Function} onStatus — callback de status para exibir progresso no UI
  */
 async function printShippingLabel(mlOrderId, onStatus) {
-  const qz = await qzConnect();
+  // ── 1. Busca a etiqueta no backend PRIMEIRO (antes do QZ) ─────────────
   onStatus?.('Buscando etiqueta no ML…');
-
   const token = localStorage.getItem('expedicao_token') || '';
   const res   = await fetch(`/api/ml/orders/${encodeURIComponent(mlOrderId)}/label`, {
     headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
   });
-  const data  = await res.json().catch(() => ({}));
+  const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
     throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta`);
   }
 
-  onStatus?.('Enviando para impressora…');
-  const printer = await qz.printers.getDefault();
+  // ── 2. Resolve o PDF/ZPL em memória ───────────────────────────────────
+  let b64pdf = null;
+  let zplStr = null;
+  let pdfUrl = data.pdfUrl || null;
 
-  // ── ZPL — impressora térmica (zebra, argox, etc.) ──────────────────────
   if (data.format === 'zpl' && data.zpl) {
-    const config = qz.configs.create(printer, { language: { type: 'ZPL' } });
-    await qz.print(config, [{ type: 'raw', format: 'plain', data: data.zpl }]);
-    return;
+    zplStr = data.zpl;
+  } else if (data.format === 'pdf' && data.pdf) {
+    b64pdf = data.pdf;
+  } else if (data.format === 'pdf_url' && data.pdfUrl) {
+    onStatus?.('Baixando PDF…');
+    try {
+      const pdfRes = await fetch(data.pdfUrl);
+      const buf    = await pdfRes.arrayBuffer();
+      b64pdf = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    } catch {
+      // fallback: abre no browser
+    }
   }
 
-  // ── PDF base64 ────────────────────────────────────────────────────────
-  if (data.format === 'pdf' && data.pdf) {
-    const config = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
-    await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: data.pdf }]);
-    return;
+  // ── 3. Tenta imprimir via QZ Tray ─────────────────────────────────────
+  onStatus?.('Conectando à impressora…');
+  let qzOk = false;
+  try {
+    const qz = await qzConnect();
+    const printer = await qz.printers.getDefault();
+
+    if (zplStr) {
+      const config = qz.configs.create(printer, { language: { type: 'ZPL' } });
+      await qz.print(config, [{ type: 'raw', format: 'plain', data: zplStr }]);
+      qzOk = true;
+    } else if (b64pdf) {
+      const config = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
+      await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64pdf }]);
+      qzOk = true;
+    }
+  } catch (qzErr) {
+    console.warn('[printShippingLabel] QZ Tray indisponível:', qzErr.message);
+    // Não lança — cai para fallback browser
   }
 
-  // ── URL do PDF — baixa e imprime ──────────────────────────────────────
-  if (data.pdfUrl) {
-    onStatus?.('Baixando PDF da etiqueta…');
-    const pdfRes = await fetch(data.pdfUrl);
-    const buf    = await pdfRes.arrayBuffer();
-    const b64    = btoa(String.fromCharCode(...new Uint8Array(buf)));
-    onStatus?.('Enviando para impressora…');
-    const config = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
-    await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64 }]);
+  if (qzOk) return;
+
+  // ── 4. Fallback: abre PDF no browser (sem impressora física) ──────────
+  onStatus?.('Abrindo PDF no navegador…');
+  if (b64pdf) {
+    const blob = new Blob([Uint8Array.from(atob(b64pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
+    const url  = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
     return;
+  }
+  if (pdfUrl) {
+    window.open(pdfUrl, '_blank');
+    return;
+  }
+  if (zplStr) {
+    // ZPL sem impressora: mostra o código para copiar/usar depois
+    throw new Error('Etiqueta ZPL obtida mas QZ Tray não está disponível. Instale em qz.io para imprimir.');
   }
 
   throw new Error('Etiqueta não disponível — verifique se o pedido tem envio associado no ML.');
