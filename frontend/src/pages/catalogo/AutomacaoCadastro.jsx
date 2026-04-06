@@ -374,11 +374,15 @@ export default function AutomacaoCadastro() {
   }
 
   if (status === 'idle' || status === 'buscando') {
-    return <TelaBusca onBuscar={handleBuscar} carregando={status === 'buscando'} erro={erro} />;
+    return (
+      <div className="h-full overflow-y-auto">
+        <TelaBusca onBuscar={handleBuscar} carregando={status === 'buscando'} erro={erro} />
+      </div>
+    );
   }
 
   return (
-    <>
+    <div className="h-full overflow-y-auto">
       {erro && (
         <div className="mx-4 mt-4 flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
           <AlertCircle size={15} className="shrink-0" /> {erro}
@@ -395,6 +399,6 @@ export default function AutomacaoCadastro() {
         onVoltar={handleVoltar}
         isNovo={isNovo}
       />
-    </>
+    </div>
   );
 }
