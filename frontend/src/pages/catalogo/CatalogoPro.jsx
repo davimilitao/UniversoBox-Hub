@@ -7,14 +7,14 @@
  */
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { getAuthToken } from '../../utils/getAuthToken';
 import {
   Search, LayoutGrid, LayoutList, SlidersHorizontal, X, ChevronRight,
   Package, Image, Tag, Weight, Ruler, DollarSign, Barcode,
   AlertTriangle, CheckCircle2, Circle, ExternalLink, RefreshCw,
   Upload, Star, Eye, MapPin, Layers, Filter, ChevronDown, ChevronUp,
-  Boxes, FlaskConical, Zap, TrendingUp,
+  Boxes, FlaskConical, Zap, TrendingUp, Sparkles,
 } from 'lucide-react';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -229,6 +229,7 @@ function StudioPanel({ produto, onClose }) {
   const [tab, setTab] = useState('info'); // info | fotos | bling
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
+  const navigate = useNavigate();
   const score = calcScore(produto);
 
   const fotos = [
@@ -397,15 +398,13 @@ function StudioPanel({ produto, onClose }) {
               )
             }
 
-            {/* Upload */}
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+            {/* Image Studio CTA */}
             <button
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-dashed border-slate-600 hover:border-emerald-500/50 text-slate-500 hover:text-emerald-400 text-xs transition-colors disabled:opacity-50"
+              onClick={() => navigate(`/catalogo/fotos?sku=${encodeURIComponent(produto.sku || '')}`)}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-violet-600/10 border border-violet-500/30 hover:bg-violet-600/20 text-violet-400 hover:text-violet-300 text-xs font-semibold transition-colors"
             >
-              <Upload size={14} />
-              {uploading ? 'Enviando…' : 'Enviar nova foto'}
+              <Sparkles size={14} />
+              Editar no Image Studio
             </button>
           </div>
         )}
