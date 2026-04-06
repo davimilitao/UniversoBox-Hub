@@ -2,6 +2,10 @@
  * @file useOrderNotifier.js
  * @description Polling a cada 30s para novos pedidos pending.
  *              Dispara som + callback quando count aumenta.
+ *
+ * IMPORTANTE: onNewOrders é estabilizado via useRef para que o useCallback
+ * de `poll` não dependa dela — evitando re-mounts em cascata quando o
+ * chamador passa uma arrow function inline.
  */
 
 import { useEffect, useRef, useCallback } from 'react';
@@ -31,9 +35,13 @@ function beepNewOrder() {
 }
 
 export function useOrderNotifier({ enabled = true, intervalMs = 30_000, onNewOrders }) {
-  const lastCount = useRef(null);
-  const timerRef  = useRef(null);
+  const lastCount    = useRef(null);
+  const timerRef     = useRef(null);
+  // Ref estável para onNewOrders — não entra nas deps do useCallback
+  const onNewOrdersRef = useRef(onNewOrders);
+  useEffect(() => { onNewOrdersRef.current = onNewOrders; });
 
+  // poll NÃO depende de onNewOrders — usa a ref
   const poll = useCallback(async () => {
     try {
       const token = localStorage.getItem('expedicao_token') || '';
@@ -47,7 +55,7 @@ export function useOrderNotifier({ enabled = true, intervalMs = 30_000, onNewOrd
       if (lastCount.current !== null && count > lastCount.current) {
         const diff = count - lastCount.current;
         beepNewOrder();
-        onNewOrders?.(diff, count);
+        onNewOrdersRef.current?.(diff, count);
         // Browser notification (se permissão concedida)
         if (Notification.permission === 'granted') {
           new Notification('📦 Novos pedidos!', {
@@ -60,7 +68,7 @@ export function useOrderNotifier({ enabled = true, intervalMs = 30_000, onNewOrd
       }
       lastCount.current = count;
     } catch {}
-  }, [onNewOrders]);
+  }, []); // deps vazias — estável para sempre
 
   useEffect(() => {
     if (!enabled) return;
