@@ -2460,7 +2460,9 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
 //         3) se vier JSON → extrai URL e faz proxy do PDF
 //         4) se vier binário PDF direto → converte para base64
 app.get('/bling/danfe/:id', async (req, res, next) => {
-  const nfId = req.params.id;
+  // Sanitiza: remove tudo que não for dígito (ex: traços, espaços, letras)
+  const nfId = String(req.params.id).replace(/\D/g, '');
+  if (!nfId) return res.status(400).json({ error: 'id_invalido', message: 'ID da NF deve ser numérico.' });
   try {
     const token = await blingEnsureToken();
 
@@ -2863,7 +2865,9 @@ app.get('/bling/debug/lista', async (req, res, next) => {
 // ── CLONAR NF → CRIAR PEDIDO ─────────────────────────────────────
 app.post('/bling/clonar', async (req, res, next) => {
   try {
-    const { blingNfId, marketplace, itens, clienteNome, numeroPedido, mlOrderId, logistica } = req.body;
+    const { marketplace, itens, clienteNome, numeroPedido, mlOrderId, logistica } = req.body;
+    // Sanitiza blingNfId: mantém apenas dígitos (remove traços, letras, etc.)
+    const blingNfId = String(req.body.blingNfId || '').replace(/\D/g, '') || null;
 
     if (!itens || !itens.length) return res.status(400).json({ error: 'Nenhum item enviado. Abra os itens da NF antes de clonar.' });
 
@@ -4778,7 +4782,9 @@ app.get('/bling/debug/nfe/:id', async (req, res, next) => {
 // ── CLONAR NF → CRIAR PEDIDO ─────────────────────────────────────
 app.post('/bling/clonar', async (req, res, next) => {
   try {
-    const { blingNfId, marketplace, itens, clienteNome, numeroPedido, mlOrderId, logistica } = req.body;
+    const { marketplace, itens, clienteNome, numeroPedido, mlOrderId, logistica } = req.body;
+    // Sanitiza blingNfId: mantém apenas dígitos (remove traços, letras, etc.)
+    const blingNfId = String(req.body.blingNfId || '').replace(/\D/g, '') || null;
 
     if (!itens || !itens.length) return res.status(400).json({ error: 'Nenhum item enviado. Abra os itens da NF antes de clonar.' });
 
