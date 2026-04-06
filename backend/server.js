@@ -2464,15 +2464,34 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
   const nfId = String(req.params.id).replace(/\D/g, '');
   if (!nfId) return res.status(400).json({ error: 'id_invalido', message: 'ID da NF deve ser numérico.' });
 
-  // Helper: baixa URL e retorna base64, ou null se falhar
+  // Converte URL do viewer Bling para URL de download direto
+  // doc.view.php → doc.download.php (mesmo id + accessKey)
+  function toBlingDownloadUrl(viewerUrl) {
+    try {
+      const u = new URL(viewerUrl);
+      if (u.pathname.includes('doc.view.php')) {
+        u.pathname = u.pathname.replace('doc.view.php', 'doc.download.php');
+        return u.toString();
+      }
+    } catch {}
+    return null;
+  }
+
+  // Helper: baixa URL, verifica assinatura %PDF e retorna base64
+  // Retorna null se não for PDF válido (ex: HTML viewer, SVG, etc.)
   async function downloadPdf(url, via) {
     try {
       const r = await fetch(url, { redirect: 'follow' });
       if (!r.ok) return null;
-      const ct = r.headers.get('content-type') || '';
       const buf = await r.arrayBuffer();
-      // Verifica assinatura %PDF
-      if (buf.byteLength < 50) return null;
+      if (buf.byteLength < 100) return null;
+      // Verifica assinatura mágica %PDF nos primeiros bytes
+      const header = Buffer.from(buf.slice(0, 5)).toString('ascii');
+      if (!header.startsWith('%PDF')) {
+        const preview = Buffer.from(buf.slice(0, 200)).toString('utf8');
+        console.warn(`[danfe] downloadPdf(${via}) não é PDF — header="${header}" preview=${preview.slice(0,100).replace(/\n/g,' ')}`);
+        return null;
+      }
       return { pdf: Buffer.from(buf).toString('base64'), via };
     } catch { return null; }
   }
@@ -2494,18 +2513,43 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
 
         console.log(`[danfe/${nfId}] detalhe sit=${nf?.situacao} campos=[${Object.keys(nf).join(',')}]`);
 
-        // Extrai qualquer link DANFE presente no objeto
-        const linkDanfe =
-          nf?.linkDanfe || nf?.linkDanfeFull ||
-          nf?.linkDanfeSimplificado || nf?.danfe?.link ||
-          nf?.urls?.danfe || nf?.url;
+        // Prioridade: linkPDF (PDF direto) > linkDanfe (HTML viewer) > linkDanfeFull
+        // ATENÇÃO: linkDanfe = viewer HTML/SVG — NÃO é PDF binário!
+        //          linkPDF   = download direto do PDF = o que precisamos
+        const linkPdf =
+          nf?.linkPDF || nf?.linkPdf ||
+          nf?.linkDanfeFull || nf?.linkDanfeSimplificado;
 
-        if (linkDanfe) {
-          console.log(`[danfe/${nfId}] linkDanfe=${linkDanfe}`);
-          const result = await downloadPdf(linkDanfe, 'linkDanfe_detalhe');
+        const linkViewer =
+          nf?.linkDanfe || nf?.danfe?.link || nf?.urls?.danfe || nf?.url;
+
+        // Tenta linkPDF primeiro (PDF verdadeiro)
+        if (linkPdf) {
+          console.log(`[danfe/${nfId}] linkPDF=${linkPdf}`);
+          const result = await downloadPdf(linkPdf, 'linkPDF');
           if (result) return res.json({ ok: true, ...result, nfId });
-          // URL existe mas PDF não baixou — retorna a URL pro frontend abrir
-          return res.json({ ok: true, pdfUrl: linkDanfe, nfId, via: 'linkDanfe_url' });
+        }
+
+        // Tenta linkDanfe — normalmente é viewer HTML (doc.view.php)
+        // Converte para doc.download.php para tentar PDF direto
+        if (linkViewer) {
+          console.log(`[danfe/${nfId}] linkDanfe(viewer)=${linkViewer}`);
+
+          // Tenta versão download da mesma URL
+          const downloadUrl = toBlingDownloadUrl(linkViewer);
+          if (downloadUrl) {
+            console.log(`[danfe/${nfId}] tentando download URL: ${downloadUrl}`);
+            const result = await downloadPdf(downloadUrl, 'doc.download.php');
+            if (result) return res.json({ ok: true, ...result, nfId });
+          }
+
+          // Tenta o viewer direto (às vezes retorna PDF)
+          const result = await downloadPdf(linkViewer, 'linkDanfe_direto');
+          if (result) return res.json({ ok: true, ...result, nfId });
+
+          // É HTML viewer — retorna URL para o browser imprimir
+          console.log(`[danfe/${nfId}] linkDanfe é HTML viewer — retornando pdfUrl`);
+          return res.json({ ok: true, pdfUrl: linkViewer, nfId, via: 'linkDanfe_browser' });
         }
 
         // chaveAcesso → tenta serviço público da Receita Federal
