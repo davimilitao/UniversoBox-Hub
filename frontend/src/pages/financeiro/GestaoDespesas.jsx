@@ -186,6 +186,30 @@ export function GestaoDespesas() {
     }
   }, [setDespesas]);
 
+  // ── Toggle status pago/pendente ───────────────────────────────────────────
+  const handleToggleStatus = useCallback(async (rowIndex, novaSituacao) => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/despesas/${rowIndex}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ situacao: novaSituacao }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Falha ao atualizar');
+      // Atualiza localmente sem reload
+      setDespesas(prev => prev.map(d =>
+        d.id === rowIndex ? { ...d, situacao: novaSituacao } : d
+      ));
+      showToast(`Marcado como ${novaSituacao} ✅`);
+    } catch (err) {
+      showToast(`Erro: ${err.message}`, 'err');
+    }
+  }, [setDespesas]);
+
   // ── Deletar despesa ────────────────────────────────────────────────────────
   const handleDelete = useCallback(async (rowIndex) => {
     try {
@@ -273,6 +297,7 @@ export function GestaoDespesas() {
               despesas={despesasFiltradas}
               isAdmin={true}
               onDelete={handleDelete}
+              onToggleStatus={handleToggleStatus}
             />
           </div>
 
