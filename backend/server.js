@@ -3716,17 +3716,97 @@ app.post('/api/ml/orders/:orderId/status', async (req, res, next) => {
 // ════════════════════════════════════════════════════════════════════════════
 // GET /api/ml/orders/:orderId/label
 // Etiqueta de transporte ML — retorna ZPL (string) ou PDF (base64).
-// Aceita ?format=zpl (padrão) ou ?format=pdf
+// Estratégia: múltiplas variantes de endpoint até encontrar uma que funcione.
 // ════════════════════════════════════════════════════════════════════════════
 app.get('/api/ml/orders/:orderId/label', async (req, res, next) => {
   try {
-    const orderId    = safeTrim(req.params.orderId);
-    const wantFormat = (req.query.format || 'zpl').toLowerCase(); // 'zpl' | 'pdf'
-    const token      = await mlEnsureToken();
-    const headers    = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+    const orderId = safeTrim(req.params.orderId);
+    const token   = await mlEnsureToken();
+    const headers = { 'Authorization': `Bearer ${token}` };
 
-    // 1. Busca shipment_id
-    const orderRes = await fetchWithTimeout(`${ML_API_BASE}/orders/${orderId}`, { headers }, 8000);
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    async function tryDownloadUrl(url, label) {
+      try {
+        const r = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${token}` } }, 10000);
+        const ct = r.headers.get('content-type') || '';
+        if (r.ok && ct.includes('pdf')) {
+          const buf = await r.arrayBuffer();
+          return { format: 'pdf', pdf: Buffer.from(buf).toString('base64'), via: label };
+        }
+      } catch (_) {}
+      return null;
+    }
+
+    async function tryLabelEndpoint(url, label) {
+      console.log(`[ml/label] tentando (${label}): ${url}`);
+      const r  = await fetchWithTimeout(url, { headers }, 12000);
+      const ct = r.headers.get('content-type') || '';
+      const st = r.status;
+      console.log(`[ml/label] (${label}) status=${st} ct=${ct}`);
+
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '');
+        console.log(`[ml/label] (${label}) err body=${errBody.slice(0, 200)}`);
+        return null;
+      }
+
+      // PDF binário — lê como buffer (text() corromperia o binário)
+      if (ct.includes('pdf') || ct.includes('octet')) {
+        const buf = await r.arrayBuffer();
+        // Verifica assinatura %PDF
+        const sig = Buffer.from(buf.slice(0, 4)).toString('ascii');
+        if (sig === '%PDF') {
+          return { format: 'pdf', pdf: Buffer.from(buf).toString('base64'), via: label };
+        }
+        // Pode ser ZPL em octet-stream
+        const txt = Buffer.from(buf).toString('utf8');
+        if (txt.includes('^XA')) {
+          return { format: 'zpl', zpl: txt, via: label };
+        }
+      }
+
+      // Texto / JSON
+      const raw = await r.text();
+      console.log(`[ml/label] (${label}) body=${raw.slice(0, 300)}`);
+
+      // ZPL direto
+      if (raw.trimStart().startsWith('^XA') || (ct.includes('zpl') && raw.includes('^XA'))) {
+        return { format: 'zpl', zpl: raw, via: label };
+      }
+
+      // JSON — extrai URL ou ZPL inline
+      let data = {};
+      try { data = JSON.parse(raw); } catch {}
+
+      // ZPL inline no JSON
+      const zplInline = data?.zpl || data?.content || data?.label || data?.data?.zpl;
+      if (typeof zplInline === 'string' && zplInline.includes('^XA')) {
+        return { format: 'zpl', zpl: zplInline, via: label };
+      }
+
+      // URL de PDF no JSON (várias formas que o ML pode retornar)
+      const pdfUrl =
+        data?.url || data?.data?.url ||
+        data?.link || data?.data?.link ||
+        data?.print_url || data?.label_url ||
+        (Array.isArray(data) && data[0]?.url) ||
+        (Array.isArray(data?.content) && data.content[0]?.url) || null;
+
+      if (pdfUrl) {
+        const downloaded = await tryDownloadUrl(pdfUrl, `${label}+url`);
+        if (downloaded) return downloaded;
+        return { format: 'pdf_url', pdfUrl, via: label };
+      }
+
+      return null; // conteúdo não reconhecido
+    }
+
+    // ── 1. Busca shipment_id a partir do pedido ───────────────────────────
+    const orderRes = await fetchWithTimeout(
+      `${ML_API_BASE}/orders/${orderId}`,
+      { headers: { ...headers, 'Accept': 'application/json' } },
+      8000
+    );
     if (!orderRes.ok) {
       const body = await orderRes.json().catch(() => ({}));
       throw Object.assign(new Error(body.message || `Pedido ${orderId} não encontrado`), { statusCode: 404 });
@@ -3735,92 +3815,58 @@ app.get('/api/ml/orders/:orderId/label', async (req, res, next) => {
     const shipmentId = orderData.shipping?.id;
     if (!shipmentId) throw Object.assign(new Error('Pedido sem envio associado'), { statusCode: 400 });
 
-    console.log(`[ml/label] orderId=${orderId} shipmentId=${shipmentId} format=${wantFormat}`);
+    console.log(`[ml/label] orderId=${orderId} shipmentId=${shipmentId}`);
 
-    // 2. Tenta ZPL primeiro (para impressoras térmicas via QZ Tray)
-    const zplUrl = `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=zpl2&shipment_ids=${shipmentId}`;
-    const zplRes = await fetchWithTimeout(zplUrl, { headers }, 12000);
+    // ── 2. Verifica detalhe do shipment (pode ter URL de etiqueta direta) ──
+    const shipRes = await fetchWithTimeout(
+      `${ML_API_BASE}/shipments/${shipmentId}`,
+      { headers: { ...headers, 'Accept': 'application/json' } },
+      8000
+    ).catch(() => null);
 
-    const zplCt  = zplRes.headers.get('content-type') || '';
-    console.log(`[ml/label] ZPL response: status=${zplRes.status} ct=${zplCt}`);
+    if (shipRes?.ok) {
+      const ship = await shipRes.json().catch(() => ({}));
+      console.log(`[ml/label] shipment status=${ship.status} substatus=${ship.substatus} tracking_method=${ship.tracking_method}`);
 
-    if (zplRes.ok) {
-      // ML retornou conteúdo ZPL direto
-      if (zplCt.includes('zpl') || zplCt.includes('plain') || zplCt.includes('octet')) {
-        const zplText = await zplRes.text();
-        if (zplText.trim().startsWith('^XA') || zplText.includes('^XA')) {
-          return res.json({ ok: true, format: 'zpl', zpl: zplText, shipmentId, orderId });
-        }
-      }
-
-      // ML retornou PDF binário
-      if (zplCt.includes('pdf')) {
-        const buf = await zplRes.arrayBuffer();
-        const b64 = Buffer.from(buf).toString('base64');
-        return res.json({ ok: true, format: 'pdf', pdf: b64, shipmentId, orderId });
-      }
-
-      // ML retornou JSON com URL ou ZPL inline
-      if (zplCt.includes('json') || zplCt.includes('text')) {
-        const raw  = await zplRes.text();
-        console.log(`[ml/label] JSON body preview: ${raw.slice(0, 400)}`);
-        let data = {};
-        try { data = JSON.parse(raw); } catch {}
-
-        // Tenta extrair ZPL inline
-        const zplInline = data?.zpl || data?.content || data?.label || data?.data?.zpl || null;
-        if (zplInline && (zplInline.includes('^XA') || zplInline.startsWith('%PDF'))) {
-          if (zplInline.includes('^XA')) {
-            return res.json({ ok: true, format: 'zpl', zpl: zplInline, shipmentId, orderId });
-          }
-        }
-
-        // Tenta extrair URL do PDF
-        const pdfUrl = data?.url || data?.data?.url || data?.link || data?.data?.link || null;
-        if (pdfUrl) {
-          // Baixa o PDF e converte para base64
-          try {
-            const pdfRes = await fetchWithTimeout(pdfUrl, {}, 10000);
-            if (pdfRes.ok) {
-              const buf = await pdfRes.arrayBuffer();
-              const b64 = Buffer.from(buf).toString('base64');
-              return res.json({ ok: true, format: 'pdf', pdf: b64, shipmentId, orderId, pdfUrl });
-            }
-          } catch (e) {
-            console.warn('[ml/label] Falha ao baixar PDF da URL:', e.message);
-          }
-          return res.json({ ok: true, format: 'pdf_url', pdfUrl, shipmentId, orderId });
-        }
+      // Algumas modalidades expõem url diretamente
+      const directUrl = ship?.label?.url || ship?.print_label_url || ship?.shipping_label_url;
+      if (directUrl) {
+        const downloaded = await tryDownloadUrl(directUrl, 'shipment_direct_url');
+        if (downloaded) return res.json({ ok: true, ...downloaded, shipmentId, orderId });
+        return res.json({ ok: true, format: 'pdf_url', pdfUrl: directUrl, shipmentId, orderId, via: 'shipment_direct_url' });
       }
     }
 
-    // 3. Fallback: tenta PDF direto (response_type=pdf)
-    const pdfFallbackUrl = `${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf&shipment_ids=${shipmentId}`;
-    const pdfRes = await fetchWithTimeout(pdfFallbackUrl, { headers }, 12000);
-    const pdfCt  = pdfRes.headers.get('content-type') || '';
-    console.log(`[ml/label] PDF fallback: status=${pdfRes.status} ct=${pdfCt}`);
+    // ── 3. Cascata de endpoints de etiqueta ──────────────────────────────
+    // IMPORTANTE: /shipments/{id}/labels NÃO usa shipment_ids= (isso é para lote via /shipments/labels)
+    const attempts = [
+      // individual sem parâmetro extra
+      [`${ML_API_BASE}/shipments/${shipmentId}/labels`, 'individual_noparams'],
+      // individual ZPL
+      [`${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=zpl2`, 'individual_zpl2'],
+      // individual PDF
+      [`${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf2`, 'individual_pdf2'],
+      // individual PDF (sem 2)
+      [`${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf`, 'individual_pdf'],
+      // endpoint de lote com 1 ID
+      [`${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}&response_type=zpl2`, 'batch_zpl2'],
+      [`${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}&response_type=pdf2`, 'batch_pdf2'],
+      [`${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}`, 'batch_noparams'],
+    ];
 
-    if (pdfRes.ok) {
-      if (pdfCt.includes('pdf') || pdfCt.includes('octet')) {
-        const buf = await pdfRes.arrayBuffer();
-        const b64 = Buffer.from(buf).toString('base64');
-        return res.json({ ok: true, format: 'pdf', pdf: b64, shipmentId, orderId, via: 'pdf_fallback' });
-      }
-      const raw = await pdfRes.text();
-      let data = {};
-      try { data = JSON.parse(raw); } catch {}
-      const pdfUrl = data?.url || data?.data?.url || null;
-      if (pdfUrl) {
-        return res.json({ ok: true, format: 'pdf_url', pdfUrl, shipmentId, orderId, via: 'pdf_fallback_url' });
+    for (const [url, label] of attempts) {
+      const result = await tryLabelEndpoint(url, label);
+      if (result) {
+        console.log(`[ml/label] ✓ sucesso via (${result.via}) format=${result.format}`);
+        return res.json({ ok: true, ...result, shipmentId, orderId });
       }
     }
 
-    // 4. Nenhum formato funcionou — retorna debug info
-    const zplBodyPreview = await zplRes.text().catch(() => '');
+    // ── 4. Nada funcionou ─────────────────────────────────────────────────
     return res.status(422).json({
-      error:   'label_formato_desconhecido',
-      message: 'ML não retornou etiqueta reconhecível (ZPL nem PDF).',
-      debug:   { zplStatus: zplRes.status, zplCt, zplBodyPreview: zplBodyPreview.slice(0, 300), shipmentId },
+      error:   'label_indisponivel',
+      message: 'Não foi possível obter a etiqueta ML. Verifique se ela já foi gerada no painel.',
+      debug:   { shipmentId, orderId, attemptsCount: attempts.length },
     });
 
   } catch (err) {

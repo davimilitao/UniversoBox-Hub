@@ -221,8 +221,16 @@ async function printShippingLabel(mlOrderId, onStatus) {
     return;
   }
   if (zplStr) {
-    // ZPL sem impressora: mostra o código para copiar/usar depois
-    throw new Error('Etiqueta ZPL obtida mas QZ Tray não está disponível. Instale em qz.io para imprimir.');
+    // ZPL sem QZ Tray: baixa como arquivo .zpl para uso posterior
+    onStatus?.('Baixando arquivo ZPL…');
+    const blob = new Blob([zplStr], { type: 'text/plain' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `etiqueta-${mlOrderId}.zpl`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return;
   }
 
   throw new Error('Etiqueta não disponível — verifique se o pedido tem envio associado no ML.');
