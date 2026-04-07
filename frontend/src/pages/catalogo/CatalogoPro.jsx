@@ -364,11 +364,11 @@ function StudioPanel({ produto, onClose }) {
             <section className="space-y-2 pt-2">
               <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest">Ações</p>
               <Link
-                to={`/catalogo/admin?sku=${encodeURIComponent(produto.sku)}`}
+                to={`/catalogo/automacao?sku=${encodeURIComponent(produto.sku)}`}
                 className="flex items-center gap-2 w-full px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
               >
                 <ExternalLink size={13} />
-                Editar no Admin
+                Editar no Studio
               </Link>
             </section>
           </div>
@@ -419,15 +419,14 @@ function StudioPanel({ produto, onClose }) {
             <div className="rounded-lg bg-slate-800/60 border border-white/5 p-3">
               <p className="text-xs text-slate-400 mb-2 font-medium">Publicar no Bling</p>
               <p className="text-[10px] text-slate-600 leading-relaxed">
-                A sincronização com o Bling será ativada em breve.
-                Por enquanto edite diretamente via Admin Produtos.
+                Edite dados, descrição, imagens e envie direto para o Bling via Catálogo Studio.
               </p>
               <Link
-                to={`/catalogo/admin?sku=${encodeURIComponent(produto.sku)}`}
+                to={`/catalogo/automacao?sku=${encodeURIComponent(produto.sku)}`}
                 className="mt-3 flex items-center gap-2 w-full px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
               >
                 <ExternalLink size={13} />
-                Abrir Admin
+                Abrir Studio
               </Link>
             </div>
           </div>
