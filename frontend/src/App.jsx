@@ -23,6 +23,7 @@ import ImportarCSV             from './pages/catalogo/ImportarCSV';
 import ImageStudio             from './pages/catalogo/ImageStudio';
 import ConfiguracoesSistema    from './pages/sistema/ConfiguracoesSistema';
 import Contas                  from './pages/financeiro/Contas';
+import Compras                 from './pages/expedicao/Compras';
 
 export default function App() {
   return (
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="/expedicao/bling"     element={<BlingPedidos />} />
         <Route path="/expedicao/pedidos"   element={<PedidosDoDia />} />
         <Route path="/expedicao/insumos"   element={<GestaoInsumos />} />
+        <Route path="/expedicao/compras"   element={<Compras />} />
         {/* Catálogo */}
         <Route path="/catalogo/produtos"   element={<CatalogoPro />} />
         <Route path="/catalogo/admin"      element={<AdminProdutos />} />
