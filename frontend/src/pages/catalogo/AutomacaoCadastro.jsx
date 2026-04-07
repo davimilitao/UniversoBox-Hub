@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search, Loader2, Save, CheckCircle, AlertCircle,
   ArrowLeft, Package, Tag, Hash, Truck, Image,
@@ -205,7 +205,14 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               <Package size={12} /> Descrição
             </h2>
             <Campo
-              label="Descrição do produto"
+              label="Descrição curta (Bling)"
+              value={p.descricaoCurta}
+              onChange={set('descricaoCurta')}
+              placeholder="Texto resumido para listagens e marketplaces..."
+              hint="Campo descricaoCurta do Bling — aparece em cards de produto"
+            />
+            <Campo
+              label="Descrição completa"
               value={p.descricao}
               onChange={set('descricao')}
               area
@@ -352,6 +359,7 @@ export default function AutomacaoCadastro() {
   const [categorias, setCategorias] = useState([]);
   const [erro,       setErro]       = useState('');
   const [salvoOk,    setSalvoOk]    = useState(false);
+  const [searchParams]              = useSearchParams();
   const isNovo = produto && !produto.id;
 
   // Carrega categorias uma vez
@@ -362,10 +370,17 @@ export default function AutomacaoCadastro() {
       .catch(() => {});
   }, []);
 
+  // Auto-busca quando abre com ?sku= ou ?ean= na URL
+  useEffect(() => {
+    const sku = searchParams.get('sku') || searchParams.get('ean');
+    if (sku) handleBuscar(sku);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleBuscar(q) {
     if (q === '__novo__') {
       setProduto({ nome: '', codigo: '', gtin: '', preco: '0.00', marca: '', ncm: '',
-        descricao: '', situacao: 'A', origem: 0, pesoLiq: '0.000', pesoBruto: '0.000',
+        descricaoCurta: '', descricao: '', situacao: 'A', origem: 0, pesoLiq: '0.000', pesoBruto: '0.000',
         altura: '0', largura: '0', profundidade: '0', categoria: null, imagens: [] });
       setStatus('studio');
       return;

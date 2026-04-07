@@ -48,6 +48,7 @@ function normalizarProduto(p, listItem = null) {
         const tipo = String(m.tipo || m.tipoArquivo || '').toLowerCase();
         return url && !tipo.includes('video');
       })
+      .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
       .map(m => m.link || m.url || m.linkThumbnail || '')
       .filter(Boolean);
   }
@@ -85,8 +86,9 @@ function normalizarProduto(p, listItem = null) {
     preco:        String(p.preco  || '0.00'),
     marca:        p.marca         || '',
     ncm:          p.ncm           || '',
-    descricao:    p.descricao     || '',
-    tipo:         p.tipo          || 'P',
+    descricao:       p.descricao       || '',
+    descricaoCurta:  p.descricaoCurta  || '',
+    tipo:            p.tipo            || 'P',
     situacao:     p.situacao      || 'A',
     origem:       p.origem        ?? 0,
     pesoLiq:      String(p.peso?.liquido  || p.pesoLiquido  || '0.000'),
@@ -110,8 +112,9 @@ function montarPayload(p) {
     preco:        parseFloat(p.preco)        || 0,
     marca:        p.marca     || '',
     ncm:          p.ncm       || '',
-    descricao:    p.descricao || '',
-    origem:       Number(p.origem) || 0,
+    descricao:      p.descricao      || '',
+    descricaoCurta: p.descricaoCurta || '',
+    origem:         Number(p.origem) || 0,
     peso: {
       liquido: parseFloat(p.pesoLiq)   || 0,
       bruto:   parseFloat(p.pesoBruto) || 0,

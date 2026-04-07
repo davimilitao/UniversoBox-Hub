@@ -71,7 +71,28 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // ── 6) Catch-all: nega tudo que não foi explicitamente permitido ───────────
+    // ── 6) Módulo Financeiro — coleções root (acesso autenticado) ────────────────
+    // fin_meios_pagamento: cartões e contas cadastrados
+    match /fin_meios_pagamento/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // fin_compras: cabeçalhos de compras de mercadoria
+    match /fin_compras/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // fin_parcelas: parcelas geradas pelas compras
+    match /fin_parcelas/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ── 7) Insumos de embalagem (acesso autenticado) ─────────────────────────────
+    match /insumos/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ── 8) Catch-all: nega tudo que não foi explicitamente permitido ───────────
     // Por que: reduz superfície de ataque (coleções legadas em /root ficam bloqueadas).
     match /{document=**} {
       allow read, write: if false;
