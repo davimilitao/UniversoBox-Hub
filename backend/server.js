@@ -1614,7 +1614,8 @@ const SHEET_NAME = 'Despesas'; // Nome exato da aba na sua planilha
 // --- Rota GET: Ler despesas da planilha ---
 app.get('/api/despesas', requireFirebaseAuth, async (req, res, next) => {
   try {
-    if (!SPREADSHEET_ID) return res.status(500).json({ error: 'SPREADSHEET_ID não configurado' });
+    // Se SPREADSHEET_ID não está configurado, retorna lista vazia (Firestore é a fonte padrão)
+    if (!SPREADSHEET_ID) return res.json({ items: [] });
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
@@ -2125,6 +2126,61 @@ app.get('/produtos/categorias-bling', async (req, res, next) => {
     }
     // Retorna lista vazia se Bling falhar — não bloqueia a tela
     console.warn('[GET /produtos/categorias-bling]', err.message);
+    res.json({ ok: true, items: [], erro: err.message });
+  }
+});
+
+// ── Alias API: Categorias do Catálogo (aponta para /produtos/categorias-bling) ──
+app.get('/api/catalogo/categorias', async (req, res, next) => {
+  try {
+    const data = await blingFetch('/categorias/produtos?pagina=1&limite=100');
+    const items = (data?.data || []).map(c => ({
+      id:   c.id,
+      nome: c.descricao || c.nome || '',
+    }));
+    res.json({ ok: true, items });
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') {
+      return res.status(401).json({ error: 'bling_not_authorized' });
+    }
+    console.warn('[GET /api/catalogo/categorias]', err.message);
+    res.json({ ok: true, items: [], erro: err.message });
+  }
+});
+
+// ── Alias API: Buscar produtos (aponta para busca no Bling) ──────────────────
+app.get('/api/catalogo/buscar', async (req, res, next) => {
+  const q = req.query.q || '';
+  if (!q || q.length < 2) {
+    return res.json({ ok: true, items: [] });
+  }
+  try {
+    // Tenta buscar por SKU primeiro (mais específico)
+    const skuData = await blingFetch(`/produtos?filtros[sku]=${encodeURIComponent(q)}&limite=1`);
+    const skuItems = (skuData?.data || []).map(p => ({
+      id: p.id,
+      sku: p.sku,
+      nome: p.nome,
+      descricao: p.descricao || '',
+    }));
+    if (skuItems.length > 0) {
+      return res.json({ ok: true, items: skuItems });
+    }
+
+    // Se não encontrar por SKU, busca por nome
+    const nomeData = await blingFetch(`/produtos?filtros[nome]=${encodeURIComponent(q)}&limite=10`);
+    const nomeItems = (nomeData?.data || []).map(p => ({
+      id: p.id,
+      sku: p.sku,
+      nome: p.nome,
+      descricao: p.descricao || '',
+    }));
+    res.json({ ok: true, items: nomeItems });
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') {
+      return res.status(401).json({ error: 'bling_not_authorized' });
+    }
+    console.warn('[GET /api/catalogo/buscar]', err.message);
     res.json({ ok: true, items: [], erro: err.message });
   }
 });
