@@ -17,6 +17,19 @@ import {
 } from 'lucide-react';
 import { getAuthToken } from '../utils/getAuthToken';
 
+// ─── Proxy helper ─────────────────────────────────────────────────────────────
+
+/**
+ * Retorna a URL original para imagens Cloudinary (CORS permitido).
+ * Para qualquer outro host externo, usa o proxy backend para evitar bloqueio CORS.
+ */
+function proxyIfNeeded(url) {
+  if (!url) return url;
+  if (url.includes('res.cloudinary.com')) return url;
+  if (url.startsWith('/') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+  return `/admin/proxy-image?url=${encodeURIComponent(url)}`;
+}
+
 // ─── Cloudinary helpers ───────────────────────────────────────────────────────
 
 /**
@@ -107,8 +120,9 @@ export function ImageEditor({ url, sku, kind = 'stock', onSaved, onClose }) {
   async function applyStandard() {
     setStatus('loading'); setStatusMsg('Gerando imagem padronizada…');
     try {
-      // Fetch the Cloudinary-transformed image
-      const res = await fetch(standardPreview);
+      // Para Cloudinary: usa transformações; para outros hosts: baixa via proxy (evita CORS)
+      const fetchUrl = proxyIfNeeded(standardPreview);
+      const res = await fetch(fetchUrl);
       if (!res.ok) throw new Error('Falha ao buscar imagem transformada');
       const blob = await res.blob();
       await uploadBlob(blob);
@@ -142,7 +156,9 @@ export function ImageEditor({ url, sku, kind = 'stock', onSaved, onClose }) {
       // Dynamic import to avoid loading 40MB unless user requests
       const { removeBackground } = await import('@imgly/background-removal');
       setStatusMsg('Removendo fundo…');
-      const resultBlob = await removeBackground(url, {
+      // Usa proxy para URLs externas (S3, CDN Bling) que bloqueiam CORS no navegador
+      const imageSource = proxyIfNeeded(url);
+      const resultBlob = await removeBackground(imageSource, {
         progress: (key, cur, total) => {
           if (total > 0) setStatusMsg(`Processando… ${Math.round((cur / total) * 100)}%`);
         },

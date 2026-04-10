@@ -117,7 +117,7 @@ export function LoginPage() {
         /* ignore quota */
       }
 
-      navigate('/', { replace: true });
+      navigate('/expedicao/pedidos', { replace: true });
     } catch (err) {
       console.error('[LoginPage] submit', err);
       setError(err?.message || 'Falha no login. Tente novamente.');
