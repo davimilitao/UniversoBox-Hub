@@ -20,8 +20,7 @@ Produto atual: `UniversoBox Hub` (SaaS, multi-tenant, escalável)
 | Camada        | Tecnologia                          | Status          |
 |---------------|-------------------------------------|-----------------|
 | Backend       | Node.js 18+ / Express               | ✅ Ativo         |
-| Frontend      | Vanilla JS + HTML (legado)          | 🔄 Migrando      |
-| Frontend novo | React 18 + Tailwind CSS             | 🔄 Em construção |
+| Frontend      | React 18 + Tailwind CSS + Vite      | ✅ Ativo         |
 | Banco         | Firebase Firestore                  | ✅ Ativo         |
 | Auth          | Firebase Authentication             | ✅ Ativo         |
 | Storage       | Firebase Storage (imagens)          | ✅ Ativo         |
@@ -55,18 +54,16 @@ universobox-hub/
 │       ├── bling-client.js         # Cliente HTTP para Bling API (com token por tenant)
 │       └── sku-validator.js        # Valida e normaliza SKUs antes de gravar
 │
-├── frontend/                       # Telas legado (Vanilla JS)
-│   ├── bling.html                  # Gestão de NFs de saída
-│   ├── admin.html                  # Enriquecimento de catálogo (fotos, bin)
-│   ├── cadastro-produto.html       # Registro manual de produtos
-│   ├── catalogo.html               # Catálogo técnico (suporte/vendas)
-│   └── compras.html                # Controle de estoque e pedidos
-│
-├── src/                            # React (novo — migração progressiva)
-│   ├── components/
-│   ├── pages/
-│   ├── hooks/
-│   └── services/
+├── frontend/                       # React SPA (Vite)
+│   ├── src/
+│   │   ├── pages/                  # 24 páginas React (Pedidos, Financeiro, Catálogo, etc)
+│   │   ├── components/             # 28 componentes reutilizáveis (AppShell, ImageEditor, etc)
+│   │   ├── hooks/                  # Custom hooks (usePerfil, useAuth, useFirestore)
+│   │   ├── utils/                  # Helpers (API client, normalizers, validators)
+│   │   └── App.jsx                 # Root component com routing
+│   ├── vite.config.js              # Dev server config (proxy para backend:8080)
+│   ├── tailwind.config.js          # Tailwind CSS setup
+│   └── public/                     # Assets estáticos
 │
 ├── CLAUDE.md                       # ← Este arquivo
 └── .env.example                    # Variáveis de ambiente necessárias
@@ -185,8 +182,9 @@ router.get('/orders',
 
 ### Base URL:
 ```
-https://www.bling.com.br/Api/v3/
+https://api.bling.com.br/Api/v3/
 ```
+**Nota:** Migrado de `www.bling.com.br` em Abril/2026. Versão antiga está deprecated.
 
 ### Como usar o cliente (nunca fazer fetch direto nas rotas):
 ```js
@@ -263,51 +261,68 @@ res.status(500).json({ success: false, error: 'Erro interno', code: 'INTERNAL_ER
 
 ---
 
-## 🔄 Roadmap de Migração React
+## 🔄 Status da Migração React
 
-Ordem de migração definida (trabalhar sempre no próximo item da fila):
+**Migração completa!** (Abril/2026)
 
-| Prioridade | Tela                    | Status       | Componentes React necessários              |
-|------------|-------------------------|--------------|--------------------------------------------|
-| 1          | `bling.html`            | 🔄 Em andamento | `NFTable`, `NFStatusBadge`, `CloneModal`  |
-| 2          | `admin.html`            | 📋 Pendente  | `ProductEditor`, `ImageUploader`, `BinInput` |
-| 3          | `cadastro-produto.html` | 📋 Pendente  | `ProductForm`, `SKUValidator`              |
-| 4          | `catalogo.html`         | 📋 Pendente  | `CatalogGrid`, `ProductCard`, `SilenceToggle` |
-| 5          | `compras.html`          | 📋 Pendente  | `TransitList`, `PurchaseForm`, `BIChart`  |
+Todas as telas HTML legado foram removidas. O projeto agora é 100% React SPA com:
 
-### Princípio de migração:
-1. Criar o componente React em `src/pages/`
-2. Manter o `.html` legado funcionando em paralelo
-3. Só remover o legado após teste completo do React
-4. Usar Tailwind CSS — nunca CSS custom nos componentes novos
+| Página | Rota | Status |
+|--------|------|--------|
+| Pedidos | `/expedicao/pedidos` | ✅ Ativa |
+| Financeiro | `/financeiro/despesas` | ✅ Ativa |
+| Catálogo Pro | `/catalogo/produtos` | ✅ Ativa |
+| Automação | `/catalogo/automacao` | ✅ Ativa |
+| Compras | `/compras` | ✅ Ativa |
+| Admin (Config) | `/admin/config` | ✅ Ativa |
+
+### Convenções atuais:
+- Todos os componentes usam **Tailwind CSS** (sem CSS custom)
+- `BrowserRouter` com `basename` dinâmico (dev: `/`, prod: `/spa/`)
+- Auth via `usePerfil()` hook com `onAuthStateChanged` do Firebase
+- Vite dev proxy roteia `/api`, `/bling`, `/auth`, `/admin` para backend:8080
 
 ---
 
 ## ⚙️ Comandos de Desenvolvimento
 
 ```bash
-# Instalar dependências
+# Backend (na pasta backend/)
 npm install
+npm start                  # Inicia em localhost:8080
 
-# Rodar backend local (porta 3001)
-cd backend && npm run dev
+# Frontend (na pasta frontend/)
+npm install
+npm run dev               # Vite dev server em localhost:5173 (proxy para :8080)
+npm run build             # Build para production (output: backend/public/spa/)
 
-# Rodar frontend React (porta 3000)
-npm run dev
+# Em produção (Railway):
+# Backend serve tanto SPA quanto APIs
+# - /spa/* → frontend (React SPA)
+# - /api/* → endpoints da API
+# - /bling/* → integração Bling
+# - /admin/* → rotas admin
+```
 
-# Rodar testes
-npm test
+### Variáveis de ambiente necessárias (.env)
+```
+# Firebase (escolha um dos dois formatos)
+FIREBASE_SERVICE_ACCOUNT_JSON={...}  ou  FIREBASE_SERVICE_ACCOUNT_PATH=keys/firebase-service-account.json
+ADMIN_RESET_TOKEN=
 
-# Build de produção
-npm run build
-
-# Variáveis de ambiente necessárias (ver .env.example)
-FIREBASE_PROJECT_ID=
-FIREBASE_CLIENT_EMAIL=
-FIREBASE_PRIVATE_KEY=
+# Bling OAuth
 BLING_CLIENT_ID=
 BLING_CLIENT_SECRET=
-PORT=3001
+BLING_REDIRECT_URI=https://seu-dominio.com/bling/callback
+
+# Cloudinary (para upload de imagens)
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+
+# API Keys
+ANTHROPIC_API_KEY=
+TOKEN_SECRET=
 ```
 
 ---
@@ -320,6 +335,12 @@ PORT=3001
 |------------|--------|------------------------------------------------------|-----------------------------------|
 | 2025-01    | v1.0   | Documento inicial criado pelo Gemini                 | Onboarding e visão de produto     |
 | 2025-01    | v2.0   | CLAUDE.md expandido com schema, fluxos e comandos    | Preparar para Claude Code         |
+| 2026-04    | v2.1   | Migração React completa + Bling API v3 atualizada   | Remover legado, estabilizar auth  |
+|            |        | - Deletadas 15 páginas HTML legado                   |                                   |
+|            |        | - Bling API: www.bling.com.br → api.bling.com.br     |                                   |
+|            |        | - Adicionado retry 429 em blingFetch()               |                                   |
+|            |        | - Cloudinary validado e integrado                    |                                   |
+|            |        | - Relatório técnico criado (RELATORIO_TECNICO.md)    |                                   |
 
 ---
 
