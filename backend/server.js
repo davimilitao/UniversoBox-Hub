@@ -67,21 +67,9 @@ app.get('/spa/*', (req, res) => res.sendFile(path.join(SPA_DIR, 'index.html')));
 // Em dev: Vite serve com basename '/' — redirects quebram a navegação
 
 app.use(express.static(PUBLIC_DIR));
-app.get('/', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
-app.get('/manual', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manual.html')));
-app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')));
-app.get('/pedidos', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'pedidos.html')));
-app.get('/embalagens', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'embalagens.html')));
-app.get('/importar', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'importar.html')));
-app.get('/catalogo', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'catalogo.html')));
-app.get('/compras', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'compras.html')));
-app.get('/financas', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'financas.html')));
-app.get('/bling',   (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'bling.html')));
-app.get('/config',  (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'config.html')));
-app.get('/cadastrar', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'cadastro-produto.html')));
-app.get('/enriquecer-xml', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'enriquecer-xml.html')));
-app.get('/ml-dashboard', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'ml-dashboard.html')));
-app.get('/produto-studio', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'produto-studio.html')));
+
+// Redireciona / para o SPA React
+app.get('/', (req, res) => res.redirect('/spa/login'));
 
 
 // ✅ uploads locais (fotos reais do estoque)
