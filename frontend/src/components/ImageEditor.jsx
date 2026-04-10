@@ -138,13 +138,22 @@ export function ImageEditor({ url, sku, kind = 'stock', onSaved, onClose }) {
   }
 
   async function applyCrop() {
-    if (!completedCrop || !imgRef.current) return;
+    if (!completedCrop || !imgRef.current) {
+      setStatus('err');
+      setStatusMsg('Selecione uma área para recortar antes de aplicar');
+      return;
+    }
     setStatus('loading'); setStatusMsg('Recortando imagem…');
     try {
       const blob = await getCroppedBlob(imgRef.current, completedCrop);
+      if (!blob || blob.size === 0) throw new Error('Blob vazio após crop');
+      console.log('[ImageEditor] Crop OK, blob size:', blob.size);
       await uploadBlob(blob);
     } catch (e) {
-      setStatus('err'); setStatusMsg(e.message);
+      setStatus('err');
+      const msg = e.message || 'Erro ao recortar imagem';
+      setStatusMsg(msg);
+      console.error('[ImageEditor] applyCrop error:', e);
     }
   }
 
@@ -152,25 +161,42 @@ export function ImageEditor({ url, sku, kind = 'stock', onSaved, onClose }) {
   async function removeBg() {
     setStatus('loading');
     setStatusMsg('Carregando modelo de IA… (1ª vez pode levar até 30s — fica em cache)');
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Timeout: processamento demorou muito')), 120000) // 2min timeout
+    );
+
     try {
       // Dynamic import to avoid loading 40MB unless user requests
       const { removeBackground } = await import('@imgly/background-removal');
       setStatusMsg('Removendo fundo…');
+
       // Usa proxy para URLs externas (S3, CDN Bling) que bloqueiam CORS no navegador
       const imageSource = proxyIfNeeded(url);
-      const resultBlob = await removeBackground(imageSource, {
-        progress: (key, cur, total) => {
-          if (total > 0) setStatusMsg(`Processando… ${Math.round((cur / total) * 100)}%`);
-        },
-      });
+
+      // Race: removeBackground vs timeout
+      const resultBlob = await Promise.race([
+        removeBackground(imageSource, {
+          progress: (key, cur, total) => {
+            if (total > 0) setStatusMsg(`Processando… ${Math.round((cur / total) * 100)}%`);
+          },
+        }),
+        timeoutPromise
+      ]);
+
+      if (!resultBlob) throw new Error('Resultado vazio da IA');
+
       const objUrl = URL.createObjectURL(resultBlob);
       setBgBlob(resultBlob);
       setBgObjUrl(objUrl);
       setStatus(null);
       setStatusMsg('');
+      console.log('[ImageEditor] Background removal OK');
     } catch (e) {
       setStatus('err');
-      setStatusMsg('Erro ao remover fundo: ' + e.message);
+      const msg = e.message || 'Erro desconhecido ao remover fundo';
+      setStatusMsg(msg);
+      console.error('[ImageEditor] removeBg error:', e);
     }
   }
 
