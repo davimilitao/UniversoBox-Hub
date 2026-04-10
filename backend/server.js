@@ -62,13 +62,9 @@ app.use('/spa', express.static(SPA_DIR));
 
 app.get('/spa/*', (req, res) => res.sendFile(path.join(SPA_DIR, 'index.html')));
 
-app.get('/login', (req, res) => res.redirect('/spa/login'));
-app.get('/dashboard/:tenantId', (req, res) =>
-  res.redirect(`/spa/dashboard/${req.params.tenantId}`)
-);
-// Redireciona rotas React para o SPA
-app.get('/financeiro/*', (req, res) => res.redirect('/spa' + req.path));
-app.get('/expedicao/*',  (req, res) => res.redirect('/spa' + req.path));
+// ❌ Removido: redirects de /login, /financeiro/*, /expedicao/* causavam erro em dev
+// Em produção: Vite já buildou com base '/spa/' — paths estão corretos
+// Em dev: Vite serve com basename '/' — redirects quebram a navegação
 
 app.use(express.static(PUBLIC_DIR));
 app.get('/', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
@@ -4992,6 +4988,95 @@ app.post('/bling/clonar', async (req, res, next) => {
 // ════════════════════════════════════════════════════════════════════════════
 // FIM — Enriquecer Produtos
 // ════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROXY DE IMAGEM — /admin/proxy-image?url=...
+// Resolve CORS: o browser não consegue fazer fetch em URLs externas (Bling S3,
+// Cloudinary de outro domínio). O backend baixa a imagem e devolve como buffer.
+// ══════════════════════════════════════════════════════════════════════════════
+app.get('/admin/proxy-image', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'url obrigatório' });
+  try {
+    const ext = url.split('?')[0].split('.').pop().toLowerCase();
+    const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' }[ext] || 'image/jpeg';
+    const r = await fetch(url, { headers: { 'User-Agent': 'UniversoBox-Hub/1.0' } });
+    if (!r.ok) return res.status(r.status).json({ error: `fetch remoto falhou: ${r.status}` });
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.set('Content-Type', mime);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(buf);
+  } catch (e) {
+    console.error('[proxy-image]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INTELIGÊNCIA DO PRODUTO — /bling/produto-intel?sku=XPTO
+// Retorna: estoque atual + vendas 30 dias por canal de marketplace
+// Usa blingFetch (já definido no server.js)
+// ══════════════════════════════════════════════════════════════════════════════
+app.get('/bling/produto-intel', async (req, res) => {
+  const { sku } = req.query;
+  if (!sku) return res.status(400).json({ error: 'sku obrigatório' });
+  try {
+    // 1. Busca produto no Bling para obter o ID
+    const lista = await blingFetch(`/produtos?codigo=${encodeURIComponent(sku)}&limite=5`);
+    const match = (lista?.data || []).find(p =>
+      (p.codigo || '').toLowerCase() === sku.toLowerCase()
+    );
+    if (!match) return res.json({ ok: true, estoque: null, vendas30d: null, canais: [] });
+
+    const blingId = match.id;
+
+    // 2. Estoque em paralelo com pedidos 30 dias
+    const dataInicio = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const dataFim    = new Date().toISOString().slice(0, 10);
+
+    const [estoqueRes, pedidosRes] = await Promise.allSettled([
+      blingFetch(`/estoques/${blingId}`),
+      blingFetch(`/pedidos/vendas?dataInicial=${dataInicio}&dataFinal=${dataFim}&limite=100`),
+    ]);
+
+    // 3. Estoque
+    let estoque = null;
+    if (estoqueRes.status === 'fulfilled') {
+      const ed = estoqueRes.value?.data;
+      estoque = ed?.saldoFisico ?? ed?.saldoVirtual ?? null;
+    }
+
+    // 4. Vendas: filtra por SKU nos itens dos pedidos
+    const canaisMap = {};
+    let totalQty = 0;
+    if (pedidosRes.status === 'fulfilled') {
+      const pedidos = pedidosRes.value?.data || [];
+      for (const pedido of pedidos) {
+        const canal = pedido.canal?.descricao || pedido.canal?.nome || 'Outros';
+        const itens = pedido.itens || [];
+        for (const item of itens) {
+          const itemSku = item.codigo || item.produto?.codigo || '';
+          if (itemSku.toLowerCase() !== sku.toLowerCase()) continue;
+          const qty = Number(item.quantidade) || 0;
+          totalQty += qty;
+          canaisMap[canal] = (canaisMap[canal] || 0) + qty;
+        }
+      }
+    }
+
+    const canais = Object.entries(canaisMap)
+      .map(([nome, qty]) => ({ nome, qty }))
+      .sort((a, b) => b.qty - a.qty);
+
+    res.json({ ok: true, sku, blingId, estoque, vendas30d: totalQty, canais });
+  } catch (e) {
+    console.error('[/bling/produto-intel]', e.message);
+    if (e.message === 'bling_not_authorized') {
+      return res.status(401).json({ error: 'Bling não conectado' });
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ---------------- Errors ----------------
 app.use((err, req, res, next) => {
