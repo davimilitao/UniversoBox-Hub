@@ -2677,30 +2677,58 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
 
 // ── DEBUG: testa o endpoint de DANFE para um ID específico ───────
 // GET /bling/debug/danfe/:id  — retorna raw response do Bling
+// Query params:
+//   ?tipo=simplificado  — testa DANFE Simplificada (etiqueta 10x15cm)
+//   ?tipo=completa      — testa DANFE completa (A4) [padrão]
 app.get('/bling/debug/danfe/:id', async (req, res, next) => {
   try {
     const token = await blingEnsureToken();
     const nfId  = req.params.id;
+    const tipo  = req.query.tipo || 'completa';
 
-    const results = {};
+    const results = { nfId, tipo_testado: tipo };
 
-    // Teste 1: sem Accept header
+    // Teste 1: DANFE (tipo padrão)
     try {
-      const r = await fetch(`${BLING_API_BASE}/nfe/${nfId}/danfe`, {
+      const danfeUrl = tipo === 'simplificado'
+        ? `${BLING_API_BASE}/nfe/${nfId}/danfe?tipo=simplificado`
+        : `${BLING_API_BASE}/nfe/${nfId}/danfe`;
+
+      const r = await fetch(danfeUrl, {
         headers: { 'Authorization': `Bearer ${token}` },
         redirect: 'manual',
       });
       const ct  = r.headers.get('content-type') || '';
       const loc = r.headers.get('location')     || '';
       const txt = await r.text().catch(() => '');
-      results.sem_accept = {
+      results.danfe_endpoint = {
         status: r.status,
         content_type: ct,
         location: loc,
         body_preview: txt.slice(0, 500),
+        url_testada: danfeUrl,
       };
-    } catch(e) { results.sem_accept = { erro: e.message }; }
+    } catch(e) { results.danfe_endpoint = { erro: e.message }; }
 
+    // Teste 2: GET /nfe/:id para verificar linkDanfe vs linkDanfeSimplificado
+    try {
+      const r = await fetch(`${BLING_API_BASE}/nfe/${nfId}`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+      });
+      if (r.ok) {
+        const data = await r.json().catch(() => ({}));
+        const nf = data?.data || data;
+        results.nfe_detalhe = {
+          numero: nf?.numero,
+          linkPDF: nf?.linkPDF ? nf.linkPDF.slice(0, 100) : null,
+          linkDanfeFull: nf?.linkDanfeFull ? nf.linkDanfeFull.slice(0, 100) : null,
+          linkDanfeSimplificado: nf?.linkDanfeSimplificado ? nf.linkDanfeSimplificado.slice(0, 100) : null,
+          linkDanfe: nf?.linkDanfe ? nf.linkDanfe.slice(0, 100) : null,
+        };
+      }
+    } catch(e) { results.nfe_detalhe = { erro: e.message }; }
+
+    // Teste antigo (mantém compatibilidade):
     // Teste 2: Accept: application/json
     try {
       const r = await fetch(`${BLING_API_BASE}/nfe/${nfId}/danfe`, {
