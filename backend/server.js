@@ -1895,9 +1895,9 @@ app.get('/api/margem', requireFirebaseAuth, async (req, res, next) => {
 const BLING_CLIENT_ID     = process.env.BLING_CLIENT_ID     || '';
 const BLING_CLIENT_SECRET = process.env.BLING_CLIENT_SECRET || '';
 const BLING_REDIRECT_URI  = process.env.BLING_REDIRECT_URI  || '';
-const BLING_TOKEN_URL     = 'https://www.bling.com.br/Api/v3/oauth/token';
-const BLING_AUTH_URL      = 'https://www.bling.com.br/Api/v3/oauth/authorize';
-const BLING_API_BASE      = 'https://www.bling.com.br/Api/v3';
+const BLING_TOKEN_URL     = 'https://api.bling.com.br/Api/v3/oauth/token';
+const BLING_AUTH_URL      = 'https://api.bling.com.br/Api/v3/oauth/authorize';
+const BLING_API_BASE      = 'https://api.bling.com.br/Api/v3';
 
 // ── Mercado Livre OAuth constants ─────────────────────────────────────────────
 const ML_CLIENT_ID     = process.env.ML_CLIENT_ID     || '';
