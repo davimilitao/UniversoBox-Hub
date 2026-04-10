@@ -1332,6 +1332,11 @@ cloudinary.config({
   api_secret:  process.env.CLOUDINARY_API_SECRET,
 });
 
+// Validar credenciais do Cloudinary
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.warn('⚠️  Cloudinary não configurado — configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET no .env');
+}
+
 // Multer em memória (não salva disco) — só para essa rota
 const uploadMemory = multer({
   storage: multer.memoryStorage(),
@@ -1344,6 +1349,11 @@ app.post('/admin/save-photo-cloudinary/:sku',
   uploadMemory.single('file'),
   async (req, res, next) => {
     try {
+      // Verificar credenciais Cloudinary
+      if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+        return res.status(500).json({ error: 'Cloudinary não configurado — adicione CLOUDINARY_* ao .env' });
+      }
+
       const tenantId = req.auth.tenantId;
       const sku = safeTrim(req.params.sku);
       if (!sku)       return res.status(400).json({ error: 'missing sku' });
@@ -1940,12 +1950,19 @@ async function blingEnsureToken() {
   }
   return tok.accessToken;
 }
-async function blingFetch(path) {
+async function blingFetch(path, retryCount = 0) {
   const token = await blingEnsureToken();
   const res = await fetch(`${BLING_API_BASE}${path}`, {
     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
   });
   if (res.status === 401) throw new Error('bling_not_authorized');
+  if (res.status === 429 && retryCount < 3) {
+    // Rate limit — retry com backoff exponencial (1s, 2s, 4s)
+    const delay = Math.pow(2, retryCount) * 1000;
+    console.warn(`[blingFetch] 429 rate limit — retry em ${delay}ms (tentativa ${retryCount + 1}/3)`);
+    await new Promise(r => setTimeout(r, delay));
+    return blingFetch(path, retryCount + 1);
+  }
   const text = await res.text();
   if (!res.ok) throw new Error(`Bling ${res.status}: ${text.slice(0, 200)}`);
   return JSON.parse(text);
@@ -4740,12 +4757,19 @@ async function blingEnsureToken() {
   }
   return tok.accessToken;
 }
-async function blingFetch(path) {
+async function blingFetch(path, retryCount = 0) {
   const token = await blingEnsureToken();
   const res = await fetch(`${BLING_API_BASE}${path}`, {
     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
   });
   if (res.status === 401) throw new Error('bling_not_authorized');
+  if (res.status === 429 && retryCount < 3) {
+    // Rate limit — retry com backoff exponencial (1s, 2s, 4s)
+    const delay = Math.pow(2, retryCount) * 1000;
+    console.warn(`[blingFetch] 429 rate limit — retry em ${delay}ms (tentativa ${retryCount + 1}/3)`);
+    await new Promise(r => setTimeout(r, delay));
+    return blingFetch(path, retryCount + 1);
+  }
   const text = await res.text();
   if (!res.ok) throw new Error(`Bling ${res.status}: ${text.slice(0, 200)}`);
   return JSON.parse(text);
