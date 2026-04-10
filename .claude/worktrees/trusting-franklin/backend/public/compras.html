@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Reposição / Compras — Expedição Pro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/erp.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    .compras-stack { display:flex; flex-direction:column; gap:20px; max-width:980px; }
+
+    /* Busca */
+    .search-input { width:100%; background:var(--depth-4); border:1px solid var(--border-default); border-radius:var(--r-md); padding:11px 14px; color:var(--text-primary); font-family:var(--font-body); font-size:14px; outline:none; transition:border-color var(--transition-fast); }
+    .search-input:focus { border-color:var(--accent-blue); }
+    .search-input::placeholder { color:var(--text-muted); }
+    .search-result-item { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:var(--r-md); cursor:pointer; transition:background var(--transition-fast); border-bottom:1px solid var(--border-subtle); }
+    .search-result-item:hover { background:var(--depth-4); }
+    .search-result-img { width:36px; height:36px; border-radius:6px; object-fit:cover; background:var(--depth-5); flex-shrink:0; }
+
+    /* Modalidade */
+    .modalidade-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .modalidade-bar label { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--text-secondary); cursor:pointer; padding:5px 12px; border-radius:var(--r-sm); border:1px solid var(--border-default); background:var(--depth-4); transition:all var(--transition-fast); user-select:none; }
+    .modalidade-bar input[type=radio] { accent-color:var(--accent-blue); }
+    .modalidade-bar label:has(input:checked) { background:var(--accent-blue); color:#fff; border-color:var(--accent-blue); font-weight:700; }
+
+    /* Lista invisível */
+    #card-lista { opacity:0; max-height:0; overflow:hidden; pointer-events:none; transition:opacity .3s, max-height .4s; }
+    #card-lista.visible { opacity:1; max-height:2000px; pointer-events:auto; }
+
+    /* Tabela */
+    .cart-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .cart-table th { padding:9px 12px; text-align:left; font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.6px; border-bottom:1px solid var(--border-default); background:var(--depth-3); }
+    .cart-table td { padding:10px 12px; border-bottom:1px solid var(--border-subtle); vertical-align:middle; }
+    .cart-table tr:last-child td { border-bottom:none; }
+    .cart-input { width:70px; background:var(--depth-5); border:1px solid var(--border-default); border-radius:var(--r-sm); padding:6px 8px; color:var(--text-primary); font-family:'Space Mono',monospace; font-size:13px; text-align:center; outline:none; }
+    .btn-remove { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.25); color:var(--accent-red); border-radius:var(--r-sm); padding:4px 10px; cursor:pointer; font-size:12px; }
+    .btn-remove:hover { background:rgba(239,68,68,.22); }
+    .action-bar { display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-top:1px solid var(--border-subtle); }
+    .btn-fechar { background:var(--accent-green); color:#000; font-weight:700; border:none; border-radius:var(--r-md); padding:10px 20px; font-family:var(--font-body); font-size:13px; cursor:pointer; transition:filter var(--transition-fast); }
+    .btn-fechar:hover { filter:brightness(1.1); }
+    .btn-fechar:disabled { opacity:.4; cursor:not-allowed; }
+    #resumo-totais { display:none; align-items:center; }
+
+    /* Carrossel transit */
+    #card-transit { display:none; }
+    #card-transit.visible { display:block; }
+    .carousel-wrap { display:flex; gap:12px; overflow-x:auto; padding:12px 20px 16px; scrollbar-width:thin; }
+    .carousel-wrap::-webkit-scrollbar { height:4px; }
+    .carousel-wrap::-webkit-scrollbar-thumb { background:var(--border-default); border-radius:2px; }
+    .transit-card { flex-shrink:0; width:174px; background:var(--depth-3); border:1px solid var(--border-default); border-radius:var(--r-md); overflow:hidden; display:flex; flex-direction:column; transition:border-color .2s; }
+    .transit-card-img { width:100%; height:108px; object-fit:contain; background:var(--depth-5); padding:8px; }
+    .transit-card-body { padding:10px; flex:1; display:flex; flex-direction:column; gap:3px; }
+    .transit-card-name { font-size:12px; font-weight:700; color:var(--text-primary); line-height:1.3; }
+    .transit-card-marca { font-size:10px; color:var(--text-muted); }
+    .transit-card-qty { font-size:11px; color:var(--text-secondary); }
+    .transit-card-days { font-size:10px; padding:2px 6px; border-radius:20px; display:inline-block; background:rgba(234,179,8,.15); color:#b45309; margin-top:2px; }
+    .transit-card-days.fast { background:rgba(34,197,94,.12); color:#15803d; }
+    .transit-card-days.slow { background:rgba(239,68,68,.12); color:var(--accent-red); }
+    .btn-recebido { margin-top:auto; padding-top:6px; width:100%; background:var(--accent-green); color:#000; font-weight:700; border:none; border-radius:var(--r-sm); padding:7px; font-size:11px; cursor:pointer; font-family:var(--font-body); }
+    .btn-recebido:hover { filter:brightness(1.1); }
+
+    /* ── NOVO CARD DO LOG ───────────────────────────────── */
+    .log-card { padding:12px 16px; border-bottom:1px solid var(--border-subtle); }
+    .log-card:last-child { border-bottom:none; }
+    .log-card-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:8px; }
+    .log-card-left { display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0; }
+    .log-card-id { font-size:13px; font-weight:700; color:var(--text-primary); white-space:nowrap; }
+    .log-card-date { font-size:11px; color:var(--text-muted); white-space:nowrap; flex-shrink:0; }
+    .marca-pill { font-size:10px; font-weight:700; background:rgba(59,130,246,.12); color:var(--accent-blue); padding:2px 8px; border-radius:20px; white-space:nowrap; }
+    .marca-pill.multi { background:rgba(139,92,246,.12); color:#7c3aed; }
+    .modal-pill { font-size:10px; font-weight:600; background:var(--depth-4); color:var(--text-muted); padding:2px 7px; border-radius:4px; }
+    .log-card-actions { display:flex; align-items:center; gap:6px; }
+    .log-btn-items { font-size:12px; font-weight:600; color:var(--text-secondary); background:var(--depth-4); border:1px solid var(--border-default); border-radius:var(--r-sm); padding:5px 12px; cursor:pointer; transition:background var(--transition-fast); }
+    .log-btn-items:hover { background:var(--depth-5); color:var(--text-primary); }
+    .log-btn-pdf { font-size:12px; color:var(--text-muted); background:transparent; border:1px solid var(--border-subtle); border-radius:var(--r-sm); padding:5px 10px; cursor:pointer; }
+    .log-btn-pdf:hover { color:var(--text-primary); background:var(--depth-4); }
+    .log-btn-replicar { font-size:11px; color:var(--text-muted); background:none; border:none; cursor:pointer; margin-left:auto; padding:4px 6px; opacity:.7; }
+    .log-btn-replicar:hover { opacity:1; color:var(--text-primary); }
+    .log-expand { display:none; margin-top:8px; border-top:1px solid var(--border-subtle); padding-top:8px; }
+    .log-expand.open { display:block; }
+    .log-item-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .status-badge { font-size:10px; font-weight:600; padding:2px 7px; border-radius:20px; white-space:nowrap; }
+    .status-badge.received { background:rgba(34,197,94,.12); color:#15803d; }
+    .status-badge.transit  { background:rgba(234,179,8,.12);  color:#b45309; }
+    .btn-a-caminho { font-size:11px; font-weight:600; padding:3px 9px; border-radius:4px; border:1px solid rgba(234,179,8,.4); background:rgba(234,179,8,.1); color:#b45309; cursor:pointer; font-family:var(--font-body); white-space:nowrap; }
+    .btn-a-caminho:hover { background:rgba(234,179,8,.2); }
+
+    /* ── BI ─────────────────────────────────────────────── */
+    .bi-tabs { display:flex; gap:2px; padding:12px 20px 0; border-bottom:1px solid var(--border-subtle); }
+    .bi-tab { font-size:12px; font-weight:600; color:var(--text-muted); background:transparent; border:none; padding:7px 14px; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; transition:color var(--transition-fast); font-family:var(--font-body); }
+    .bi-tab:hover { color:var(--text-primary); }
+    .bi-tab.active { color:var(--accent-blue); border-bottom-color:var(--accent-blue); }
+    .bi-stat { background:var(--depth-4); border-radius:var(--r-md); padding:12px; }
+    .bi-stat-label { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+    .bi-stat-val { font-size:22px; font-weight:700; color:var(--text-primary); }
+    .bi-stat-var { font-size:10px; margin-top:2px; }
+    .bi-stat-var.up { color:#15803d; }
+    .bi-stat-var.down { color:var(--accent-red); }
+    #log-pedidos { max-height:600px; overflow-y:auto; }
+
+    /* Modais */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:1000; align-items:center; justify-content:center; }
+    .modal-overlay.open { display:flex; }
+    .modal-box { background:var(--depth-2); border:1px solid var(--border-default); border-radius:var(--r-lg); padding:24px; width:360px; max-width:95vw; }
+    .modal-title { font-size:15px; font-weight:700; color:var(--text-primary); margin-bottom:4px; }
+    .modal-sub { font-size:12px; color:var(--text-muted); margin-bottom:16px; }
+    .modal-label { font-size:11px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+    .modal-input { width:100%; background:var(--depth-5); border:1px solid var(--border-default); border-radius:var(--r-sm); padding:8px 10px; color:var(--text-primary); font-family:'Space Mono',monospace; font-size:18px; text-align:center; outline:none; margin-bottom:6px; }
+    .modal-input:focus { border-color:var(--accent-blue); }
+    .modal-hint { font-size:11px; color:var(--text-muted); margin-bottom:16px; }
+    .modal-actions { display:flex; gap:8px; justify-content:flex-end; }
+    .btn-modal-cancel { background:transparent; border:1px solid var(--border-default); color:var(--text-muted); border-radius:var(--r-sm); padding:8px 16px; font-family:var(--font-body); font-size:13px; cursor:pointer; }
+    .btn-modal-ok { background:var(--accent-blue); color:#fff; border:none; border-radius:var(--r-sm); padding:8px 20px; font-weight:700; font-family:var(--font-body); font-size:13px; cursor:pointer; }
+
+    /* PDF */
+    #pdf-template { display:none; background:#fff; color:#000; font-family:Arial,sans-serif; }
+    .pdf-header { margin-bottom:16px; border-bottom:2px solid #000; padding-bottom:10px; }
+    .pdf-header h2 { font-size:18px; margin-bottom:4px; }
+    .pdf-header p { font-size:10px; color:#555; }
+    .pdf-meta { display:flex; gap:24px; margin-bottom:16px; }
+    .pdf-meta-item { font-size:10px; }
+    .pdf-meta-item strong { display:block; font-size:9px; color:#888; text-transform:uppercase; letter-spacing:.5px; }
+    .pdf-table { width:100%; border-collapse:collapse; font-size:11px; }
+    .pdf-table th { padding:7px 10px; background:#f0f0f0; font-weight:700; text-align:left; border-bottom:1px solid #ccc; }
+    .pdf-table td { border-bottom:1px solid #eee; vertical-align:middle; }
+    .pdf-table tr { page-break-inside:avoid; }
+    .pdf-footer { margin-top:20px; border-top:1px solid #ddd; padding-top:8px; font-size:9px; color:#aaa; display:flex; justify-content:space-between; }
+  </style>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<div class="erp-layout">
+  <div id="sidebar-placeholder"></div>
+  <main class="erp-main">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">🛒 Compras & Reposição</h1>
+        <p class="page-subtitle">Pedidos, entregas em trânsito e análise de performance</p>
+      </div>
+    </div>
+    <div class="page-content">
+      <div class="compras-stack">
+
+        <!-- ① A CAMINHO -->
+        <div id="card-transit" class="card" style="padding:0;overflow:hidden;">
+          <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;padding:14px 16px 10px;border-bottom:1px solid var(--border-subtle);">🚚 A Caminho</div>
+          <div id="transit-totais"></div>
+          <div class="carousel-wrap" id="transitCarousel"></div>
+        </div>
+
+        <!-- ② FAZER PEDIDO -->
+        <div class="card">
+          <div class="card-title" style="margin-bottom:12px;">Fazer Pedido de Reposição</div>
+          <div style="margin-bottom:12px;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Modalidade do pedido</div>
+            <div class="modalidade-bar">
+              <label><input type="radio" name="modalidade" value="FULL"    onchange="setModalidade(this.value)"> Full</label>
+              <label><input type="radio" name="modalidade" value="FLEX"    onchange="setModalidade(this.value)" checked> Flex</label>
+              <label><input type="radio" name="modalidade" value="AGÊNCIA" onchange="setModalidade(this.value)"> Agência</label>
+            </div>
+          </div>
+          <input type="text" id="searchInput" class="search-input" placeholder="Buscar produto por nome, SKU ou EAN..." onkeyup="buscarProduto()" />
+          <div id="searchResults" style="overflow-y:auto;max-height:360px;margin-top:4px;"></div>
+        </div>
+
+        <!-- ③ LISTA DE ITENS -->
+        <div id="card-lista" class="card" style="padding:0;overflow:hidden;">
+          <div class="card-header" style="padding:14px 20px;">
+            <div class="card-title">Lista de Reposição</div>
+            <div class="card-subtitle" id="resumo-modalidade"></div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="cart-table">
+              <thead><tr><th>Produto / Marca</th><th>EAN</th><th style="width:80px;">Qtd.</th><th>Ação</th></tr></thead>
+              <tbody id="cartBody"></tbody>
+            </table>
+          </div>
+          <div class="action-bar">
+            <div id="resumo-totais"></div>
+            <button class="btn-fechar" id="btnFechar" onclick="fecharLista()">✅ Fechar & Gerar PDF</button>
+          </div>
+        </div>
+
+        <!-- ④ HISTÓRICO DE PEDIDOS -->
+        <div class="card" style="padding:0;overflow:hidden;">
+          <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;padding:14px 16px 10px;border-bottom:1px solid var(--border-subtle);">📋 Histórico de Pedidos</div>
+          <div id="log-pedidos"><div style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px;">Carregando...</div></div>
+        </div>
+
+        <!-- ⑤ INTELIGÊNCIA DE COMPRAS -->
+        <div class="card" style="padding:0;overflow:hidden;">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px 0;">
+            <span style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;">📊 Inteligência de Compras</span>
+            <button onclick="carregarBI()" style="font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-muted);cursor:pointer;">↻ Atualizar</button>
+          </div>
+          <div class="bi-tabs">
+            <button class="bi-tab active" data-aba="pedidos" onclick="setAbaBI('pedidos')">Pedidos & Marcas</button>
+            <button class="bi-tab" data-aba="itens" onclick="setAbaBI('itens')">Itens mais pedidos</button>
+          </div>
+          <div id="card-bi"><div style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px;">Carregando...</div></div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- MODAL A CAMINHO -->
+<div class="modal-overlay" id="modalTransit">
+  <div class="modal-box">
+    <div class="modal-title" id="modal-product-name"></div>
+    <div class="modal-sub" id="modal-product-meta"></div>
+    <div class="modal-label">Quantidade confirmada na compra</div>
+    <input type="number" min="1" class="modal-input" id="modal-qty-input" value="1">
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="fecharModal()">Cancelar</button>
+      <button class="btn-modal-ok" onclick="confirmarACaminho()">🚚 A Caminho</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL RECEBIDO -->
+<div class="modal-overlay" id="modalRecebido">
+  <div class="modal-box">
+    <div class="modal-title">Confirmar Recebimento</div>
+    <div class="modal-sub" id="modal-recebido-meta"></div>
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px;" id="modal-recebido-info"></div>
+    <div class="modal-label">Quantidade recebida</div>
+    <input type="number" min="1" class="modal-input" id="modal-recebido-qty">
+    <div class="modal-hint" id="modal-recebido-qty-esp"></div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="fecharModalRecebido()">Cancelar</button>
+      <button class="btn-modal-ok" style="background:var(--accent-green);color:#000;" onclick="confirmarRecebido()">✅ Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- PDF -->
+<div id="pdf-template">
+  <div style="padding:28px;">
+    <div class="pdf-header"><h2>PEDIDO DE COMPRA / REPOSIÇÃO</h2><p>Expedição Pro</p></div>
+    <div class="pdf-meta">
+      <div class="pdf-meta-item"><strong>ID do Pedido</strong><span id="pdf-id"></span></div>
+      <div class="pdf-meta-item"><strong>Data</strong><span id="pdf-date"></span></div>
+      <div class="pdf-meta-item"><strong>Modalidade</strong><span id="pdf-modalidade"></span></div>
+      <div class="pdf-meta-item"><strong>Total</strong><span id="pdf-total"></span></div>
+    </div>
+    <table class="pdf-table">
+      <thead><tr>
+        <th style="width:60px;">Foto</th>
+        <th>Produto / SKU</th>
+        <th style="width:90px;">Marca</th>
+        <th style="width:110px;">EAN</th>
+        <th style="width:70px;text-align:center;">Qtd.</th>
+      </tr></thead>
+      <tbody id="pdf-body"></tbody>
+    </table>
+    <div class="pdf-footer"><span>Expedição Pro — documento gerado automaticamente</span><span id="pdf-footer-id"></span></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/menu.js"></script>
+<script src="/compras.js"></script>
+</body>
+</html>

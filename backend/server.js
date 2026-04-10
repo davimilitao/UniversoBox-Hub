@@ -2482,6 +2482,9 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
 
 // ── DANFE PDF (proxy → QZ Tray) ──────────────────────────────────
 // GET /bling/danfe/:id  → { ok, pdf: base64 } ou { ok, pdfUrl }
+// Query params:
+//   ?tipo=simplificado    → DANFE Simplificada (etiqueta 10x15cm)
+//   ?tipo=completa        → DANFE completa (A4) [padrão]
 //
 // IMPORTANTE: NÃO enviar Accept: application/pdf — o Bling V3 retorna
 // JSON com URL do PDF ou faz redirect. O header errado causa 404.
@@ -2490,6 +2493,7 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
 //         3) se vier JSON → extrai URL e faz proxy do PDF
 //         4) se vier binário PDF direto → converte para base64
 app.get('/bling/danfe/:id', async (req, res, next) => {
+  const tipoParam = req.query.tipo || 'completa'; // padrão = completa (A4)
   // Sanitiza: remove tudo que não for dígito (ex: traços, espaços, letras)
   const nfId = String(req.params.id).replace(/\D/g, '');
   if (!nfId) return res.status(400).json({ error: 'id_invalido', message: 'ID da NF deve ser numérico.' });
@@ -2557,7 +2561,7 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
         if (linkPdf) {
           console.log(`[danfe/${nfId}] linkPDF=${linkPdf}`);
           const result = await downloadPdf(linkPdf, 'linkPDF');
-          if (result) return res.json({ ok: true, ...result, nfId });
+          if (result) return res.json({ ok: true, ...result, nfId, tipo: tipoParam });
         }
 
         // Tenta linkDanfe — normalmente é viewer HTML (doc.view.php)
@@ -2570,16 +2574,16 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
           if (downloadUrl) {
             console.log(`[danfe/${nfId}] tentando download URL: ${downloadUrl}`);
             const result = await downloadPdf(downloadUrl, 'doc.download.php');
-            if (result) return res.json({ ok: true, ...result, nfId });
+            if (result) return res.json({ ok: true, ...result, nfId, tipo: tipoParam });
           }
 
           // Tenta o viewer direto (às vezes retorna PDF)
           const result = await downloadPdf(linkViewer, 'linkDanfe_direto');
-          if (result) return res.json({ ok: true, ...result, nfId });
+          if (result) return res.json({ ok: true, ...result, nfId, tipo: tipoParam });
 
           // É HTML viewer — retorna URL para o browser imprimir
           console.log(`[danfe/${nfId}] linkDanfe é HTML viewer — retornando pdfUrl`);
-          return res.json({ ok: true, pdfUrl: linkViewer, nfId, via: 'linkDanfe_browser' });
+          return res.json({ ok: true, pdfUrl: linkViewer, nfId, tipo: tipoParam, via: 'linkDanfe_browser' });
         }
 
         // chaveAcesso → tenta serviço público da Receita Federal
@@ -2588,7 +2592,7 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
           console.log(`[danfe/${nfId}] tentando SEFAZ com chave ${chave.slice(0,10)}…`);
           const sefazUrl = `https://www.nfe.fazenda.gov.br/portal/downloadNFe.aspx?chave=${chave}&tipoDownload=2`;
           const result = await downloadPdf(sefazUrl, 'sefaz_chave');
-          if (result) return res.json({ ok: true, ...result, nfId });
+          if (result) return res.json({ ok: true, ...result, nfId, tipo: tipoParam });
         }
       } else {
         const errTxt = await detResp.text().catch(() => '');
@@ -2600,8 +2604,13 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
 
     // ══════════════════════════════════════════════════════════════════════
     // PASSO 2 — Endpoint /nfe/{id}/danfe com redirect manual
+    // Adiciona ?tipo=simplificado se solicitado (DANFE etiqueta 10x15cm)
     // ══════════════════════════════════════════════════════════════════════
-    const danfeResp = await fetch(`${BLING_API_BASE}/nfe/${nfId}/danfe`, {
+    const danfeUrl = tipoParam === 'simplificado'
+      ? `${BLING_API_BASE}/nfe/${nfId}/danfe?tipo=simplificado`
+      : `${BLING_API_BASE}/nfe/${nfId}/danfe`;
+
+    const danfeResp = await fetch(danfeUrl, {
       headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json, */*;q=0.8' },
       redirect: 'manual',
     });
@@ -2624,7 +2633,7 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
       // PDF binário
       if (dCt.includes('pdf') || dCt.includes('octet')) {
         const buf = await danfeResp.arrayBuffer();
-        return res.json({ ok: true, pdf: Buffer.from(buf).toString('base64'), nfId, via: 'binary' });
+        return res.json({ ok: true, pdf: Buffer.from(buf).toString('base64'), nfId, tipo: tipoParam, via: 'binary' });
       }
       // JSON com URL
       const raw = await danfeResp.text();
@@ -2637,8 +2646,8 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
         data?.url || data?.link || data?.danfe || null;
       if (pdfUrl) {
         const result = await downloadPdf(pdfUrl, 'json_url');
-        if (result) return res.json({ ok: true, ...result, nfId });
-        return res.json({ ok: true, pdfUrl, nfId, via: 'json_url_fallback' });
+        if (result) return res.json({ ok: true, ...result, nfId, tipo: tipoParam });
+        return res.json({ ok: true, pdfUrl, nfId, tipo: tipoParam, via: 'json_url_fallback' });
       }
       // ZPL ou texto desconhecido
       return res.status(422).json({ error: 'danfe_json_sem_url', rawBody: raw.slice(0, 400) });
