@@ -2186,32 +2186,55 @@ app.get('/api/catalogo/buscar', async (req, res, next) => {
 });
 
 // ── PUT /api/catalogo/produto/:id  — salva produto editado no Bling ─────────
+// blingFetch só suporta GET, então usamos fetch direto para PUT
 app.put('/api/catalogo/produto/:id', requireFirebaseAuth, async (req, res, next) => {
   const produtoId = req.params.id;
-  const { nome, descricao, imagens } = req.body;
+  const body = req.body || {};
 
   if (!produtoId) {
     return res.status(400).json({ ok: false, error: 'ID do produto obrigatório' });
   }
 
   try {
-    // Monta payload para Bling (apenas campos que ele aceita)
+    const token = await blingEnsureToken();
+
+    // Monta payload para Bling (campos aceitos pela API v3)
     const payload = {};
-    if (nome) payload.nome = nome;
-    if (descricao) payload.descricao = descricao;
+    if (body.nome !== undefined)           payload.nome = body.nome;
+    if (body.descricao !== undefined)      payload.descricao = body.descricao;
+    if (body.descricaoCurta !== undefined) payload.descricaoCurta = body.descricaoCurta;
+    if (body.preco !== undefined)          payload.preco = Number(body.preco) || 0;
+    if (body.gtin !== undefined)           payload.gtin = body.gtin;
+    if (body.marca !== undefined)          payload.marca = body.marca;
 
-    // Bling não aceita imagens via API PUT direto
-    // Imagens devem ser enviadas via portal ou webhook
-    // Então apenas sincronizamos nome e descrição
+    // Imagens: Bling aceita array de URLs via midia.internas
+    if (body.imagens && Array.isArray(body.imagens)) {
+      payload.midia = {
+        internas: { link: body.imagens.filter(u => u && typeof u === 'string') }
+      };
+    }
 
-    const updateRes = await blingFetch(`/produtos/${produtoId}`, {
+    const updateRes = await fetch(`${BLING_API_BASE}/produtos/${produtoId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
       body: JSON.stringify(payload),
     });
 
-    console.log(`[PUT /api/catalogo/produto/${produtoId}] atualizado no Bling`, { nome, descricao });
-    res.json({ ok: true, message: 'Produto atualizado no Bling', produto: updateRes?.data });
+    const text = await updateRes.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch {}
+
+    if (!updateRes.ok) {
+      console.error(`[PUT /api/catalogo/produto/${produtoId}] Bling ${updateRes.status}: ${text.slice(0, 300)}`);
+      throw new Error(data?.error?.message || `Bling retornou ${updateRes.status}`);
+    }
+
+    console.log(`[PUT /api/catalogo/produto/${produtoId}] OK`);
+    res.json({ ok: true, message: 'Produto atualizado no Bling', produto: data?.data });
 
   } catch (err) {
     if (err.message === 'bling_not_authorized') {
@@ -5147,6 +5170,7 @@ app.get('/admin/proxy-image', async (req, res) => {
     const buf = Buffer.from(await r.arrayBuffer());
     res.set('Content-Type', mime);
     res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Access-Control-Allow-Origin', '*');
     res.send(buf);
   } catch (e) {
     console.error('[proxy-image]', e.message);

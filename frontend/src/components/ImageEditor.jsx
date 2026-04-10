@@ -372,7 +372,8 @@ export function ImageEditor({ url, sku, kind = 'stock', onSaved, onClose }) {
                   >
                     <img
                       ref={imgRef}
-                      src={url}
+                      src={proxyIfNeeded(url)}
+                      crossOrigin="anonymous"
                       alt="Recortar"
                       className="max-w-full max-h-[320px] object-contain"
                       onLoad={onImgLoad}
