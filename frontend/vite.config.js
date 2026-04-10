@@ -17,8 +17,9 @@ export default defineConfig(({ command }) => ({
       '/orders':  { target: 'http://localhost:8080', changeOrigin: true },
       '/api':     { target: 'http://localhost:8080', changeOrigin: true },
       '/auth':    { target: 'http://localhost:8080', changeOrigin: true },
-      '/admin':   { target: 'http://localhost:8080', changeOrigin: true },
+      '/admin':    { target: 'http://localhost:8080', changeOrigin: true },
       '/produtos': { target: 'http://localhost:8080', changeOrigin: true },
+      '/products': { target: 'http://localhost:8080', changeOrigin: true },
     },
   },
 }));
