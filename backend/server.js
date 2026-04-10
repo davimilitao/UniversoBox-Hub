@@ -2185,6 +2185,43 @@ app.get('/api/catalogo/buscar', async (req, res, next) => {
   }
 });
 
+// ── PUT /api/catalogo/produto/:id  — salva produto editado no Bling ─────────
+app.put('/api/catalogo/produto/:id', requireFirebaseAuth, async (req, res, next) => {
+  const produtoId = req.params.id;
+  const { nome, descricao, imagens } = req.body;
+
+  if (!produtoId) {
+    return res.status(400).json({ ok: false, error: 'ID do produto obrigatório' });
+  }
+
+  try {
+    // Monta payload para Bling (apenas campos que ele aceita)
+    const payload = {};
+    if (nome) payload.nome = nome;
+    if (descricao) payload.descricao = descricao;
+
+    // Bling não aceita imagens via API PUT direto
+    // Imagens devem ser enviadas via portal ou webhook
+    // Então apenas sincronizamos nome e descrição
+
+    const updateRes = await blingFetch(`/produtos/${produtoId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    console.log(`[PUT /api/catalogo/produto/${produtoId}] atualizado no Bling`, { nome, descricao });
+    res.json({ ok: true, message: 'Produto atualizado no Bling', produto: updateRes?.data });
+
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') {
+      return res.status(401).json({ ok: false, error: 'bling_not_authorized' });
+    }
+    console.error(`[PUT /api/catalogo/produto/${produtoId}]`, err.message);
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Helpers ML ────────────────────────────────────────────────────────────────
 const ML_HEADERS = {
   'Accept': 'application/json',

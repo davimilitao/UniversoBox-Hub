@@ -13,6 +13,68 @@ import {
 } from 'lucide-react';
 import { ImageEditor } from '../../components/ImageEditor';
 
+// ── Campo HTML com preview ────────────────────────────────────────────────────
+function CampoHTML({ label, value, onChange, hint }) {
+  const [mode, setMode] = useState('edit'); // 'edit' | 'preview'
+  const [htmlErr, setHtmlErr] = useState('');
+
+  function validateHTML() {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(value, 'text/html');
+      if (doc.body.textContent.length === 0) {
+        setHtmlErr('HTML vazio');
+        return;
+      }
+      setHtmlErr('');
+    } catch (e) {
+      setHtmlErr('HTML inválido');
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{label}</label>
+        <div className="flex gap-1 bg-slate-800 border border-white/5 rounded-lg p-1">
+          <button
+            onClick={() => { setMode('edit'); setHtmlErr(''); }}
+            className={`text-[10px] px-2.5 py-1 rounded font-bold transition-colors ${mode === 'edit' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-500 hover:text-slate-400'}`}
+          >
+            Código HTML
+          </button>
+          <button
+            onClick={() => { setMode('preview'); validateHTML(); }}
+            className={`text-[10px] px-2.5 py-1 rounded font-bold transition-colors ${mode === 'preview' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-500 hover:text-slate-400'}`}
+          >
+            Preview
+          </button>
+        </div>
+      </div>
+
+      {mode === 'edit' ? (
+        <textarea
+          rows={6}
+          className="w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-white font-mono text-sm outline-none focus:border-emerald-500/60 transition-colors resize-none"
+          value={value}
+          onChange={e => { onChange(e.target.value); setHtmlErr(''); }}
+          placeholder="<p>Descrição em HTML...</p>"
+        />
+      ) : (
+        <div className="w-full bg-slate-900 border border-white/5 rounded-xl p-4 min-h-[200px] text-white prose prose-invert prose-sm max-w-none prose-p:m-0 prose-p:mb-2">
+          {htmlErr ? (
+            <p className="text-red-400">{htmlErr}</p>
+          ) : (
+            <div dangerouslySetInnerHTML={{ __html: value }} />
+          )}
+        </div>
+      )}
+
+      {hint && <p className="text-[10px] text-slate-600 ml-1">{hint}</p>}
+    </div>
+  );
+}
+
 // ── Campo de texto genérico ───────────────────────────────────────────────────
 function Campo({ label, value, onChange, mono, placeholder, area, hint }) {
   const cls = 'w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-white outline-none focus:border-emerald-500/60 transition-colors ' + (mono ? 'font-mono text-emerald-400' : '');
@@ -211,12 +273,11 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               placeholder="Texto resumido para listagens e marketplaces..."
               hint="Campo descricaoCurta do Bling — aparece em cards de produto"
             />
-            <Campo
-              label="Descrição completa"
+            <CampoHTML
+              label="Descrição completa (HTML)"
               value={p.descricao}
               onChange={set('descricao')}
-              area
-              placeholder="Descrição completa para os marketplaces..."
+              hint="Suporta HTML — use tabs para editar código ou visualizar preview"
             />
           </section>
 
