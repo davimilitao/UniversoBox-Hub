@@ -2138,50 +2138,87 @@ app.get('/api/catalogo/categorias', async (req, res, next) => {
       id:   c.id,
       nome: c.descricao || c.nome || '',
     }));
-    res.json({ ok: true, items });
+    // Frontend espera array direto: Array.isArray(d)
+    res.json(items);
   } catch (err) {
     if (err.message === 'bling_not_authorized') {
       return res.status(401).json({ error: 'bling_not_authorized' });
     }
     console.warn('[GET /api/catalogo/categorias]', err.message);
-    res.json({ ok: true, items: [], erro: err.message });
+    res.json([]);
   }
 });
 
-// ── Alias API: Buscar produtos (aponta para busca no Bling) ──────────────────
+// ── Buscar produto COMPLETO no Bling por SKU ou EAN ─────────────────────────
+// Frontend (AutomacaoCadastro) espera objeto produto direto, não array
 app.get('/api/catalogo/buscar', async (req, res, next) => {
-  const q = req.query.q || '';
+  const q = (req.query.q || '').trim();
   if (!q || q.length < 2) {
-    return res.json({ ok: true, items: [] });
+    return res.status(400).json({ error: 'Informe SKU ou EAN para buscar' });
   }
   try {
-    // Tenta buscar por SKU primeiro (mais específico)
-    const skuData = await blingFetch(`/produtos?filtros[sku]=${encodeURIComponent(q)}&limite=1`);
-    const skuItems = (skuData?.data || []).map(p => ({
-      id: p.id,
-      sku: p.sku,
-      nome: p.nome,
-      descricao: p.descricao || '',
-    }));
-    if (skuItems.length > 0) {
-      return res.json({ ok: true, items: skuItems });
+    // 1) Busca listagem por código (SKU)
+    let listData = await blingFetch(`/produtos?codigo=${encodeURIComponent(q)}&limite=1`);
+    let produtos = listData?.data || [];
+
+    // 2) Se não achou por código, tenta por GTIN (EAN)
+    if (!produtos.length) {
+      listData = await blingFetch(`/produtos?gtin=${encodeURIComponent(q)}&limite=1`);
+      produtos = listData?.data || [];
     }
 
-    // Se não encontrar por SKU, busca por nome
-    const nomeData = await blingFetch(`/produtos?filtros[nome]=${encodeURIComponent(q)}&limite=10`);
-    const nomeItems = (nomeData?.data || []).map(p => ({
-      id: p.id,
-      sku: p.sku,
-      nome: p.nome,
-      descricao: p.descricao || '',
-    }));
-    res.json({ ok: true, items: nomeItems });
+    // 3) Se não achou, tenta busca genérica
+    if (!produtos.length) {
+      listData = await blingFetch(`/produtos?pesquisa=${encodeURIComponent(q)}&limite=1`);
+      produtos = listData?.data || [];
+    }
+
+    if (!produtos.length) {
+      return res.status(404).json({ error: 'Produto não encontrado' });
+    }
+
+    // 4) Busca detalhes completos do primeiro resultado
+    const detail = await blingFetch(`/produtos/${produtos[0].id}`);
+    const item = detail?.data || {};
+
+    // 5) Extrai imagens (Bling retorna em formatos variados)
+    const imgList = item.midia?.internas?.link || item.midia?.imagens || item.imagens || [];
+    const imagens = (Array.isArray(imgList) ? imgList : [imgList])
+      .map(img => typeof img === 'string' ? img : (img?.link || img?.url || ''))
+      .filter(u => u && /^https?:\/\//i.test(u));
+
+    // 6) Monta objeto no formato que o frontend espera
+    const produto = {
+      id:              item.id,
+      nome:            item.nome || '',
+      codigo:          item.codigo || '',
+      gtin:            item.gtin || '',
+      marca:           item.marca?.nome || item.marca || '',
+      ncm:             item.classFiscal || item.ncm || '',
+      situacao:        item.situacao || 'A',
+      tipo:            item.tipo || 'P',
+      origem:          item.origem ?? 0,
+      preco:           item.preco ?? item.precoCusto ?? 0,
+      descricaoCurta:  item.descricaoCurta || '',
+      descricao:       item.descricao || '',
+      pesoLiq:         item.pesoLiquido ?? item.pesoLiq ?? '0.000',
+      pesoBruto:       item.pesoBruto ?? '0.000',
+      largura:         item.dimensoes?.largura ?? item.largura ?? '0',
+      altura:          item.dimensoes?.altura ?? item.altura ?? '0',
+      profundidade:    item.dimensoes?.profundidade ?? item.profundidade ?? '0',
+      categoria:       item.categoria ? { id: item.categoria.id, nome: item.categoria.descricao || item.categoria.nome || '' } : null,
+      imagens,
+    };
+
+    console.log(`[GET /api/catalogo/buscar] q=${q} → id=${produto.id} sku=${produto.codigo} imgs=${imagens.length}`);
+    res.json(produto);
+
   } catch (err) {
     if (err.message === 'bling_not_authorized') {
       return res.status(401).json({ error: 'bling_not_authorized' });
     }
-    console.warn('[GET /api/catalogo/buscar]', err.message);
-    res.json({ ok: true, items: [], erro: err.message });
+    console.error('[GET /api/catalogo/buscar]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
