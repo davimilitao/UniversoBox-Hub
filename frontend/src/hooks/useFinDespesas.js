@@ -64,6 +64,12 @@ export function useFinDespesas() {
   const [error,    setError]    = useState(null);
 
   useEffect(() => {
+    if (!db) {
+      setError('Firebase não inicializado — verifique o .env');
+      setLoading(false);
+      return;
+    }
+
     const q = query(
       collection(db, 'fin_despesas'),
       orderBy('data', 'desc'),
