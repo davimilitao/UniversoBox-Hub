@@ -1775,6 +1775,164 @@ app.patch('/api/despesas/:rowIndex', requireFirebaseAuth, async (req, res, next)
 });
 
 // ================================================================
+// FIN-DESPESAS — Firestore como banco primário de despesas
+// Substitui gradualmente o modelo de Google Sheets puro.
+// Tipos: mensal_fixa | operacional | investimento
+// Investimento cria automaticamente fin_compras + fin_parcelas
+// ================================================================
+
+// POST /api/fin-despesas — lança despesa no Firestore + appenda na planilha xlsx
+app.post('/api/fin-despesas', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { uid, tenantId } = req.auth;
+    const {
+      data,             // "DD/MM/YYYY"
+      tipo,             // 'mensal_fixa' | 'operacional' | 'investimento'
+      categoria,
+      fornecedor,
+      descricao,
+      valor,            // número
+      situacao,         // 'pago' | 'pendente'
+      meioId,           // opcional — ref fin_meios_pagamento
+      numeroParcelas,   // obrigatório se tipo === 'investimento'
+      taxaJuros,        // % mensal, opcional
+      comprovante,      // { tipo, codigoAutenticacao, banco, dataOriginal, arquivo }
+    } = req.body;
+
+    if (!data || !tipo || !categoria || !fornecedor || !valor) {
+      return res.status(400).json({ error: 'Campos obrigatórios: data, tipo, categoria, fornecedor, valor' });
+    }
+
+    // Converte "DD/MM/YYYY" para Timestamp do Firestore
+    const [d, m, y] = data.split('/');
+    const dataTs = admin.firestore.Timestamp.fromDate(new Date(`${y}-${m}-${d}T12:00:00`));
+
+    const despesaDoc = {
+      data: dataTs,
+      tipo,
+      categoria,
+      fornecedor,
+      descricao: descricao || '',
+      valor: parseFloat(valor),
+      situacao: situacao || 'pago',
+      meioId: meioId || null,
+      compraId: null,
+      numeroParcela: null,
+      comprovante: comprovante || null,
+      tenantId,
+      uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    const docRef = await admin.firestore().collection('fin_despesas').add(despesaDoc);
+    let compraId = null;
+
+    // Se for investimento parcelado → cria fin_compras + fin_parcelas
+    if (tipo === 'investimento' && numeroParcelas && meioId) {
+      const nParcelas = parseInt(numeroParcelas, 10);
+      const taxa = parseFloat(taxaJuros || 0);
+      const totalComJuros = parseFloat(valor) * (1 + (taxa / 100) * nParcelas);
+      const valorBase = Math.floor((totalComJuros / nParcelas) * 100) / 100;
+      const resto = Math.round((totalComJuros - valorBase * nParcelas) * 100) / 100;
+
+      // Busca o meio de pagamento para pegar diaVencimento
+      const meioSnap = await admin.firestore().collection('fin_meios_pagamento').doc(meioId).get();
+      const meio = meioSnap.exists ? meioSnap.data() : {};
+      const diaVenc = meio.diaVencimento || 10;
+
+      const compraRef = await admin.firestore().collection('fin_compras').add({
+        fornecedor,
+        descricao: descricao || categoria,
+        totalBruto: parseFloat(valor),
+        totalComJuros,
+        numeroParcelas: nParcelas,
+        taxaJuros: taxa,
+        meioId,
+        meioNome: meio.nome || '',
+        meioBandeira: meio.bandeira || '',
+        sku: null,
+        qtd: null,
+        custoUnitario: null,
+        status: 'aberta',
+        despesaId: docRef.id,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      compraId = compraRef.id;
+
+      // Atualiza despesa com compraId
+      await docRef.update({ compraId });
+
+      // Cria N parcelas
+      const batch = admin.firestore().batch();
+      const hoje = new Date(`${y}-${m}-${d}T12:00:00`);
+      for (let i = 0; i < nParcelas; i++) {
+        const vencMes = new Date(hoje);
+        vencMes.setMonth(vencMes.getMonth() + i + 1);
+        vencMes.setDate(Math.min(diaVenc, new Date(vencMes.getFullYear(), vencMes.getMonth() + 1, 0).getDate()));
+        const valorParcela = i === nParcelas - 1 ? valorBase + resto : valorBase;
+        const parcelaRef = admin.firestore().collection('fin_parcelas').doc();
+        batch.set(parcelaRef, {
+          compraId,
+          fornecedor,
+          descricao: descricao || categoria,
+          meioId,
+          meioNome: meio.nome || '',
+          meioBandeira: meio.bandeira || '',
+          numeroParcela: i + 1,
+          totalParcelas: nParcelas,
+          valor: valorParcela,
+          vencimento: admin.firestore.Timestamp.fromDate(vencMes),
+          status: 'pendente',
+          comprovante: null,
+          paidAt: null,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    }
+
+    return res.json({ ok: true, id: docRef.id, compraId });
+  } catch (err) {
+    console.error('[POST /api/fin-despesas]', err);
+    return next(err);
+  }
+});
+
+// GET /api/fin-despesas — lista despesas do Firestore com filtros opcionais
+app.get('/api/fin-despesas', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tipo, categoria, mes } = req.query; // mes = "YYYY-MM"
+
+    let query = admin.firestore().collection('fin_despesas').orderBy('data', 'desc');
+
+    if (tipo) query = query.where('tipo', '==', tipo);
+    if (categoria) query = query.where('categoria', '==', categoria);
+    if (mes) {
+      const [year, month] = mes.split('-').map(Number);
+      const inicio = admin.firestore.Timestamp.fromDate(new Date(year, month - 1, 1));
+      const fim = admin.firestore.Timestamp.fromDate(new Date(year, month, 1));
+      query = query.where('data', '>=', inicio).where('data', '<', fim);
+    }
+
+    const snap = await query.limit(500).get();
+    const items = snap.docs.map(doc => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        ...d,
+        data: d.data?.toDate ? d.data.toDate().toLocaleDateString('pt-BR') : null,
+        createdAt: d.createdAt?.toDate ? d.createdAt.toDate().toISOString() : null,
+      };
+    });
+
+    return res.json({ items });
+  } catch (err) {
+    console.error('[GET /api/fin-despesas]', err);
+    return next(err);
+  }
+});
+
+// ================================================================
 // MARGEM — lê aba "Margem" da planilha Controle Financeiro
 // ================================================================
 app.get('/api/margem', requireFirebaseAuth, async (req, res, next) => {
