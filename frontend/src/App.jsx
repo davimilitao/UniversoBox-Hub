@@ -2,28 +2,30 @@
  * @file App.jsx
  * @description Rotas principais. Rotas dentro do AppShell têm sidebar React.
  *   A rota raiz "/" é o DashboardPage — painel operacional do dia.
- * @version 2.2.0
- * @date 2026-04-05
+ * @version 2.3.0
+ * @date 2026-04-12
+ * @changelog
+ *   2.3.0 — 2026-04-12 — Fusão Contas + GestaoDespesas → GestaoFinanceira; /contas redireciona.
+ *   2.2.0 — 2026-04-05 — Versão anterior.
  */
 
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { LoginPage }        from './pages/LoginPage';
-import { DashboardPage }    from './pages/DashboardPage';
-import { PainelFinanceiro } from './pages/financeiro/PainelFinanceiro';
-import { GestaoDespesas }   from './pages/financeiro/GestaoDespesas';
-import { GestaoMargem }     from './pages/financeiro/GestaoMargem';
-import { BlingPedidos }     from './pages/expedicao/BlingPedidos';
-import { AppShell }         from './components/AppShell';
-import GestaoInsumos           from './pages/expedicao/GestaoInsumos';
-import PedidosDoDia            from './pages/expedicao/PedidosDoDia';
-import AutomacaoCadastro       from './pages/catalogo/AutomacaoCadastro';
-import CatalogoPro             from './pages/catalogo/CatalogoPro';
-import AdminProdutos           from './pages/catalogo/AdminProdutos';
-import ImportarCSV             from './pages/catalogo/ImportarCSV';
-import ImageStudio             from './pages/catalogo/ImageStudio';
-import ConfiguracoesSistema    from './pages/sistema/ConfiguracoesSistema';
-import Contas                  from './pages/financeiro/Contas';
-import Compras                 from './pages/expedicao/Compras';
+import { LoginPage }          from './pages/LoginPage';
+import { DashboardPage }      from './pages/DashboardPage';
+import { PainelFinanceiro }   from './pages/financeiro/PainelFinanceiro';
+import { GestaoFinanceira }   from './pages/financeiro/GestaoFinanceira';
+import { GestaoMargem }       from './pages/financeiro/GestaoMargem';
+import { BlingPedidos }       from './pages/expedicao/BlingPedidos';
+import { AppShell }           from './components/AppShell';
+import GestaoInsumos          from './pages/expedicao/GestaoInsumos';
+import PedidosDoDia           from './pages/expedicao/PedidosDoDia';
+import AutomacaoCadastro      from './pages/catalogo/AutomacaoCadastro';
+import CatalogoPro            from './pages/catalogo/CatalogoPro';
+import AdminProdutos          from './pages/catalogo/AdminProdutos';
+import ImportarCSV            from './pages/catalogo/ImportarCSV';
+import ImageStudio            from './pages/catalogo/ImageStudio';
+import ConfiguracoesSistema   from './pages/sistema/ConfiguracoesSistema';
+import Compras                from './pages/expedicao/Compras';
 
 export default function App() {
   return (
@@ -49,8 +51,8 @@ export default function App() {
         <Route path="/catalogo/automacao"  element={<AutomacaoCadastro />} />
         <Route path="/catalogo/fotos"      element={<ImageStudio />} />
         {/* Financeiro */}
-        <Route path="/financeiro/contas"    element={<Contas />} />
-        <Route path="/financeiro/despesas" element={<GestaoDespesas />} />
+        <Route path="/financeiro/despesas" element={<GestaoFinanceira />} />
+        <Route path="/financeiro/contas"   element={<Navigate to="/financeiro/despesas" replace />} />
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />
         <Route path="/financeiro/painel"   element={<PainelFinanceiro />} />
         {/* Sistema */}

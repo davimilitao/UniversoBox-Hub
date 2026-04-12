@@ -12,8 +12,7 @@
  */
 
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
-
-const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+import { BRL } from '../../../utils/financeiroUtils';
 
 // Paleta que contrasta bem no fundo slate-800
 const CORES = ['#34d399', '#60a5fa', '#f97316', '#a78bfa', '#fb7185', '#fbbf24', '#22d3ee', '#e879f9'];
