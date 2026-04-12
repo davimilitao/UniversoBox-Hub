@@ -1,366 +1,165 @@
-# UniversoBox Hub — Contexto Técnico para o Claude Code (v2.0)
+# CLAUDE.md
 
-> **Leia este arquivo inteiro antes de qualquer ação.**
-> Ele define as regras absolutas do projeto. Violá-las pode quebrar o isolamento entre clientes.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
----
+## Development Commands
 
-## 🎯 Missão do Projeto
-
-SaaS multi-tenant para e-commerce que integra **Bling ERP** e **Mercado Livre**.
-Cada cliente (tenant) opera em isolamento completo de dados dentro da mesma infraestrutura Firebase.
-
-Produto anterior: `Expedição Pro` (monolítico, single-tenant)
-Produto atual: `UniversoBox Hub` (SaaS, multi-tenant, escalável)
-
----
-
-## 🛠️ Stack Técnica
-
-| Camada        | Tecnologia                          | Status          |
-|---------------|-------------------------------------|-----------------|
-| Backend       | Node.js 18+ / Express               | ✅ Ativo         |
-| Frontend      | React 18 + Tailwind CSS + Vite      | ✅ Ativo         |
-| Banco         | Firebase Firestore                  | ✅ Ativo         |
-| Auth          | Firebase Authentication             | ✅ Ativo         |
-| Storage       | Firebase Storage (imagens)          | ✅ Ativo         |
-| ERP           | Bling API v3 (OAuth2)               | ✅ Ativo         |
-| Marketplace   | Mercado Livre API                   | 📋 Planejado     |
-
----
-
-## 📁 Estrutura de Pastas
-
-```
-universobox-hub/
-│
-├── backend/                        # Servidor Node.js/Express
-│   ├── server.js                   # Entry point — inicializa Express e rotas
-│   ├── firebase-admin.js           # Inicialização do Firebase Admin SDK
-│   │
-│   ├── routes/
-│   │   ├── bling_routes.js         # Todas as rotas /bling/* (NFs, clone, OAuth)
-│   │   ├── admin_routes.js         # Rotas /admin/* (config, catálogo, uploads)
-│   │   ├── compras_routes.js       # Rotas /compras/* (pedidos, trânsito, BI)
-│   │   └── auth_routes.js          # Rotas /auth/* (login, refresh, claims)
-│   │
-│   ├── middleware/
-│   │   ├── requireFirebaseAuth.js  # Valida token Firebase + extrai tenantId
-│   │   ├── requireRole.js          # Valida customClaims (admin, operator, viewer)
-│   │   └── tenantScope.js          # Injeta tenantId em req para queries Firestore
-│   │
-│   └── utils/
-│       ├── firestore.js            # Helpers de query com tenantId obrigatório
-│       ├── bling-client.js         # Cliente HTTP para Bling API (com token por tenant)
-│       └── sku-validator.js        # Valida e normaliza SKUs antes de gravar
-│
-├── frontend/                       # React SPA (Vite)
-│   ├── src/
-│   │   ├── pages/                  # 24 páginas React (Pedidos, Financeiro, Catálogo, etc)
-│   │   ├── components/             # 28 componentes reutilizáveis (AppShell, ImageEditor, etc)
-│   │   ├── hooks/                  # Custom hooks (usePerfil, useAuth, useFirestore)
-│   │   ├── utils/                  # Helpers (API client, normalizers, validators)
-│   │   └── App.jsx                 # Root component com routing
-│   ├── vite.config.js              # Dev server config (proxy para backend:8080)
-│   ├── tailwind.config.js          # Tailwind CSS setup
-│   └── public/                     # Assets estáticos
-│
-├── CLAUDE.md                       # ← Este arquivo
-└── .env.example                    # Variáveis de ambiente necessárias
-```
-
----
-
-## 🗄️ Modelo de Dados — Firestore
-
-### Regra absoluta de isolamento:
-```
-/tenants/{tenantId}/               ← RAIZ de todos os dados de um cliente
-    orders/{orderId}
-    products/{sku}
-    purchases/{purchaseId}
-    config/bling                   ← tokens OAuth do Bling deste tenant
-    config/mercadolivre            ← tokens do ML deste tenant
-```
-
-### Schema: `orders` (pedido interno de separação)
-```js
-{
-  tenantId: "string",          // OBRIGATÓRIO — nunca omitir
-  sku: "string",               // Chave de integração com Bling e catálogo
-  nfNumero: "string",          // Número da NF de origem no Bling
-  status: "pending|picking|done|cancelled",
-  createdAt: Timestamp,
-  updatedAt: Timestamp,
-  operatorId: "string",        // uid do Firebase Auth do operador
-  items: [
-    {
-      sku: "string",
-      nome: "string",
-      quantidade: number,
-      binName: "string"        // endereço no estoque (ex: "A-12-3")
-    }
-  ]
-}
-```
-
-### Schema: `products` (catálogo interno)
-```js
-{
-  tenantId: "string",          // OBRIGATÓRIO
-  sku: "string",               // PRIMARY KEY de integração — nunca duplicar
-  fMarca: "string",
-  fNome: "string",
-  pesoLiq: number,             // em gramas
-  dimensoes: {
-    altura: number,
-    largura: number,
-    profundidade: number       // em cm
-  },
-  binName: "string",           // endereço no estoque
-  silenciado: boolean,         // se true, não aparece na operação diária
-  imagens: {
-    bin: "string|null",        // URL Firebase Storage — foto da gaveta
-    box: "string|null",        // URL Firebase Storage — foto da embalagem
-    stock: "string|null"       // URL Firebase Storage — foto real do produto
-  },
-  createdAt: Timestamp,
-  updatedAt: Timestamp
-}
-```
-
-### Schema: `config/bling` (OAuth por tenant)
-```js
-{
-  accessToken: "string",       // Token atual Bling API v3
-  refreshToken: "string",      // Para renovação automática
-  expiresAt: Timestamp,        // Quando o accessToken expira
-  clientId: "string",
-  clientSecret: "string"       // Armazenar criptografado
-}
-```
-
----
-
-## 🔐 Fluxo de Autenticação
-
-### Como o tenantId chega no backend:
-```
-1. Usuário faz login via Firebase Auth (frontend)
-2. Firebase retorna idToken JWT com customClaims: { tenantId, role }
-3. Frontend envia idToken no header: Authorization: Bearer {idToken}
-4. Middleware requireFirebaseAuth decodifica e injeta em req.user
-5. Middleware tenantScope injeta req.tenantId para uso nas rotas
-```
-
-### Middleware obrigatório em toda rota sensível:
-```js
-// Exemplo de rota protegida — SEMPRE nesta ordem
-router.get('/orders',
-  requireFirebaseAuth,    // 1. Valida token
-  requireRole('operator'), // 2. Valida role (admin | operator | viewer)
-  tenantScope,             // 3. Injeta tenantId
-  async (req, res) => {
-    // req.tenantId já está disponível e validado
-    const orders = await db
-      .collection(`tenants/${req.tenantId}/orders`)
-      .get();
-  }
-);
-```
-
-### Roles disponíveis:
-| Role       | Permissões                                          |
-|------------|-----------------------------------------------------|
-| `admin`    | Tudo — configurações, usuários, tokens Bling        |
-| `operator` | Operação diária — NFs, separação, compras           |
-| `viewer`   | Somente leitura — catálogo e relatórios             |
-
----
-
-## 🔗 Integração Bling API v3
-
-### Base URL:
-```
-https://api.bling.com.br/Api/v3/
-```
-**Nota:** Migrado de `www.bling.com.br` em Abril/2026. Versão antiga está deprecated.
-
-### Como usar o cliente (nunca fazer fetch direto nas rotas):
-```js
-// utils/bling-client.js — sempre usar esta função
-const blingClient = require('../utils/bling-client');
-
-// O cliente busca o token do tenant automaticamente no Firestore
-const nfs = await blingClient.get(req.tenantId, '/notasfiscais', {
-  params: { situacao: 'Autorizado', pagina: 1 }
-});
-```
-
-### Endpoints principais já integrados:
-- `GET /notasfiscais` — lista NFs de saída
-- `GET /notasfiscais/{id}` — detalhe de uma NF
-- `POST /pedidosvendas` — clonar pedido (origem do "Criar na Expedição")
-
-### Fluxo "Criar na Expedição":
-```
-NF no Bling → POST /bling/clonar → valida SKU → grava em /tenants/{id}/orders
-```
-
----
-
-## 📋 Regras de Desenvolvimento (Mandatórias)
-
-### 1. Isolamento de dados — regra número 1
-```js
-// ❌ NUNCA FAZER — query sem tenantId
-db.collection('orders').where('status', '==', 'pending')
-
-// ✅ SEMPRE FAZER — collection scoped por tenant
-db.collection(`tenants/${tenantId}/orders`).where('status', '==', 'pending')
-```
-
-### 2. SKU é sagrado
-```js
-// Antes de qualquer gravação de produto:
-const { valid, normalized } = await skuValidator.validate(sku);
-if (!valid) throw new Error(`SKU inválido: ${sku}`);
-// Usar sempre o `normalized` para gravar
-```
-
-### 3. Padrão de resposta das rotas Express
-```js
-// Sucesso
-res.json({ success: true, data: resultado });
-
-// Erro operacional (ex: SKU não encontrado)
-res.status(400).json({ success: false, error: 'SKU não encontrado', code: 'SKU_NOT_FOUND' });
-
-// Erro de autenticação
-res.status(401).json({ success: false, error: 'Não autorizado', code: 'UNAUTHORIZED' });
-
-// Erro de servidor — nunca expor stack trace ao cliente
-res.status(500).json({ success: false, error: 'Erro interno', code: 'INTERNAL_ERROR' });
-```
-
-### 4. Nomenclatura
-- Variáveis e funções: `camelCase`
-- Componentes React: `PascalCase`
-- Arquivos de componentes: `PascalCase.jsx`
-- Arquivos de rotas e utils: `kebab-case.js`
-- Collections Firestore: `camelCase` plural (`orders`, `products`, `purchases`)
-- Campos do Firestore: `camelCase`
-
-### 5. Prefixos de rotas
-```
-/bling/*   → integração com Bling ERP
-/admin/*   → configurações e catálogo (role: admin)
-/compras/* → gestão de estoque e pedidos (role: operator)
-/auth/*    → autenticação e gestão de usuários
-```
-
----
-
-## 🔄 Status da Migração React
-
-**Migração completa!** (Abril/2026)
-
-Todas as telas HTML legado foram removidas. O projeto agora é 100% React SPA com:
-
-| Página | Rota | Status |
-|--------|------|--------|
-| Pedidos | `/expedicao/pedidos` | ✅ Ativa |
-| Financeiro | `/financeiro/despesas` | ✅ Ativa |
-| Catálogo Pro | `/catalogo/produtos` | ✅ Ativa |
-| Automação | `/catalogo/automacao` | ✅ Ativa |
-| Compras | `/compras` | ✅ Ativa |
-| Admin (Config) | `/admin/config` | ✅ Ativa |
-
-### Convenções atuais:
-- Todos os componentes usam **Tailwind CSS** (sem CSS custom)
-- `BrowserRouter` com `basename` dinâmico (dev: `/`, prod: `/spa/`)
-- Auth via `usePerfil()` hook com `onAuthStateChanged` do Firebase
-- Vite dev proxy roteia `/api`, `/bling`, `/auth`, `/admin` para backend:8080
-
----
-
-## ⚙️ Comandos de Desenvolvimento
-
+**Run both servers for development (separate terminals):**
 ```bash
-# Backend (na pasta backend/)
-npm install
-npm start                  # Inicia em localhost:8080
+# Backend (port 8080, with auto-reload)
+cd backend && npm run dev
 
-# Frontend (na pasta frontend/)
-npm install
-npm run dev               # Vite dev server em localhost:5173 (proxy para :8080)
-npm run build             # Build para production (output: backend/public/spa/)
-
-# Em produção (Railway):
-# Backend serve tanto SPA quanto APIs
-# - /spa/* → frontend (React SPA)
-# - /api/* → endpoints da API
-# - /bling/* → integração Bling
-# - /admin/* → rotas admin
+# Frontend (port 5173, proxies to backend)
+cd frontend && npm run dev
 ```
 
-### Variáveis de ambiente necessárias (.env)
-```
-# Firebase (escolha um dos dois formatos)
-FIREBASE_SERVICE_ACCOUNT_JSON={...}  ou  FIREBASE_SERVICE_ACCOUNT_PATH=keys/firebase-service-account.json
-ADMIN_RESET_TOKEN=
-
-# Bling OAuth
-BLING_CLIENT_ID=
-BLING_CLIENT_SECRET=
-BLING_REDIRECT_URI=https://seu-dominio.com/bling/callback
-
-# Cloudinary (para upload de imagens)
-CLOUDINARY_CLOUD_NAME=
-CLOUDINARY_API_KEY=
-CLOUDINARY_API_SECRET=
-
-# API Keys
-ANTHROPIC_API_KEY=
-TOKEN_SECRET=
+**Build for production:**
+```bash
+npm run build   # Builds frontend → backend/public/spa, then installs backend deps
+npm start       # Starts backend serving SPA at /spa
 ```
 
----
+## Architecture
 
-## 📝 Log de Evolução do Projeto
+**Monorepo:** `/backend` (Node.js + Express) + `/frontend` (React + Vite SPA)
 
-> O Claude deve adicionar uma entrada aqui toda vez que fizer uma mudança arquitetural relevante.
+The frontend dev server at `:5173` proxies `/bling`, `/orders`, `/api`, `/auth` to the backend at `:8080`. Production builds to `backend/public/spa`, served by Express.
 
-| Data       | Versão | Mudança                                              | Motivo                            |
-|------------|--------|------------------------------------------------------|-----------------------------------|
-| 2025-01    | v1.0   | Documento inicial criado pelo Gemini                 | Onboarding e visão de produto     |
-| 2025-01    | v2.0   | CLAUDE.md expandido com schema, fluxos e comandos    | Preparar para Claude Code         |
-| 2026-04    | v2.1   | Migração React completa + Bling API v3 atualizada   | Remover legado, estabilizar auth  |
-|            |        | - Deletadas 15 páginas HTML legado                   |                                   |
-|            |        | - Bling API: www.bling.com.br → api.bling.com.br     |                                   |
-|            |        | - Adicionado retry 429 em blingFetch()               |                                   |
-|            |        | - Cloudinary validado e integrado                    |                                   |
-|            |        | - Relatório técnico criado (RELATORIO_TECNICO.md)    |                                   |
+**Migration complete (April/2026):** All vanilla HTML/JS pages have been migrated to React SPA. The project is now 100% React at `/spa/*`.
 
----
+### Modules
 
-## 🚫 O que o Claude NUNCA deve fazer
+| Module | React Pages | Backend |
+|--------|-------------|---------|
+| Expedição | `pages/expedicao/` (BlingPedidos, PedidosDoDia, GestaoInsumos, Compras) | `server.js`, `public/bling_routes.js` |
+| Catálogo | `pages/catalogo/` (CatalogoPro, AdminProdutos, ImageStudio, ImportarCSV, AutomacaoCadastro) | `routes/catalogo.js` |
+| Financeiro | `pages/financeiro/` (PainelFinanceiro, GestaoDespesas, GestaoMargem, Contas) | `/api/fin-despesas` via Firestore (migrado de Google Sheets) |
+| Admin/Sistema | `pages/sistema/ConfiguracoesSistema.jsx` | `routes/tenants.js`, `routes/tenantProvisioning.js` |
 
-1. Criar query no Firestore sem filtro de `tenantId`
-2. Gravar um produto sem validar o SKU via `sku-validator.js`
-3. Expor `accessToken` ou `refreshToken` do Bling em respostas de API
-4. Remover uma tela legada sem ter o equivalente React testado
-5. Criar um novo campo no Firestore sem seguir o schema definido acima
-6. Fazer fetch direto para a Bling API fora do `bling-client.js`
-7. Commitar variáveis de ambiente reais (apenas `.env.example`)
+### Critical Operation Flow
 
----
+```
+Bling NF (nota fiscal) → POST /bling/clonar → orders/{id} in Firestore
+                                                    ↓
+                                        PedidosDoDia.jsx (picking queue)
+                                                    ↓
+                                        Print DANFE → scan barcode → print shipping label
+```
 
-## ✅ Checklist antes de qualquer commit
+`PedidosDoDia.jsx` is the core daily operation — handle with extreme care when modifying.
 
-- [ ] A query do Firestore tem `tenantId` no path ou no `.where()`?
-- [ ] SKUs foram validados antes de gravar?
-- [ ] A rota nova tem `requireFirebaseAuth` e `requireRole`?
-- [ ] A resposta segue o padrão `{ success, data/error, code }`?
-- [ ] Novos campos do Firestore foram adicionados ao schema neste arquivo?
-- [ ] O log de evolução foi atualizado?
+### Multi-Tenancy
+
+- `tenantId` is **always** extracted from Firebase custom claims (never from request body or query)
+- Every backend protected route uses `requireFirebaseAuth` middleware (`backend/middleware/requireFirebaseAuth.js`)
+- `req.auth = { uid, tenantId, role, email }` is available after middleware
+- Roles: `admin`, `operator`, `financeiro`, `catalogo`, `vendas`
+
+**Auth flow:** `signInWithEmailAndPassword` → `POST /auth/provision { tenantId }` → backend sets custom claims → `getIdToken(true)` refreshes token with `tenantId` + `role`
+
+### Firestore Structure
+
+```
+tenants/{tenantId}/members/{uid}     ← authorized users (role)
+tenants/{tenantId}/audit_logs/{id}   ← backend-written audit trail
+
+bling_tokens/main                    ← Bling OAuth2 tokens (single account currently)
+ml_tokens/                           ← Mercado Livre OAuth2 tokens
+products/{sku}                       ← base catalog (synced from Bling)
+product_overrides/{sku}              ← local enrichment (photos, bin location, notes, packaging)
+orders/{id}                          ← internal separation/picking orders
+fin_compras/{id}                     ← purchase orders
+fin_parcelas/{id}                    ← payment installments
+fin_despesas/{id}                    ← expenses (migrated from Google Sheets Apr/2026)
+embalagens/                          ← packaging inventory
+```
+
+### API Integrations
+
+**Bling API v3 (OAuth2):**
+- Token stored in `bling_tokens/main` (Firestore), auto-refreshed with 5-min buffer
+- Config: `BLING_CLIENT_ID`, `BLING_CLIENT_SECRET`, `BLING_REDIRECT_URI`
+- Token management: `blingEnsureToken()` in `backend/public/bling_routes.js`
+- Auth endpoints: `GET /bling/auth`, `GET /bling/callback`, `GET /bling/status`
+- Base URL: `https://api.bling.com.br/Api/v3` (migrated from `www.bling.com.br` Apr/2026)
+- Image payload: `{ midia: { imagens: { externas: [{ link: url }] } } }`
+
+**Mercado Livre (OAuth2):**
+- Token stored in `ml_tokens/` (Firestore)
+- Marketplace detection from order origin/customer name patterns
+
+**Google Sheets (Financeiro — legacy):**
+- Endpoints `/api/despesas` mantidos para retrocompatibilidade
+- Novos dados vão para Firestore `fin_despesas`
+
+### Frontend Patterns
+
+**State management:** Custom hooks + Firestore real-time listeners (no Redux/Zustand)
+```javascript
+// Pattern used throughout: custom hook with onSnapshot
+export function useCompras() {
+  const [data, setData] = useState([]);
+  useEffect(() => {
+    const unsubscribe = onSnapshot(query(...), snap => setData(...));
+    return unsubscribe;
+  }, []);
+  return { data, ... };
+}
+```
+
+**Auth token in API calls:** Use `getAuthToken()` from `src/utils/getAuthToken.js`
+
+**Styling:** Tailwind CSS only — no CSS files per component, no styled-components. Dark mode via `class` strategy. Custom brand colors and animations defined in `frontend/tailwind.config.js`.
+
+**Themes:** AppShell implements `dark`/`uber`/`marvel` themes via CSS custom properties on `<body>`.
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `backend/server.js` | Main Express app (large — core API + static serving) |
+| `backend/public/bling_routes.js` | Bling OAuth2 + NF/order logic |
+| `backend/routes/catalogo.js` | Product CRUD + Bling sync |
+| `backend/middleware/requireFirebaseAuth.js` | Auth + tenant extraction |
+| `frontend/src/App.jsx` | All route definitions |
+| `frontend/src/firebase.js` | Firebase client init |
+| `frontend/src/utils/getAuthToken.js` | Auth headers helper |
+| `CONTEXTO.md` | Master technical context in Portuguese (read this for business logic) |
+| `backend/.cursorrules` | Additional development conventions |
+
+## Environment Setup
+
+**Backend** (`backend/.env`): `TOKEN_SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON` or `FIREBASE_SERVICE_ACCOUNT_PATH`, `BLING_CLIENT_ID`, `BLING_CLIENT_SECRET`, `BLING_REDIRECT_URI`, `ANTHROPIC_API_KEY`
+
+**Frontend** (`frontend/.env`): `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`
+
+## Conventions
+
+- File headers with `@file`, `@module`, `@description`, `@version`, `@date`, `@changelog` are used in existing files — maintain the pattern when modifying them
+- No TypeScript — pure JavaScript/JSX
+- No test suite configured — manual testing via UI
+- React hooks only (no class components)
+- Feature-based folder structure target: `/features/orders/`, `/features/auth/`, etc. (migration in progress from flat `pages/` structure)
+- All UI copy in Portuguese (pt-BR)
+
+## Dev Squad (Slash Commands)
+
+| Command | Role |
+|---------|------|
+| `/tech-lead` | Orchestrates full feature delivery — start here for any new task |
+| `/dev-backend` | Senior Node/Express/Firestore developer |
+| `/dev-frontend` | Senior React/Tailwind developer |
+| `/reviewer` | Code review — security, bugs, patterns |
+| `/qa` | QA checklist per module before every PR |
+| `/expedicao` | Expedição module specialist |
+| `/financeiro` | Financeiro module specialist |
+| `/catalogo` | Catálogo module specialist |
+| `/admin-hub` | Admin/Sistema module specialist |
+
+## Security Rules (Never Violate)
+
+1. `tenantId` ALWAYS from `req.auth.tenantId` — never from `req.body` or `req.query`
+2. Every protected route MUST use `requireFirebaseAuth` middleware
+3. Never expose Bling tokens in API responses
+4. Validate all user inputs before saving to Firestore
+5. Never commit real `.env` files — only `.env.example`
