@@ -59,7 +59,7 @@ export function FiltrosBar({
           <select
             value={mesAtivo}
             onChange={e => onMes(e.target.value)}
-            className="bg-transparent text-slate-100 text-sm font-bold px-2 py-1 outline-none cursor-pointer min-w-[100px] text-center [color-scheme:dark]"
+            className="bg-slate-900 text-slate-100 text-sm font-bold px-2 py-1 outline-none cursor-pointer min-w-[100px] text-center [color-scheme:dark]"
           >
             {meses.map(m => (
               <option key={m.label} value={m.label}>{labelBonito(m.label)}</option>
