@@ -14,7 +14,7 @@ import {
   Package, Image, Tag, Weight, Ruler, DollarSign, Barcode,
   AlertTriangle, CheckCircle2, Circle, ExternalLink, RefreshCw,
   Upload, Star, Eye, MapPin, Layers, Filter, ChevronDown, ChevronUp,
-  Boxes, FlaskConical, Zap, TrendingUp, Sparkles,
+  Boxes, FlaskConical, Zap, TrendingUp, Sparkles, Loader2,
 } from 'lucide-react';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -232,10 +232,54 @@ function StudioPanel({ produto, onClose }) {
   const navigate = useNavigate();
   const score = calcScore(produto);
 
+  // Bling images
+  const [blingImgs, setBlingImgs] = useState([]);
+  const [loadingBling, setLoadingBling] = useState(false);
+  const [importing, setImporting] = useState(null);
+
   const fotos = [
     ...(produto.images      || []),
     ...(produto.stockPhotos || []),
   ].filter(Boolean);
+
+  async function fetchBlingImages() {
+    setLoadingBling(true); setBlingImgs([]);
+    try {
+      const ean = produto.ean || produto.eanBox;
+      const q = ean ? `ean=${encodeURIComponent(ean)}` : `sku=${encodeURIComponent(produto.sku)}`;
+      const token = await getAuthToken();
+      const res = await fetch(`/bling/product-images?${q}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setBlingImgs(data.images || []);
+    } catch {}
+    setLoadingBling(false);
+  }
+
+  // Auto-fetch Bling images when fotos tab opens
+  useEffect(() => {
+    if (tab === 'fotos' && !blingImgs.length && !loadingBling) fetchBlingImages();
+  }, [tab]); // eslint-disable-line
+
+  async function importBlingImage(url) {
+    setImporting(url);
+    try {
+      const token = await getAuthToken();
+      const imgRes = await fetch(url);
+      const blob = await imgRes.blob();
+      const fd = new FormData();
+      fd.append('file', blob, 'bling_import.jpg');
+      fd.append('kind', 'stock');
+      const res = await fetch(`/admin/save-photo-cloudinary/${encodeURIComponent(produto.sku)}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+      });
+      const data = await res.json();
+      if (data.ok) alert('Imagem importada do Bling para o sistema local!');
+      else alert(data.error || 'Erro no import');
+    } catch (e) { alert('Erro: ' + e.message); }
+    setImporting(null);
+  }
 
   async function handlePhotoUpload(e) {
     const file = e.target.files?.[0];
@@ -377,26 +421,56 @@ function StudioPanel({ produto, onClose }) {
         {/* ── FOTOS ── */}
         {tab === 'fotos' && (
           <div className="p-4 space-y-4">
-            {fotos.length > 0
-              ? (
-                <div className="grid grid-cols-2 gap-2">
+            {/* Fotos locais (sistema) */}
+            <div>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Fotos do Sistema</p>
+              {fotos.length > 0 ? (
+                <div className="grid grid-cols-3 gap-1.5">
                   {fotos.map((url, i) => (
                     <a key={i} href={url} target="_blank" rel="noreferrer" className="block">
-                      <img
-                        src={url} alt={`foto ${i + 1}`}
-                        className="w-full aspect-square object-contain rounded-lg bg-slate-800 p-1 hover:opacity-80 transition-opacity"
-                      />
+                      <img src={url} alt={`foto ${i + 1}`}
+                        className="w-full aspect-square object-contain rounded-lg bg-slate-800 p-0.5 hover:opacity-80 transition-opacity border border-white/[0.06]" />
                     </a>
                   ))}
                 </div>
-              )
-              : (
-                <div className="flex flex-col items-center justify-center py-8 gap-3 text-slate-600">
-                  <Image size={36} />
-                  <p className="text-xs">Nenhuma foto cadastrada</p>
+              ) : (
+                <p className="text-[11px] text-slate-600 py-2">Nenhuma foto local</p>
+              )}
+            </div>
+
+            {/* Fotos do Bling */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Fotos do Bling</p>
+                <button onClick={fetchBlingImages} disabled={loadingBling}
+                  className="text-[10px] text-blue-400 hover:text-blue-300 disabled:opacity-40 flex items-center gap-1">
+                  {loadingBling ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
+                  Atualizar
+                </button>
+              </div>
+              {loadingBling ? (
+                <div className="flex justify-center py-4"><Loader2 size={18} className="animate-spin text-blue-400" /></div>
+              ) : blingImgs.length > 0 ? (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {blingImgs.map((img, i) => (
+                    <div key={i} className="relative group">
+                      <img src={img.url} alt="" className="w-full aspect-square object-contain rounded-lg bg-slate-800 p-0.5 border border-blue-500/20" />
+                      <button onClick={() => importBlingImage(img.url)}
+                        disabled={importing === img.url}
+                        className="absolute inset-0 bg-blue-500/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center"
+                        title="Importar para o sistema">
+                        {importing === img.url
+                          ? <Loader2 size={16} className="animate-spin text-white" />
+                          : <Upload size={16} className="text-white" />
+                        }
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              )
-            }
+              ) : (
+                <p className="text-[11px] text-slate-600 py-2">Nenhuma imagem no Bling</p>
+              )}
+            </div>
 
             {/* Image Studio CTA */}
             <button

@@ -3,8 +3,8 @@ const router  = express.Router();
 const axios   = require('axios');
 const { db }  = require('../config/firebase');
 
-const BLING_API_BASE  = 'https://www.bling.com.br/Api/v3';
-const BLING_TOKEN_URL = 'https://www.bling.com.br/Api/v3/oauth/token';
+const BLING_API_BASE  = 'https://api.bling.com.br/Api/v3';
+const BLING_TOKEN_URL = 'https://api.bling.com.br/Api/v3/oauth/token';
 
 // ── Token helper (auto-refresh) ───────────────────────────────────────────────
 async function blingEnsureToken() {

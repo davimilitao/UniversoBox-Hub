@@ -96,8 +96,6 @@ export function usePerfil() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-
-      unsub();
     });
 
     return () => { cancelled = true; unsub(); };

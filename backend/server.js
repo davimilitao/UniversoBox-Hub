@@ -62,30 +62,14 @@ app.use('/spa', express.static(SPA_DIR));
 
 app.get('/spa/*', (req, res) => res.sendFile(path.join(SPA_DIR, 'index.html')));
 
-app.get('/login', (req, res) => res.redirect('/spa/login'));
-app.get('/dashboard/:tenantId', (req, res) =>
-  res.redirect(`/spa/dashboard/${req.params.tenantId}`)
-);
-// Redireciona rotas React para o SPA
-app.get('/financeiro/*', (req, res) => res.redirect('/spa' + req.path));
-app.get('/expedicao/*',  (req, res) => res.redirect('/spa' + req.path));
+// ❌ Removido: redirects de /login, /financeiro/*, /expedicao/* causavam erro em dev
+// Em produção: Vite já buildou com base '/spa/' — paths estão corretos
+// Em dev: Vite serve com basename '/' — redirects quebram a navegação
 
 app.use(express.static(PUBLIC_DIR));
-app.get('/', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
-app.get('/manual', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manual.html')));
-app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')));
-app.get('/pedidos', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'pedidos.html')));
-app.get('/embalagens', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'embalagens.html')));
-app.get('/importar', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'importar.html')));
-app.get('/catalogo', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'catalogo.html')));
-app.get('/compras', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'compras.html')));
-app.get('/financas', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'financas.html')));
-app.get('/bling',   (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'bling.html')));
-app.get('/config',  (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'config.html')));
-app.get('/cadastrar', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'cadastro-produto.html')));
-app.get('/enriquecer-xml', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'enriquecer-xml.html')));
-app.get('/ml-dashboard', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'ml-dashboard.html')));
-app.get('/produto-studio', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'produto-studio.html')));
+
+// Redireciona / para o SPA React
+app.get('/', (req, res) => res.redirect('/spa/login'));
 
 
 // ✅ uploads locais (fotos reais do estoque)
@@ -1336,6 +1320,11 @@ cloudinary.config({
   api_secret:  process.env.CLOUDINARY_API_SECRET,
 });
 
+// Validar credenciais do Cloudinary
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.warn('⚠️  Cloudinary não configurado — configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET no .env');
+}
+
 // Multer em memória (não salva disco) — só para essa rota
 const uploadMemory = multer({
   storage: multer.memoryStorage(),
@@ -1348,6 +1337,11 @@ app.post('/admin/save-photo-cloudinary/:sku',
   uploadMemory.single('file'),
   async (req, res, next) => {
     try {
+      // Verificar credenciais Cloudinary
+      if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+        return res.status(500).json({ error: 'Cloudinary não configurado — adicione CLOUDINARY_* ao .env' });
+      }
+
       const tenantId = req.auth.tenantId;
       const sku = safeTrim(req.params.sku);
       if (!sku)       return res.status(400).json({ error: 'missing sku' });
@@ -1620,7 +1614,8 @@ const SHEET_NAME = 'Despesas'; // Nome exato da aba na sua planilha
 // --- Rota GET: Ler despesas da planilha ---
 app.get('/api/despesas', requireFirebaseAuth, async (req, res, next) => {
   try {
-    if (!SPREADSHEET_ID) return res.status(500).json({ error: 'SPREADSHEET_ID não configurado' });
+    // Se SPREADSHEET_ID não está configurado, retorna lista vazia (Firestore é a fonte padrão)
+    if (!SPREADSHEET_ID) return res.json({ items: [] });
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
@@ -2200,9 +2195,9 @@ app.get('/api/margem', requireFirebaseAuth, async (req, res, next) => {
 const BLING_CLIENT_ID     = process.env.BLING_CLIENT_ID     || '';
 const BLING_CLIENT_SECRET = process.env.BLING_CLIENT_SECRET || '';
 const BLING_REDIRECT_URI  = process.env.BLING_REDIRECT_URI  || '';
-const BLING_TOKEN_URL     = 'https://www.bling.com.br/Api/v3/oauth/token';
-const BLING_AUTH_URL      = 'https://www.bling.com.br/Api/v3/oauth/authorize';
-const BLING_API_BASE      = 'https://www.bling.com.br/Api/v3';
+const BLING_TOKEN_URL     = 'https://api.bling.com.br/Api/v3/oauth/token';
+const BLING_AUTH_URL      = 'https://api.bling.com.br/Api/v3/oauth/authorize';
+const BLING_API_BASE      = 'https://api.bling.com.br/Api/v3';
 
 // ── Mercado Livre OAuth constants ─────────────────────────────────────────────
 const ML_CLIENT_ID     = process.env.ML_CLIENT_ID     || '';
@@ -2245,12 +2240,19 @@ async function blingEnsureToken() {
   }
   return tok.accessToken;
 }
-async function blingFetch(path) {
+async function blingFetch(path, retryCount = 0) {
   const token = await blingEnsureToken();
   const res = await fetch(`${BLING_API_BASE}${path}`, {
     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
   });
   if (res.status === 401) throw new Error('bling_not_authorized');
+  if (res.status === 429 && retryCount < 3) {
+    // Rate limit — retry com backoff exponencial (1s, 2s, 4s)
+    const delay = Math.pow(2, retryCount) * 1000;
+    console.warn(`[blingFetch] 429 rate limit — retry em ${delay}ms (tentativa ${retryCount + 1}/3)`);
+    await new Promise(r => setTimeout(r, delay));
+    return blingFetch(path, retryCount + 1);
+  }
   const text = await res.text();
   if (!res.ok) throw new Error(`Bling ${res.status}: ${text.slice(0, 200)}`);
   return JSON.parse(text);
@@ -2426,6 +2428,161 @@ app.get('/produtos/categorias-bling', async (req, res, next) => {
     // Retorna lista vazia se Bling falhar — não bloqueia a tela
     console.warn('[GET /produtos/categorias-bling]', err.message);
     res.json({ ok: true, items: [], erro: err.message });
+  }
+});
+
+// ── Alias API: Categorias do Catálogo (aponta para /produtos/categorias-bling) ──
+app.get('/api/catalogo/categorias', async (req, res, next) => {
+  try {
+    const data = await blingFetch('/categorias/produtos?pagina=1&limite=100');
+    const items = (data?.data || []).map(c => ({
+      id:   c.id,
+      nome: c.descricao || c.nome || '',
+    }));
+    // Frontend espera array direto: Array.isArray(d)
+    res.json(items);
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') {
+      return res.status(401).json({ error: 'bling_not_authorized' });
+    }
+    console.warn('[GET /api/catalogo/categorias]', err.message);
+    res.json([]);
+  }
+});
+
+// ── Buscar produto COMPLETO no Bling por SKU ou EAN ─────────────────────────
+// Frontend (AutomacaoCadastro) espera objeto produto direto, não array
+app.get('/api/catalogo/buscar', async (req, res, next) => {
+  const q = (req.query.q || '').trim();
+  if (!q || q.length < 2) {
+    return res.status(400).json({ error: 'Informe SKU ou EAN para buscar' });
+  }
+  try {
+    // 1) Busca listagem por código (SKU)
+    let listData = await blingFetch(`/produtos?codigo=${encodeURIComponent(q)}&limite=1`);
+    let produtos = listData?.data || [];
+
+    // 2) Se não achou por código, tenta por GTIN (EAN)
+    if (!produtos.length) {
+      listData = await blingFetch(`/produtos?gtin=${encodeURIComponent(q)}&limite=1`);
+      produtos = listData?.data || [];
+    }
+
+    // 3) Se não achou, tenta busca genérica
+    if (!produtos.length) {
+      listData = await blingFetch(`/produtos?pesquisa=${encodeURIComponent(q)}&limite=1`);
+      produtos = listData?.data || [];
+    }
+
+    if (!produtos.length) {
+      return res.status(404).json({ error: 'Produto não encontrado' });
+    }
+
+    // 4) Busca detalhes completos do primeiro resultado
+    const detail = await blingFetch(`/produtos/${produtos[0].id}`);
+    const item = detail?.data || {};
+
+    // 5) Extrai imagens (Bling retorna em formatos variados)
+    const imgList = item.midia?.internas?.link || item.midia?.imagens || item.imagens || [];
+    const imagens = (Array.isArray(imgList) ? imgList : [imgList])
+      .map(img => typeof img === 'string' ? img : (img?.link || img?.url || ''))
+      .filter(u => u && /^https?:\/\//i.test(u));
+
+    // 6) Monta objeto no formato que o frontend espera
+    const produto = {
+      id:              item.id,
+      nome:            item.nome || '',
+      codigo:          item.codigo || '',
+      gtin:            item.gtin || '',
+      marca:           item.marca?.nome || item.marca || '',
+      ncm:             item.classFiscal || item.ncm || '',
+      situacao:        item.situacao || 'A',
+      tipo:            item.tipo || 'P',
+      origem:          item.origem ?? 0,
+      preco:           item.preco ?? item.precoCusto ?? 0,
+      descricaoCurta:  item.descricaoCurta || '',
+      descricao:       item.descricao || '',
+      pesoLiq:         item.pesoLiquido ?? item.pesoLiq ?? '0.000',
+      pesoBruto:       item.pesoBruto ?? '0.000',
+      largura:         item.dimensoes?.largura ?? item.largura ?? '0',
+      altura:          item.dimensoes?.altura ?? item.altura ?? '0',
+      profundidade:    item.dimensoes?.profundidade ?? item.profundidade ?? '0',
+      categoria:       item.categoria ? { id: item.categoria.id, nome: item.categoria.descricao || item.categoria.nome || '' } : null,
+      imagens,
+    };
+
+    console.log(`[GET /api/catalogo/buscar] q=${q} → id=${produto.id} sku=${produto.codigo} imgs=${imagens.length}`);
+    res.json(produto);
+
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') {
+      return res.status(401).json({ error: 'bling_not_authorized' });
+    }
+    console.error('[GET /api/catalogo/buscar]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /api/catalogo/produto/:id  — salva produto editado no Bling ─────────
+// blingFetch só suporta GET, então usamos fetch direto para PUT
+app.put('/api/catalogo/produto/:id', requireFirebaseAuth, async (req, res, next) => {
+  const produtoId = req.params.id;
+  const body = req.body || {};
+
+  if (!produtoId) {
+    return res.status(400).json({ ok: false, error: 'ID do produto obrigatório' });
+  }
+
+  try {
+    const token = await blingEnsureToken();
+
+    // Monta payload para Bling (campos aceitos pela API v3)
+    const payload = {};
+    if (body.nome !== undefined)           payload.nome = body.nome;
+    if (body.descricao !== undefined)      payload.descricao = body.descricao;
+    if (body.descricaoCurta !== undefined) payload.descricaoCurta = body.descricaoCurta;
+    if (body.preco !== undefined)          payload.preco = Number(body.preco) || 0;
+    if (body.gtin !== undefined)           payload.gtin = body.gtin;
+    if (body.marca !== undefined)          payload.marca = body.marca;
+
+    // Imagens: Bling aceita URLs externas via midia.imagens.externas
+    if (body.imagens && Array.isArray(body.imagens)) {
+      const urls = body.imagens.filter(u => u && typeof u === 'string');
+      if (urls.length) {
+        payload.midia = {
+          imagens: { externas: urls.map(url => ({ link: url })) }
+        };
+      }
+    }
+
+    const updateRes = await fetch(`${BLING_API_BASE}/produtos/${produtoId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await updateRes.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch {}
+
+    if (!updateRes.ok) {
+      console.error(`[PUT /api/catalogo/produto/${produtoId}] Bling ${updateRes.status}: ${text.slice(0, 300)}`);
+      throw new Error(data?.error?.message || `Bling retornou ${updateRes.status}`);
+    }
+
+    console.log(`[PUT /api/catalogo/produto/${produtoId}] OK`);
+    res.json({ ok: true, message: 'Produto atualizado no Bling', produto: data?.data });
+
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') {
+      return res.status(401).json({ ok: false, error: 'bling_not_authorized' });
+    }
+    console.error(`[PUT /api/catalogo/produto/${produtoId}]`, err.message);
+    res.status(400).json({ ok: false, error: err.message });
   }
 });
 
@@ -2782,6 +2939,9 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
 
 // ── DANFE PDF (proxy → QZ Tray) ──────────────────────────────────
 // GET /bling/danfe/:id  → { ok, pdf: base64 } ou { ok, pdfUrl }
+// Query params:
+//   ?tipo=simplificado    → DANFE Simplificada (etiqueta 10x15cm)
+//   ?tipo=completa        → DANFE completa (A4) [padrão]
 //
 // IMPORTANTE: NÃO enviar Accept: application/pdf — o Bling V3 retorna
 // JSON com URL do PDF ou faz redirect. O header errado causa 404.
@@ -2790,6 +2950,7 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
 //         3) se vier JSON → extrai URL e faz proxy do PDF
 //         4) se vier binário PDF direto → converte para base64
 app.get('/bling/danfe/:id', async (req, res, next) => {
+  const tipoParam = req.query.tipo || 'completa'; // padrão = completa (A4)
   // Sanitiza: remove tudo que não for dígito (ex: traços, espaços, letras)
   const nfId = String(req.params.id).replace(/\D/g, '');
   if (!nfId) return res.status(400).json({ error: 'id_invalido', message: 'ID da NF deve ser numérico.' });
@@ -2857,7 +3018,7 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
         if (linkPdf) {
           console.log(`[danfe/${nfId}] linkPDF=${linkPdf}`);
           const result = await downloadPdf(linkPdf, 'linkPDF');
-          if (result) return res.json({ ok: true, ...result, nfId });
+          if (result) return res.json({ ok: true, ...result, nfId, tipo: tipoParam });
         }
 
         // Tenta linkDanfe — normalmente é viewer HTML (doc.view.php)
@@ -2870,16 +3031,16 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
           if (downloadUrl) {
             console.log(`[danfe/${nfId}] tentando download URL: ${downloadUrl}`);
             const result = await downloadPdf(downloadUrl, 'doc.download.php');
-            if (result) return res.json({ ok: true, ...result, nfId });
+            if (result) return res.json({ ok: true, ...result, nfId, tipo: tipoParam });
           }
 
           // Tenta o viewer direto (às vezes retorna PDF)
           const result = await downloadPdf(linkViewer, 'linkDanfe_direto');
-          if (result) return res.json({ ok: true, ...result, nfId });
+          if (result) return res.json({ ok: true, ...result, nfId, tipo: tipoParam });
 
           // É HTML viewer — retorna URL para o browser imprimir
           console.log(`[danfe/${nfId}] linkDanfe é HTML viewer — retornando pdfUrl`);
-          return res.json({ ok: true, pdfUrl: linkViewer, nfId, via: 'linkDanfe_browser' });
+          return res.json({ ok: true, pdfUrl: linkViewer, nfId, tipo: tipoParam, via: 'linkDanfe_browser' });
         }
 
         // chaveAcesso → tenta serviço público da Receita Federal
@@ -2888,7 +3049,7 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
           console.log(`[danfe/${nfId}] tentando SEFAZ com chave ${chave.slice(0,10)}…`);
           const sefazUrl = `https://www.nfe.fazenda.gov.br/portal/downloadNFe.aspx?chave=${chave}&tipoDownload=2`;
           const result = await downloadPdf(sefazUrl, 'sefaz_chave');
-          if (result) return res.json({ ok: true, ...result, nfId });
+          if (result) return res.json({ ok: true, ...result, nfId, tipo: tipoParam });
         }
       } else {
         const errTxt = await detResp.text().catch(() => '');
@@ -2900,8 +3061,13 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
 
     // ══════════════════════════════════════════════════════════════════════
     // PASSO 2 — Endpoint /nfe/{id}/danfe com redirect manual
+    // Adiciona ?tipo=simplificado se solicitado (DANFE etiqueta 10x15cm)
     // ══════════════════════════════════════════════════════════════════════
-    const danfeResp = await fetch(`${BLING_API_BASE}/nfe/${nfId}/danfe`, {
+    const danfeUrl = tipoParam === 'simplificado'
+      ? `${BLING_API_BASE}/nfe/${nfId}/danfe?tipo=simplificado`
+      : `${BLING_API_BASE}/nfe/${nfId}/danfe`;
+
+    const danfeResp = await fetch(danfeUrl, {
       headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json, */*;q=0.8' },
       redirect: 'manual',
     });
@@ -2924,7 +3090,7 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
       // PDF binário
       if (dCt.includes('pdf') || dCt.includes('octet')) {
         const buf = await danfeResp.arrayBuffer();
-        return res.json({ ok: true, pdf: Buffer.from(buf).toString('base64'), nfId, via: 'binary' });
+        return res.json({ ok: true, pdf: Buffer.from(buf).toString('base64'), nfId, tipo: tipoParam, via: 'binary' });
       }
       // JSON com URL
       const raw = await danfeResp.text();
@@ -2937,8 +3103,8 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
         data?.url || data?.link || data?.danfe || null;
       if (pdfUrl) {
         const result = await downloadPdf(pdfUrl, 'json_url');
-        if (result) return res.json({ ok: true, ...result, nfId });
-        return res.json({ ok: true, pdfUrl, nfId, via: 'json_url_fallback' });
+        if (result) return res.json({ ok: true, ...result, nfId, tipo: tipoParam });
+        return res.json({ ok: true, pdfUrl, nfId, tipo: tipoParam, via: 'json_url_fallback' });
       }
       // ZPL ou texto desconhecido
       return res.status(422).json({ error: 'danfe_json_sem_url', rawBody: raw.slice(0, 400) });
@@ -2968,30 +3134,58 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
 
 // ── DEBUG: testa o endpoint de DANFE para um ID específico ───────
 // GET /bling/debug/danfe/:id  — retorna raw response do Bling
+// Query params:
+//   ?tipo=simplificado  — testa DANFE Simplificada (etiqueta 10x15cm)
+//   ?tipo=completa      — testa DANFE completa (A4) [padrão]
 app.get('/bling/debug/danfe/:id', async (req, res, next) => {
   try {
     const token = await blingEnsureToken();
     const nfId  = req.params.id;
+    const tipo  = req.query.tipo || 'completa';
 
-    const results = {};
+    const results = { nfId, tipo_testado: tipo };
 
-    // Teste 1: sem Accept header
+    // Teste 1: DANFE (tipo padrão)
     try {
-      const r = await fetch(`${BLING_API_BASE}/nfe/${nfId}/danfe`, {
+      const danfeUrl = tipo === 'simplificado'
+        ? `${BLING_API_BASE}/nfe/${nfId}/danfe?tipo=simplificado`
+        : `${BLING_API_BASE}/nfe/${nfId}/danfe`;
+
+      const r = await fetch(danfeUrl, {
         headers: { 'Authorization': `Bearer ${token}` },
         redirect: 'manual',
       });
       const ct  = r.headers.get('content-type') || '';
       const loc = r.headers.get('location')     || '';
       const txt = await r.text().catch(() => '');
-      results.sem_accept = {
+      results.danfe_endpoint = {
         status: r.status,
         content_type: ct,
         location: loc,
         body_preview: txt.slice(0, 500),
+        url_testada: danfeUrl,
       };
-    } catch(e) { results.sem_accept = { erro: e.message }; }
+    } catch(e) { results.danfe_endpoint = { erro: e.message }; }
 
+    // Teste 2: GET /nfe/:id para verificar linkDanfe vs linkDanfeSimplificado
+    try {
+      const r = await fetch(`${BLING_API_BASE}/nfe/${nfId}`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+      });
+      if (r.ok) {
+        const data = await r.json().catch(() => ({}));
+        const nf = data?.data || data;
+        results.nfe_detalhe = {
+          numero: nf?.numero,
+          linkPDF: nf?.linkPDF ? nf.linkPDF.slice(0, 100) : null,
+          linkDanfeFull: nf?.linkDanfeFull ? nf.linkDanfeFull.slice(0, 100) : null,
+          linkDanfeSimplificado: nf?.linkDanfeSimplificado ? nf.linkDanfeSimplificado.slice(0, 100) : null,
+          linkDanfe: nf?.linkDanfe ? nf.linkDanfe.slice(0, 100) : null,
+        };
+      }
+    } catch(e) { results.nfe_detalhe = { erro: e.message }; }
+
+    // Teste antigo (mantém compatibilidade):
     // Teste 2: Accept: application/json
     try {
       const r = await fetch(`${BLING_API_BASE}/nfe/${nfId}/danfe`, {
@@ -3087,8 +3281,13 @@ app.get('/bling/product-images', async (req, res, next) => {
       try {
         const detail = await blingFetch(`/produtos/${p.id}`);
         const item = detail?.data || {};
-        const imagens = (item.imagens || item.midia?.imagens || [])
-          .map(img => img.link || img.url)
+        // Bling armazena imagens em vários formatos possíveis
+        const internas = (item.midia?.internas?.link || []);
+        const externas = (item.midia?.imagens?.externas || []);
+        const legado   = (item.imagens || []);
+        const allImgs  = [...internas, ...externas, ...legado];
+        const imagens = allImgs
+          .map(img => typeof img === 'string' ? img : (img.link || img.url))
           .filter(u => u && /^https?:\/\//i.test(u));
         imageResults.push({
           id:      item.id,
@@ -5045,12 +5244,19 @@ async function blingEnsureToken() {
   }
   return tok.accessToken;
 }
-async function blingFetch(path) {
+async function blingFetch(path, retryCount = 0) {
   const token = await blingEnsureToken();
   const res = await fetch(`${BLING_API_BASE}${path}`, {
     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
   });
   if (res.status === 401) throw new Error('bling_not_authorized');
+  if (res.status === 429 && retryCount < 3) {
+    // Rate limit — retry com backoff exponencial (1s, 2s, 4s)
+    const delay = Math.pow(2, retryCount) * 1000;
+    console.warn(`[blingFetch] 429 rate limit — retry em ${delay}ms (tentativa ${retryCount + 1}/3)`);
+    await new Promise(r => setTimeout(r, delay));
+    return blingFetch(path, retryCount + 1);
+  }
   const text = await res.text();
   if (!res.ok) throw new Error(`Bling ${res.status}: ${text.slice(0, 200)}`);
   return JSON.parse(text);
@@ -5293,6 +5499,96 @@ app.post('/bling/clonar', async (req, res, next) => {
 // ════════════════════════════════════════════════════════════════════════════
 // FIM — Enriquecer Produtos
 // ════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROXY DE IMAGEM — /admin/proxy-image?url=...
+// Resolve CORS: o browser não consegue fazer fetch em URLs externas (Bling S3,
+// Cloudinary de outro domínio). O backend baixa a imagem e devolve como buffer.
+// ══════════════════════════════════════════════════════════════════════════════
+app.get('/admin/proxy-image', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'url obrigatório' });
+  try {
+    const ext = url.split('?')[0].split('.').pop().toLowerCase();
+    const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' }[ext] || 'image/jpeg';
+    const r = await fetch(url, { headers: { 'User-Agent': 'UniversoBox-Hub/1.0' } });
+    if (!r.ok) return res.status(r.status).json({ error: `fetch remoto falhou: ${r.status}` });
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.set('Content-Type', mime);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Access-Control-Allow-Origin', '*');
+    res.send(buf);
+  } catch (e) {
+    console.error('[proxy-image]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INTELIGÊNCIA DO PRODUTO — /bling/produto-intel?sku=XPTO
+// Retorna: estoque atual + vendas 30 dias por canal de marketplace
+// Usa blingFetch (já definido no server.js)
+// ══════════════════════════════════════════════════════════════════════════════
+app.get('/bling/produto-intel', async (req, res) => {
+  const { sku } = req.query;
+  if (!sku) return res.status(400).json({ error: 'sku obrigatório' });
+  try {
+    // 1. Busca produto no Bling para obter o ID
+    const lista = await blingFetch(`/produtos?codigo=${encodeURIComponent(sku)}&limite=5`);
+    const match = (lista?.data || []).find(p =>
+      (p.codigo || '').toLowerCase() === sku.toLowerCase()
+    );
+    if (!match) return res.json({ ok: true, estoque: null, vendas30d: null, canais: [] });
+
+    const blingId = match.id;
+
+    // 2. Estoque em paralelo com pedidos 30 dias
+    const dataInicio = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const dataFim    = new Date().toISOString().slice(0, 10);
+
+    const [estoqueRes, pedidosRes] = await Promise.allSettled([
+      blingFetch(`/estoques/${blingId}`),
+      blingFetch(`/pedidos/vendas?dataInicial=${dataInicio}&dataFinal=${dataFim}&limite=100`),
+    ]);
+
+    // 3. Estoque
+    let estoque = null;
+    if (estoqueRes.status === 'fulfilled') {
+      const ed = estoqueRes.value?.data;
+      estoque = ed?.saldoFisico ?? ed?.saldoVirtual ?? null;
+    }
+
+    // 4. Vendas: filtra por SKU nos itens dos pedidos
+    const canaisMap = {};
+    let totalQty = 0;
+    if (pedidosRes.status === 'fulfilled') {
+      const pedidos = pedidosRes.value?.data || [];
+      for (const pedido of pedidos) {
+        const canal = pedido.canal?.descricao || pedido.canal?.nome || 'Outros';
+        const itens = pedido.itens || [];
+        for (const item of itens) {
+          const itemSku = item.codigo || item.produto?.codigo || '';
+          if (itemSku.toLowerCase() !== sku.toLowerCase()) continue;
+          const qty = Number(item.quantidade) || 0;
+          totalQty += qty;
+          canaisMap[canal] = (canaisMap[canal] || 0) + qty;
+        }
+      }
+    }
+
+    const canais = Object.entries(canaisMap)
+      .map(([nome, qty]) => ({ nome, qty }))
+      .sort((a, b) => b.qty - a.qty);
+
+    res.json({ ok: true, sku, blingId, estoque, vendas30d: totalQty, canais });
+  } catch (e) {
+    console.error('[/bling/produto-intel]', e.message);
+    if (e.message === 'bling_not_authorized') {
+      return res.status(401).json({ error: 'Bling não conectado' });
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ---------------- Errors ----------------
 app.use((err, req, res, next) => {

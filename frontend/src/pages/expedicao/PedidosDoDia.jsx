@@ -108,10 +108,10 @@ async function qzConnect() {
 }
 
 async function printDanfe(blingNfId, onStatus) {
-  // ── 1. Busca DANFE no backend PRIMEIRO (antes de conectar ao QZ) ──────
-  onStatus?.('Buscando DANFE no Bling…');
+  // ── 1. Busca DANFE SIMPLIFICADA (etiqueta 10x15cm) no backend ──────────
+  onStatus?.('Buscando DANFE Simplificada no Bling…');
   const token = localStorage.getItem('expedicao_token') || '';
-  const res = await fetch(`/bling/danfe/${encodeURIComponent(blingNfId)}`, {
+  const res = await fetch(`/bling/danfe/${encodeURIComponent(blingNfId)}?tipo=simplificado`, {
     headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
   });
   const data = await res.json().catch(() => ({}));
@@ -156,12 +156,21 @@ async function printDanfe(blingNfId, onStatus) {
   if (!b64pdf) throw new Error('Bling não retornou PDF da DANFE.');
 
   // ── 3. Tenta imprimir via QZ Tray ────────────────────────────────────
-  onStatus?.('Conectando à impressora…');
+  // Para impressoras térmicas 10x15: sem scaling, sem cores, preserva aspecto
+  onStatus?.('Conectando à impressora térmica…');
   let qzOk = false;
   try {
     const qz      = await qzConnect();
     const printer  = await qz.printers.getDefault();
-    const config   = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
+    // Configuração otimizada para etiquetas térmicas 10x15cm:
+    // - scaleContent: false → mantém o tamanho original (importante para etiquetas)
+    // - colorType: 'blackwhite' → apenas preto/branco (mais rápido + melhor em térmica)
+    const config   = qz.configs.create(printer, {
+      scaleContent: false,
+      colorType: 'blackwhite',
+      rotation: 0,
+      margins: { top: 0, right: 0, bottom: 0, left: 0 }
+    });
     await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64pdf }]);
     qzOk = true;
   } catch (qzErr) {
@@ -170,9 +179,10 @@ async function printDanfe(blingNfId, onStatus) {
 
   // ── 4. Fallback: abre blob PDF no browser ────────────────────────────
   if (!qzOk) {
-    onStatus?.('Abrindo PDF no navegador…');
+    onStatus?.('Abrindo DANFE no navegador…');
     const blob = new Blob([Uint8Array.from(atob(b64pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
     const url  = URL.createObjectURL(blob);
+    // Abre com tamanho original (10x15cm) — usuário imprime direto do PDF viewer
     window.open(url, '_blank');
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   }

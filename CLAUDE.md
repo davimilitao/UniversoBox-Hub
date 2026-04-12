@@ -25,7 +25,7 @@ npm start       # Starts backend serving SPA at /spa
 
 The frontend dev server at `:5173` proxies `/bling`, `/orders`, `/api`, `/auth` to the backend at `:8080`. Production builds to `backend/public/spa`, served by Express.
 
-**Migration in progress:** Vanilla HTML/JS pages in `backend/public/` are being migrated to React pages in `frontend/src/pages/`. Both coexist. Legacy pages remain functional until their React counterpart is validated.
+**Migration complete (April/2026):** All vanilla HTML/JS pages have been migrated to React SPA. The project is now 100% React at `/spa/*`.
 
 ### Modules
 
@@ -33,7 +33,7 @@ The frontend dev server at `:5173` proxies `/bling`, `/orders`, `/api`, `/auth` 
 |--------|-------------|---------|
 | Expedição | `pages/expedicao/` (BlingPedidos, PedidosDoDia, GestaoInsumos, Compras) | `server.js`, `public/bling_routes.js` |
 | Catálogo | `pages/catalogo/` (CatalogoPro, AdminProdutos, ImageStudio, ImportarCSV, AutomacaoCadastro) | `routes/catalogo.js` |
-| Financeiro | `pages/financeiro/` (PainelFinanceiro, GestaoDespesas, GestaoMargem, Contas) | `/api/despesas` via Google Sheets |
+| Financeiro | `pages/financeiro/` (PainelFinanceiro, GestaoDespesas, GestaoMargem, Contas) | `/api/fin-despesas` via Firestore (migrado de Google Sheets) |
 | Admin/Sistema | `pages/sistema/ConfiguracoesSistema.jsx` | `routes/tenants.js`, `routes/tenantProvisioning.js` |
 
 ### Critical Operation Flow
@@ -70,6 +70,7 @@ product_overrides/{sku}              ← local enrichment (photos, bin location,
 orders/{id}                          ← internal separation/picking orders
 fin_compras/{id}                     ← purchase orders
 fin_parcelas/{id}                    ← payment installments
+fin_despesas/{id}                    ← expenses (migrated from Google Sheets Apr/2026)
 embalagens/                          ← packaging inventory
 ```
 
@@ -80,14 +81,16 @@ embalagens/                          ← packaging inventory
 - Config: `BLING_CLIENT_ID`, `BLING_CLIENT_SECRET`, `BLING_REDIRECT_URI`
 - Token management: `blingEnsureToken()` in `backend/public/bling_routes.js`
 - Auth endpoints: `GET /bling/auth`, `GET /bling/callback`, `GET /bling/status`
+- Base URL: `https://api.bling.com.br/Api/v3` (migrated from `www.bling.com.br` Apr/2026)
+- Image payload: `{ midia: { imagens: { externas: [{ link: url }] } } }`
 
 **Mercado Livre (OAuth2):**
 - Token stored in `ml_tokens/` (Firestore)
 - Marketplace detection from order origin/customer name patterns
 
-**Google Sheets (Financeiro):**
-- Backend-only via service account (no user token management)
-- Used for expense tracking via `/api/despesas`
+**Google Sheets (Financeiro — legacy):**
+- Endpoints `/api/despesas` mantidos para retrocompatibilidade
+- Novos dados vão para Firestore `fin_despesas`
 
 ### Frontend Patterns
 
@@ -138,3 +141,25 @@ export function useCompras() {
 - React hooks only (no class components)
 - Feature-based folder structure target: `/features/orders/`, `/features/auth/`, etc. (migration in progress from flat `pages/` structure)
 - All UI copy in Portuguese (pt-BR)
+
+## Dev Squad (Slash Commands)
+
+| Command | Role |
+|---------|------|
+| `/tech-lead` | Orchestrates full feature delivery — start here for any new task |
+| `/dev-backend` | Senior Node/Express/Firestore developer |
+| `/dev-frontend` | Senior React/Tailwind developer |
+| `/reviewer` | Code review — security, bugs, patterns |
+| `/qa` | QA checklist per module before every PR |
+| `/expedicao` | Expedição module specialist |
+| `/financeiro` | Financeiro module specialist |
+| `/catalogo` | Catálogo module specialist |
+| `/admin-hub` | Admin/Sistema module specialist |
+
+## Security Rules (Never Violate)
+
+1. `tenantId` ALWAYS from `req.auth.tenantId` — never from `req.body` or `req.query`
+2. Every protected route MUST use `requireFirebaseAuth` middleware
+3. Never expose Bling tokens in API responses
+4. Validate all user inputs before saving to Firestore
+5. Never commit real `.env` files — only `.env.example`
