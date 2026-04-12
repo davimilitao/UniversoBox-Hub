@@ -286,7 +286,7 @@ function AbaParcelas({ parcelas, loading, saving, meios, lancarCompra, marcarPag
               <ChevronLeft size={14} />
             </button>
             <select value={mesEfetivo} onChange={e => setMesAtivo(e.target.value)}
-              className="bg-transparent text-slate-100 text-sm font-bold px-2 py-1 outline-none cursor-pointer min-w-[100px] text-center [color-scheme:dark]">
+              className="bg-slate-900 text-slate-100 text-sm font-bold px-2 py-1 outline-none cursor-pointer min-w-[100px] text-center [color-scheme:dark]">
               {meses.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
             <button onClick={() => { const i = idxMes + 1; if (i < meses.length) setMesAtivo(meses[i].key); }}
@@ -469,7 +469,7 @@ export function GestaoFinanceira() {
   const categorias = useMemo(() => extrairCategorias(despesasComStatus), [despesasComStatus]);
   const tipos      = useMemo(() => extrairTipos(despesasComStatus), [despesasComStatus]);
 
-  const mesEfetivo = mesAtivo || meses[0]?.label || '';
+  const mesEfetivo = mesAtivo || meses.find(m => m.label === mesAtualLabel)?.label || meses[0]?.label || '';
 
   const despesasMes = useMemo(() => {
     if (!mesEfetivo) return despesasComStatus;

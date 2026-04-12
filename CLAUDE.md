@@ -155,6 +155,7 @@ export function useCompras() {
 | `/financeiro` | Financeiro module specialist |
 | `/catalogo` | Catálogo module specialist |
 | `/admin-hub` | Admin/Sistema module specialist |
+| `/wiki-save` | Saves current conversation as a wiki page in docs/ and updates INDEX.md |
 
 ## Security Rules (Never Violate)
 
