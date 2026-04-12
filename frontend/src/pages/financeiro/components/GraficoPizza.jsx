@@ -34,7 +34,7 @@ export function GraficoPizza({ despesasMes }) {
   // Agrupa por categoria
   const mapa = {};
   despesasMes.forEach(d => {
-    const cat = d.nome || 'Sem categoria';
+    const cat = d.categoria || d.nome || 'Sem categoria';
     mapa[cat] = (mapa[cat] || 0) + d.valor;
   });
 

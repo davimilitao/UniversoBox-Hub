@@ -78,26 +78,61 @@ Não alterar este formato sem combinar com o time.
 
 | Coleção | Operação | Descrição |
 |---------|----------|-----------|
-| `fin_compras/{id}` | Leitura + Escrita | Pedidos de reposição de estoque |
+| `fin_despesas/{id}` | Leitura + Escrita | **Nova** — despesas com comprovante (banco primário) |
+| `fin_compras/{id}` | Leitura + Escrita | Pedidos de reposição de estoque / investimentos parcelados |
 | `fin_parcelas/{id}` | Leitura + Escrita | Parcelas geradas das compras |
 | `fin_meios_pagamento/{id}` | Leitura + Escrita | Cartões e métodos de pagamento |
+
+## Schema: fin_despesas (novo — 11/04/2026)
+
+```javascript
+{
+  data: Timestamp,
+  tipo: 'mensal_fixa' | 'operacional' | 'investimento',
+  categoria: string,        // 'Hosting/TI', 'ADS', 'Logística', etc.
+  fornecedor: string,
+  descricao: string,
+  valor: number,
+  situacao: 'pago' | 'pendente',
+  meioId: string | null,
+  compraId: string | null,  // preenchido se tipo === 'investimento'
+  comprovante: {
+    tipo: 'boleto' | 'pix' | 'transferencia' | 'manual',
+    codigoAutenticacao: string,
+    banco: string, dataOriginal: string, arquivo: string,
+  } | null,
+  tenantId: string, uid: string, createdAt: Timestamp,
+}
+```
+
+**Skill:** `/comprovante` — lê PDF em `C:\Users\milit\comprovantes\` e lança automaticamente.
+**Planilha local:** `C:\Users\milit\controle-financeiro-universobox.xlsx`
+**Tipo Investimento:** cria `fin_compras` + `fin_parcelas` automaticamente (aparece em Contas.jsx).
+
+## Novos endpoints (backend/server.js)
+
+- `POST /api/fin-despesas` — lança no Firestore; se investimento, cria parcelas em lote
+- `GET /api/fin-despesas` — lista com filtros `?tipo=`, `?categoria=`, `?mes=YYYY-MM`
+
+Os endpoints `/api/despesas` (Google Sheets) continuam funcionando durante a transição.
 
 ## Impacto em outros módulos
 
 - **Expedição (Compras):** `fin_compras` é compartilhada — mudanças de schema afetam ambos
-- **Catálogo:** custo de entrada do produto (NF de compra) virá aqui quando o fluxo XML for implementado
-- Se Google Sheets ficar indisponível → PainelFinanceiro, GestaoDespesas e GestaoMargem retornam vazio (sem fallback local)
+- **Contas.jsx:** investimentos parcelados lançados via `/comprovante` aparecem aqui automaticamente
+- Se Google Sheets ficar indisponível → PainelFinanceiro e GestaoMargem retornam vazio (sem fallback)
 
 ## Checklist antes de qualquer mudança
 
+- [ ] A mudança afeta `fin_despesas`? → verificar skill `/comprovante` e endpoints novos
 - [ ] A mudança afeta `fin_parcelas`? → verificar cálculo de limite de cartão e Contas.jsx
-- [ ] A mudança afeta `GET /api/despesas`? → verificar PainelFinanceiro e GestaoDespesas
-- [ ] A mudança afeta o schema de `fin_compras`? → verificar o módulo Expedição (Compras.jsx)
-- [ ] A mudança afeta a coluna `situacao` do Sheets? → verificar filtros de pago/pendente
-- [ ] A mudança afeta a formatação de moeda (BRL)? → verificar todos os gráficos Recharts
+- [ ] A mudança afeta `GET /api/despesas`? → verificar PainelFinanceiro e GestaoDespesas (legado)
+- [ ] A mudança afeta o schema de `fin_compras`? → verificar Expedição (Compras.jsx)
+- [ ] A mudança afeta formatação de moeda (BRL)? → verificar todos os gráficos Recharts
 
 ## Próximos passos planejados
 
-1. **Contas a pagar via NF XML de entrada:** quando o fluxo XML de compra (Expedição → Compras) for implementado, as parcelas serão geradas automaticamente a partir do XML, não entrada manual
-2. **Filtros de dados mais dedicados à visão do negócio:** substituir filtros genéricos por filtros centrados na operação diária (ex: "compras da semana", "despesas por canal")
-3. **Painel de margem com dados reais de venda:** cruzar dados de venda do Bling/ML com custo de entrada para margem por SKU
+1. Migrar GestaoDespesas para consumir `fin_despesas` (Firestore) em vez de Google Sheets
+2. Contas a pagar via NF XML de entrada: parcelas geradas automaticamente a partir do XML de compra
+3. Filtros dedicados à visão do negócio (por tipo, por categoria, semana atual)
+4. Painel de margem com dados reais de venda: cruzar Bling/ML com custo de entrada por SKU

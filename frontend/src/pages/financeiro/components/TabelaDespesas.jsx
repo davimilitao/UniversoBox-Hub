@@ -1,24 +1,79 @@
 /**
  * @file TabelaDespesas.jsx
  * @description Tabela de despesas com seleção múltipla, total acumulado e compartilhamento WhatsApp.
- * @version 3.0.0
+ *              Suporta statusEfetivo (pago / pendente / vencido) e ícone de comprovante.
+ * @version 4.0.0
+ * @date 2026-04-11
+ * @changelog
+ *   4.0.0 — 2026-04-11 — statusEfetivo (vencido), tipo pill, ícone comprovante, colunas fornecedor.
+ *   3.0.0 — 2026-04-01 — Seleção múltipla + WhatsApp + toggle pago/pendente.
  */
 
 import { useState, useMemo } from 'react';
 import {
-  ArrowUp, ArrowDown, CheckCircle2, Clock, Trash2, Inbox,
-  MessageCircle, Copy, X, Check, Loader2,
+  ArrowUp, ArrowDown, CheckCircle2, Clock, AlertCircle, Trash2, Inbox,
+  MessageCircle, Copy, X, Check, Loader2, FileText, ExternalLink,
 } from 'lucide-react';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
+const TIPO_LABEL = { mensal_fixa: 'Fixa', operacional: 'Operac.', investimento: 'Invest.' };
+const TIPO_CLS   = {
+  mensal_fixa:  'bg-blue-900/40 text-blue-300 border-blue-700/40',
+  operacional:  'bg-slate-700/60 text-slate-400 border-white/10',
+  investimento: 'bg-violet-900/40 text-violet-300 border-violet-700/40',
+};
+
 function fmtWhats(despesas) {
-  const linhas = despesas.map(d =>
-    `• ${d.data} | ${d.nome} — ${d.descricao || ''}`.trim().replace(/\s+—\s*$/, '')
-    + ` | *${BRL.format(d.valor)}* | ${d.situacao}`
-  );
+  const linhas = despesas.map(d => {
+    const cat = d.categoria || d.nome || d.fornecedor || '';
+    return `• ${d.data} | ${cat} — ${d.descricao || ''}`.trim().replace(/\s+—\s*$/, '')
+      + ` | *${BRL.format(d.valor)}* | ${d.statusEfetivo || d.situacao}`;
+  });
   const total = despesas.reduce((s, d) => s + d.valor, 0);
   return `*Despesas selecionadas*\n${linhas.join('\n')}\n\n*Total: ${BRL.format(total)}*`;
+}
+
+function StatusBadge({ d, toggling, onToggle }) {
+  const st = d.statusEfetivo || (d.situacao === 'pago' ? 'pago' : 'pendente');
+  const loading = toggling === d.id;
+
+  if (loading) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs text-slate-500">
+        <Loader2 size={11} className="animate-spin" /> …
+      </span>
+    );
+  }
+
+  if (st === 'pago') {
+    return (
+      <button onClick={() => onToggle(d.id, 'pago')} title="Clique para marcar como Pendente"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+          bg-emerald-500/10 text-emerald-400 border border-emerald-500/20
+          hover:bg-orange-500/10 hover:text-orange-400 hover:border-orange-500/20 transition-colors cursor-pointer">
+        <CheckCircle2 size={11} /> Pago
+      </button>
+    );
+  }
+  if (st === 'vencido') {
+    return (
+      <button onClick={() => onToggle(d.id, 'vencido')} title="Clique para marcar como Pago"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+          bg-red-500/10 text-red-400 border border-red-500/20
+          hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/20 transition-colors cursor-pointer">
+        <AlertCircle size={11} /> Vencido
+      </button>
+    );
+  }
+  return (
+    <button onClick={() => onToggle(d.id, 'pendente')} title="Clique para marcar como Pago"
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+        bg-amber-500/10 text-amber-400 border border-amber-500/20
+        hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/20 transition-colors cursor-pointer">
+      <Clock size={11} /> Pendente
+    </button>
+  );
 }
 
 export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) {
@@ -30,57 +85,40 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
 
   const sorted = useMemo(() =>
     [...despesas].sort((a, b) => ordem === 'desc' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp),
-    [despesas, ordem]
+    [despesas, ordem],
   );
 
-  const totalSelecionado = useMemo(() => {
-    return sorted
-      .filter(d => selecionados.has(d.id))
-      .reduce((s, d) => s + d.valor, 0);
-  }, [sorted, selecionados]);
-
-  const itensSelecionados = useMemo(() =>
-    sorted.filter(d => selecionados.has(d.id)),
-    [sorted, selecionados]
-  );
+  const itensSelecionados = useMemo(() => sorted.filter(d => selecionados.has(d.id)), [sorted, selecionados]);
+  const totalSelecionado  = useMemo(() => itensSelecionados.reduce((s, d) => s + d.valor, 0), [itensSelecionados]);
 
   function toggleItem(id) {
-    setSelecionados(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+    setSelecionados(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
-
   function toggleTodos() {
     if (selecionados.size === sorted.length) setSelecionados(new Set());
     else setSelecionados(new Set(sorted.map(d => d.id)));
   }
-
   function limparSelecao() { setSelecionados(new Set()); }
 
   function compartilharWhats() {
-    const texto = fmtWhats(itensSelecionados);
-    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+    window.open(`https://wa.me/?text=${encodeURIComponent(fmtWhats(itensSelecionados))}`, '_blank');
   }
-
   async function copiarTexto() {
-    const texto = fmtWhats(itensSelecionados);
-    await navigator.clipboard.writeText(texto).catch(() => {});
+    await navigator.clipboard.writeText(fmtWhats(itensSelecionados)).catch(() => {});
     setCopiado(true);
     setTimeout(() => setCopiado(false), 2000);
   }
 
-  async function handleToggle(id, situacaoAtual) {
+  async function handleToggle(id, statusAtual) {
     if (!onToggleStatus) return;
-    const nova = situacaoAtual?.toLowerCase().includes('pago') ? 'Pendente' : 'Pago';
+    const nova = statusAtual === 'pago' ? 'pendente' : 'pago';
     setToggling(id);
     await onToggleStatus(id, nova);
     setToggling(null);
   }
 
   async function handleDelete(id, label) {
-    if (!confirm(`Apagar "${label}"?\n\nRemove a linha da planilha permanentemente.`)) return;
+    if (!confirm(`Apagar "${label}"?\n\nRemove permanentemente do banco de dados.`)) return;
     setDeletando(id);
     await onDelete(id);
     setDeletando(null);
@@ -96,7 +134,7 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
     );
   }
 
-  const OrdemIcon = ordem === 'asc' ? ArrowUp : ArrowDown;
+  const OrdemIcon  = ordem === 'asc' ? ArrowUp : ArrowDown;
   const todosSelect = selecionados.size === sorted.length && sorted.length > 0;
 
   return (
@@ -106,7 +144,6 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/5 text-left">
-                {/* Checkbox selecionar todos */}
                 <th className="px-3 py-3 w-10">
                   <input type="checkbox" checked={todosSelect} onChange={toggleTodos}
                     className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer" />
@@ -117,19 +154,20 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
                     <OrdemIcon size={13} className="text-emerald-500" /> Data
                   </span>
                 </th>
-                <th className="px-4 py-3 text-slate-500 font-medium">Categoria</th>
-                <th className="px-4 py-3 text-slate-500 font-medium">Descrição</th>
+                <th className="px-4 py-3 text-slate-500 font-medium">Fornecedor</th>
+                <th className="px-4 py-3 text-slate-500 font-medium hidden md:table-cell">Descrição</th>
+                <th className="px-4 py-3 text-slate-500 font-medium hidden lg:table-cell">Tipo</th>
                 <th className="px-4 py-3 text-slate-500 font-medium text-right">Valor</th>
                 <th className="px-4 py-3 text-slate-500 font-medium text-center">Status</th>
                 {isAdmin && <th className="px-4 py-3 w-10" />}
               </tr>
             </thead>
             <tbody>
-              {sorted.map((d, i) => {
-                const isPago   = d.situacao?.toLowerCase().includes('pago');
+              {sorted.map(d => {
                 const selected = selecionados.has(d.id);
+                const label    = d.fornecedor || d.categoria || d.nome || d.descricao || '—';
                 return (
-                  <tr key={i}
+                  <tr key={d.id}
                     onClick={() => toggleItem(d.id)}
                     className={`border-b border-white/5 last:border-0 cursor-pointer transition-colors group ${
                       selected ? 'bg-emerald-500/[0.06]' : 'hover:bg-white/[0.02]'
@@ -139,37 +177,48 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
                         className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer" />
                     </td>
                     <td className="px-4 py-3 text-slate-400 whitespace-nowrap font-mono text-xs">{d.data || '—'}</td>
-                    <td className="px-4 py-3 text-slate-300 font-medium max-w-[160px] truncate">{d.nome || '—'}</td>
-                    <td className="px-4 py-3 text-slate-500 max-w-[220px] truncate">{d.descricao || '—'}</td>
+                    <td className="px-4 py-3 max-w-[180px]">
+                      <p className="text-slate-200 font-medium truncate">{label}</p>
+                      {/* categoria como subtítulo */}
+                      {d.categoria && d.categoria !== label && (
+                        <p className="text-xs text-slate-600 truncate">{d.categoria}</p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 max-w-[200px] truncate hidden md:table-cell">
+                      {/* ícone comprovante */}
+                      {d.comprovante && d.comprovante.tipo !== 'manual' && (
+                        <FileText size={11} className="inline mr-1 text-slate-600" title={`Autenticação: ${d.comprovante.codigoAutenticacao}`} />
+                      )}
+                      {d.descricao || '—'}
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      {d.tipo && (
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${TIPO_CLS[d.tipo] || TIPO_CLS.operacional}`}>
+                          {TIPO_LABEL[d.tipo] || d.tipo}
+                        </span>
+                      )}
+                      {/* link para Contas se for investimento */}
+                      {d.tipo === 'investimento' && d.compraId && (
+                        <a href="/financeiro/contas" title="Ver parcelas em Contas a Pagar"
+                          onClick={e => e.stopPropagation()}
+                          className="ml-1.5 text-violet-400 hover:text-violet-300">
+                          <ExternalLink size={10} className="inline" />
+                        </a>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold text-slate-200 whitespace-nowrap tabular-nums">
                       {BRL.format(d.valor)}
                     </td>
                     <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
-                      {toggling === d.id ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs text-slate-500">
-                          <Loader2 size={11} className="animate-spin" /> …
-                        </span>
-                      ) : isPago ? (
-                        <button onClick={() => handleToggle(d.id, d.situacao)}
-                          title="Clique para marcar como Pendente"
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-orange-500/10 hover:text-orange-400 hover:border-orange-500/20 transition-colors cursor-pointer">
-                          <CheckCircle2 size={11}/> Pago
-                        </button>
-                      ) : (
-                        <button onClick={() => handleToggle(d.id, d.situacao)}
-                          title="Clique para marcar como Pago"
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/20 transition-colors cursor-pointer">
-                          <Clock size={11}/> Pendente
-                        </button>
-                      )}
+                      <StatusBadge d={d} toggling={toggling} onToggle={handleToggle} />
                     </td>
                     {isAdmin && (
                       <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => handleDelete(d.id, d.descricao || d.nome)}
+                        <button onClick={() => handleDelete(d.id, label)}
                           disabled={deletando === d.id}
                           className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all disabled:opacity-40"
                           title="Apagar despesa">
-                          {deletando === d.id ? <span className="text-xs">...</span> : <Trash2 size={14} />}
+                          {deletando === d.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={14} />}
                         </button>
                       </td>
                     )}
@@ -179,7 +228,7 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
             </tbody>
             <tfoot>
               <tr className="border-t border-white/10 bg-slate-900/50">
-                <td colSpan={4} className="px-4 py-3 text-slate-500 text-xs">
+                <td colSpan={5} className="px-4 py-3 text-slate-500 text-xs">
                   {sorted.length} lançamento{sorted.length !== 1 ? 's' : ''}
                   {selecionados.size > 0 && (
                     <span className="ml-2 text-emerald-400 font-bold">
@@ -197,7 +246,7 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
         </div>
       </div>
 
-      {/* ── Toolbar de seleção (flutuante na base) ─────────────────────────── */}
+      {/* ── Toolbar flutuante de seleção ──────────────────────────────────── */}
       {selecionados.size > 0 && (
         <div className="sticky bottom-4 mt-3 mx-auto max-w-xl animate-fade-in">
           <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-emerald-500/30 shadow-2xl shadow-black/50"

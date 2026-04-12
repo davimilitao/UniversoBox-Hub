@@ -1,23 +1,24 @@
 /**
  * @file GestaoDespesas.jsx
  * @module financeiro
- * @description Gestão de Despesas — unifica lançamento, dashboard, gráficos e tabela.
- *              Substitui a tela legada financas.html com React + dados reais da planilha.
- *              Categorias dinâmicas extraídas da própria planilha Google Sheets.
- * @version 1.0.0
- * @date 2026-04-01
- * @author UniversoLab
- *
+ * @description Gestão de Despesas — fonte Firestore (fin_despesas).
+ *              Duas abas: Lançamentos (tabela + filtros + form) | Contas a Pagar (AP view).
+ *              Status efetivo: pago / pendente / vencido (calculado no frontend).
+ * @version 2.0.0
+ * @date 2026-04-11
  * @changelog
- *   2.0.0 — 2026-04-01 — Range de datas, Lucide icons, input date nativo.
- *   1.0.0 — 2026-04-01 — Criação inicial unificando financas.html + PainelFinanceiro.
+ *   2.0.0 — 2026-04-11 — Migrado para Firestore; tabs Lançamentos/Contas a Pagar; vencido.
+ *   1.0.0 — 2026-04-01 — Criação inicial com Google Sheets.
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { TrendingUp } from 'lucide-react';
+import { TrendingUp, AlertCircle } from 'lucide-react';
+import {
+  useFinDespesas, computarStatusEfetivo, extrairMesesFin, labelMesAnoTs,
+} from '../../hooks/useFinDespesas';
+import { useMeiosPagamento } from '../../hooks/useMeiosPagamento';
+import { apiFetch } from '../../utils/getAuthToken';
 import { auth } from '../../firebase';
-import { parseDataBR, labelMesAno } from '../../hooks/useDespesas';
 
 import { FiltrosBar }        from './components/FiltrosBar';
 import { ResumoCards }       from './components/ResumoCards';
@@ -25,6 +26,7 @@ import { GraficoBarras }     from './components/GraficoBarras';
 import { GraficoPizza }      from './components/GraficoPizza';
 import { FormLancarDespesa } from './components/FormLancarDespesa';
 import { TabelaDespesas }    from './components/TabelaDespesas';
+import { ContasDespesas }    from './components/ContasDespesas';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -45,304 +47,255 @@ function Toast({ msg, tipo }) {
   );
 }
 
-/** Extrai meses únicos ordenados (mais recente primeiro) das despesas */
-function extrairMeses(despesas) {
-  const vistos = new Set();
-  const lista  = [];
-  despesas.forEach(d => {
-    const p = parseDataBR(d.data);
-    if (!p) return;
-    const label = labelMesAno(p);
-    if (!vistos.has(label)) {
-      vistos.add(label);
-      lista.push({ label, ts: new Date(`${p.ano}-${String(p.mes).padStart(2,'0')}-01`).getTime() });
-    }
-  });
-  return lista.sort((a, b) => b.ts - a.ts);
-}
-
-/** Extrai categorias únicas da planilha, ordenadas alfabeticamente */
-function extrairCategorias(despesas) {
-  const set = new Set(despesas.map(d => d.nome).filter(Boolean));
-  return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-}
-
-/** Verifica se o user tem role admin via custom claim ou localStorage legado */
-function checkAdmin(user) {
+function checkAdmin() {
   try {
     const stored = localStorage.getItem('expedicao_user');
-    if (stored) {
-      const role = JSON.parse(stored).role;
-      if (role) return role === 'admin';
-    }
+    if (stored) { const r = JSON.parse(stored).role; if (r) return r === 'admin'; }
   } catch {}
-  // Fallback: se tem user autenticado e não tem claim explícita, assume não-admin
   return false;
 }
 
-async function getToken() {
-  const user = auth?.currentUser;
-  return user ? user.getIdToken(false) : null;
+function extrairCategorias(despesas) {
+  const set = new Set(despesas.map(d => d.categoria).filter(Boolean));
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+
+function extrairTipos(despesas) {
+  return Array.from(new Set(despesas.map(d => d.tipo).filter(Boolean)));
+}
+
+function labelMesAtual() {
+  const d = new Date();
+  return `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+}
+
+// ─── TabBtn ───────────────────────────────────────────────────────────────────
+
+function TabBtn({ id, label, badge, ativo, onClick }) {
+  const isAtivo = ativo === id;
+  return (
+    <button
+      onClick={() => onClick(id)}
+      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-all ${
+        isAtivo
+          ? 'border-emerald-500 text-emerald-400'
+          : 'border-transparent text-slate-500 hover:text-slate-300'
+      }`}
+    >
+      {label}
+      {badge > 0 && (
+        <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${
+          isAtivo ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+        }`}>
+          {badge}
+        </span>
+      )}
+    </button>
+  );
 }
 
 // ─── página principal ──────────────────────────────────────────────────────────
 
 export function GestaoDespesas() {
-  const { despesas, loading, error, setDespesas } = useDespesasComRefresh();
+  const { despesas, loading, error } = useFinDespesas();
+  const { meios: meiosPagamento }    = useMeiosPagamento();
 
-  // Filtros
-  const [mesAtivo,        setMesAtivo]        = useState('');
-  const [categoriaAtiva,  setCategoriaAtiva]  = useState('all');
-  const [statusAtivo,     setStatusAtivo]     = useState('all');
-  const [rangeInicio,     setRangeInicio]     = useState(null); // timestamp
-  const [rangeFim,        setRangeFim]        = useState(null); // timestamp
-  const modoRange = rangeInicio !== null || rangeFim !== null;
+  // ── Abas
+  const [aba, setAba] = useState('lancamentos');
 
-  // UI
-  const [salvando,  setSalvando]  = useState(false);
-  const [toast,     setToast]     = useState({ msg: '', tipo: 'ok' });
+  // ── Filtros
+  const [mesAtivo,       setMesAtivo]       = useState('');
+  const [tipoAtivo,      setTipoAtivo]      = useState('all');
+  const [categoriaAtiva, setCategoriaAtiva] = useState('all');
+  const [statusAtivo,    setStatusAtivo]    = useState('all');
 
-  function showToast(msg, tipo = 'ok') {
-    setToast({ msg, tipo });
-    setTimeout(() => setToast({ msg: '', tipo: 'ok' }), 3500);
-  }
+  // ── UI
+  const [salvando, setSalvando] = useState(false);
+  const [toast,    setToast]    = useState({ msg: '', tipo: 'ok' });
+  const isAdmin = checkAdmin();
 
-  // ── Dados derivados ───────────────────────────────────────────────────────
-  const meses      = useMemo(() => extrairMeses(despesas),    [despesas]);
-  const categorias = useMemo(() => extrairCategorias(despesas), [despesas]);
+  // ── Despesas com statusEfetivo calculado
+  const despesasComStatus = useMemo(
+    () => despesas.map(d => ({ ...d, statusEfetivo: computarStatusEfetivo(d) })),
+    [despesas],
+  );
+
+  // ── Listas derivadas para filtros
+  const meses      = useMemo(() => extrairMesesFin(despesasComStatus), [despesasComStatus]);
+  const categorias = useMemo(() => extrairCategorias(despesasComStatus), [despesasComStatus]);
+  const tipos      = useMemo(() => extrairTipos(despesasComStatus), [despesasComStatus]);
+
+  // Define mês ativo inicial (mês mais recente)
   const mesEfetivo = mesAtivo || meses[0]?.label || '';
 
+  // ── Despesas do mês ativo (para filtros da aba Lançamentos)
   const despesasMes = useMemo(() => {
-    if (modoRange) {
-      // Modo período: filtra por timestamp
-      return despesas.filter(d => {
-        if (!d.timestamp) return false;
-        const passInicio = rangeInicio === null || d.timestamp >= rangeInicio;
-        const passFim    = rangeFim    === null || d.timestamp <= rangeFim + 86_399_999; // até fim do dia
-        return passInicio && passFim;
-      });
-    }
-    if (!mesEfetivo) return [];
-    return despesas.filter(d => {
-      const p = parseDataBR(d.data);
-      return p && labelMesAno(p) === mesEfetivo;
-    });
-  }, [despesas, mesEfetivo, modoRange, rangeInicio, rangeFim]);
+    if (!mesEfetivo) return despesasComStatus;
+    return despesasComStatus.filter(d => labelMesAnoTs(d.timestamp) === mesEfetivo);
+  }, [despesasComStatus, mesEfetivo]);
 
+  // ── Despesas do mês ATUAL (para aba Contas a Pagar)
+  const mesAtualLabel = useMemo(() => labelMesAtual(), []);
+  const despesasMesAtual = useMemo(
+    () => despesasComStatus.filter(d => labelMesAnoTs(d.timestamp) === mesAtualLabel),
+    [despesasComStatus, mesAtualLabel],
+  );
+
+  // ── Aplicar filtros de categoria + tipo + status sobre o mês selecionado
   const despesasFiltradas = useMemo(() => {
     return despesasMes.filter(d => {
-      const passCat = categoriaAtiva === 'all' || d.nome === categoriaAtiva;
-      const passSt  = statusAtivo === 'all'
-        || (statusAtivo === 'pago'     && d.situacao?.toLowerCase().includes('pago'))
-        || (statusAtivo === 'pendente' && d.situacao?.toLowerCase().includes('pendente'));
-      return passCat && passSt;
+      if (categoriaAtiva !== 'all' && d.categoria !== categoriaAtiva) return false;
+      if (tipoAtivo !== 'all' && d.tipo !== tipoAtivo) return false;
+      if (statusAtivo !== 'all' && d.statusEfetivo !== statusAtivo) return false;
+      return true;
     });
-  }, [despesasMes, categoriaAtiva, statusAtivo]);
+  }, [despesasMes, categoriaAtiva, tipoAtivo, statusAtivo]);
 
-  // ── Resumo do mês ──────────────────────────────────────────────────────────
-  const resumoMes = useMemo(() => {
-    const pago     = despesasFiltradas.filter(d => d.situacao?.toLowerCase().includes('pago')).reduce((s,d) => s+d.valor, 0);
-    const pendente = despesasFiltradas.filter(d => d.situacao?.toLowerCase().includes('pendente')).reduce((s,d) => s+d.valor, 0);
-    return { pago, pendente, total: pago + pendente, qtd: despesasFiltradas.length };
-  }, [despesasFiltradas]);
+  // ── Badge da aba Contas a Pagar (vencidas + pendentes, exceto investimento)
+  const nContasPagar = useMemo(
+    () => despesasMesAtual.filter(d => d.statusEfetivo !== 'pago' && d.tipo !== 'investimento').length,
+    [despesasMesAtual],
+  );
 
-  // ── Adicionar despesa ──────────────────────────────────────────────────────
-  const handleSalvar = useCallback(async (formData) => {
+  // ── Toast helper
+  function showToast(msg, tipo = 'ok') {
+    setToast({ msg, tipo });
+    setTimeout(() => setToast({ msg: '', tipo: 'ok' }), 3000);
+  }
+
+  // ── Salvar nova despesa
+  const handleSalvar = useCallback(async (payload) => {
     setSalvando(true);
     try {
-      const token = await getToken();
-      const res = await fetch('/api/despesas', {
+      const res = await apiFetch('/api/fin-despesas', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!data.ok) throw new Error('Falha ao salvar na planilha');
-
-      showToast('Despesa lançada com sucesso! ✅');
-      // Adiciona otimisticamente sem recarregar tudo
-      // O backend retorna a nova linha; aqui estimamos o timestamp
-      const partes = (formData.data || '').split('/');
-      const ts = partes.length === 3
-        ? new Date(`${partes[2]}-${partes[1]}-${partes[0]}T12:00:00`).getTime()
-        : Date.now();
-      const nova = {
-        id:        Date.now(), // temporário — será substituído no próximo reload
-        data:      formData.data,
-        nome:      formData.nome,
-        descricao: formData.descricao || '',
-        valor:     parseFloat(formData.valor) || 0,
-        situacao:  formData.situacao,
-        timestamp: ts,
-      };
-      setDespesas(prev => [nova, ...prev]);
+      if (!res.ok) throw new Error(await res.text());
+      showToast('Despesa lançada!', 'ok');
     } catch (err) {
-      showToast(`Erro: ${err.message}`, 'err');
+      showToast(`Erro: ${err.message}`, 'erro');
     } finally {
       setSalvando(false);
     }
-  }, [setDespesas]);
+  }, []);
 
-  // ── Toggle status pago/pendente ───────────────────────────────────────────
-  const handleToggleStatus = useCallback(async (rowIndex, novaSituacao) => {
+  // ── Toggle status (pago ↔ pendente)
+  const handleToggleStatus = useCallback(async (id, novaSituacao) => {
     try {
-      const token = await getToken();
-      const res = await fetch(`/api/despesas/${rowIndex}`, {
+      const res = await apiFetch(`/api/fin-despesas/${id}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
         body: JSON.stringify({ situacao: novaSituacao }),
       });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Falha ao atualizar');
-      // Atualiza localmente sem reload
-      setDespesas(prev => prev.map(d =>
-        d.id === rowIndex ? { ...d, situacao: novaSituacao } : d
-      ));
-      showToast(`Marcado como ${novaSituacao} ✅`);
+      if (!res.ok) throw new Error(await res.text());
     } catch (err) {
-      showToast(`Erro: ${err.message}`, 'err');
+      showToast(`Erro: ${err.message}`, 'erro');
     }
-  }, [setDespesas]);
+  }, []);
 
-  // ── Deletar despesa ────────────────────────────────────────────────────────
-  const handleDelete = useCallback(async (rowIndex) => {
+  // ── Deletar (admin only) — usa DELETE do Firestore via endpoint
+  const handleDelete = useCallback(async (id) => {
     try {
-      const token = await getToken();
-      if (!token) { showToast('Faça login para deletar.', 'err'); return; }
-      const res = await fetch(`/api/despesas/${rowIndex}`, {
-        method:  'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Falha ao deletar');
-      setDespesas(prev => prev.filter(d => d.id !== rowIndex));
+      const res = await apiFetch(`/api/fin-despesas/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text());
       showToast('Despesa removida.', 'ok');
     } catch (err) {
-      showToast(`Erro: ${err.message}`, 'err');
+      showToast(`Erro: ${err.message}`, 'erro');
     }
-  }, [setDespesas]);
+  }, []);
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render
+  if (loading) {
+    return (
+      <div className="p-6 flex flex-col gap-4">
+        <Skeleton h="h-10" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} h="h-24" />)}
+        </div>
+        <Skeleton h="h-64" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 flex items-center gap-3 text-red-400">
+        <AlertCircle size={20} />
+        <p className="text-sm">Erro ao carregar despesas: {error}</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="text-slate-100 px-4 py-8 max-w-7xl mx-auto flex-1 overflow-y-auto">
+    <div className="flex flex-col gap-0">
       <Toast msg={toast.msg} tipo={toast.tipo} />
 
-      {/* Cabeçalho */}
-      <div className="mb-6">
-        <h1 className="text-xl font-bold text-slate-100">💰 Gestão de Despesas</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Lançamento e análise — Google Sheets</p>
+      {/* ── Header com tabs ──────────────────────────────────────────────────── */}
+      <div className="px-6 pt-6 pb-0 flex flex-col gap-1">
+        <div className="flex items-center gap-2 mb-3">
+          <TrendingUp size={18} className="text-emerald-400" />
+          <h1 className="text-base font-bold text-slate-200">Gestão de Despesas</h1>
+        </div>
+        <div className="flex border-b border-white/[0.08]">
+          <TabBtn id="lancamentos" label="Lançamentos"    ativo={aba} onClick={setAba} />
+          <TabBtn id="contas"      label="Contas a Pagar" badge={nContasPagar} ativo={aba} onClick={setAba} />
+        </div>
       </div>
 
-      {/* Error */}
-      {error && (
-        <div className="rounded-xl bg-red-900/20 border border-red-700/40 p-4 text-red-400 text-sm mb-6">
-          {error}
-        </div>
-      )}
-
-      {/* Loading */}
-      {loading && (
-        <div className="flex flex-col gap-6">
-          <Skeleton h="h-12" />
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[...Array(4)].map((_,i) => <Skeleton key={i} h="h-24" />)}
-          </div>
-          <Skeleton h="h-72" />
-          <Skeleton h="h-64" />
-        </div>
-      )}
-
-      {/* Conteúdo */}
-      {!loading && !error && (
-        <div className="flex flex-col gap-6">
+      {/* ── Aba Lançamentos ──────────────────────────────────────────────────── */}
+      {aba === 'lancamentos' && (
+        <div className="p-6 flex flex-col gap-5">
 
           {/* Filtros */}
-          {meses.length > 0 && (
-            <FiltrosBar
-              meses={meses}
-              mesAtivo={mesEfetivo}
-              onMes={m => { setMesAtivo(m); setCategoriaAtiva('all'); setStatusAtivo('all'); }}
-              categorias={categorias}
-              categoriaAtiva={categoriaAtiva}
-              onCategoria={setCategoriaAtiva}
-              statusAtivo={statusAtivo}
-              onStatus={setStatusAtivo}
-              onRangeChange={(inicio, fim) => { setRangeInicio(inicio); setRangeFim(fim); }}
-            />
-          )}
+          <FiltrosBar
+            meses={meses}         mesAtivo={mesEfetivo}    onMes={setMesAtivo}
+            tipos={tipos}         tipoAtivo={tipoAtivo}    onTipo={setTipoAtivo}
+            categorias={categorias} categoriaAtiva={categoriaAtiva} onCategoria={setCategoriaAtiva}
+            statusAtivo={statusAtivo} onStatus={setStatusAtivo}
+          />
 
-          {/* Cards */}
-          <ResumoCards despesasMes={despesasFiltradas} />
+          {/* KPI cards */}
+          <ResumoCards despesasMes={despesasMes} />
 
           {/* Gráficos */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <GraficoBarras despesas={despesas} />
-            <GraficoPizza  despesasMes={despesasFiltradas} />
-          </div>
-
-          {/* Form + Tabela */}
-          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 items-start">
-            <FormLancarDespesa
-              categorias={categorias}
-              onSalvar={handleSalvar}
-              salvando={salvando}
-            />
-            <TabelaDespesas
-              despesas={despesasFiltradas}
-              isAdmin={true}
-              onDelete={handleDelete}
-              onToggleStatus={handleToggleStatus}
-            />
-          </div>
-
-          {/* Empty state */}
-          {despesas.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-24 gap-3">
-              <span className="text-4xl">📊</span>
-              <p className="text-slate-400">Nenhuma despesa na planilha.</p>
-              <p className="text-slate-600 text-sm">Lance a primeira despesa usando o formulário.</p>
+          {despesasComStatus.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <GraficoBarras despesas={despesasComStatus} />
+              <GraficoPizza  despesasMes={despesasMes} />
             </div>
           )}
+
+          {/* Form + Tabela */}
+          <div className="flex flex-col xl:flex-row gap-5 items-start">
+            <div className="w-full xl:w-80 shrink-0">
+              <FormLancarDespesa
+                categorias={categorias}
+                meiosPagamento={meiosPagamento}
+                onSalvar={handleSalvar}
+                salvando={salvando}
+              />
+            </div>
+            <div className="flex-1 min-w-0">
+              <TabelaDespesas
+                despesas={despesasFiltradas}
+                isAdmin={isAdmin}
+                onToggleStatus={handleToggleStatus}
+                onDelete={handleDelete}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Aba Contas a Pagar ───────────────────────────────────────────────── */}
+      {aba === 'contas' && (
+        <div className="p-6">
+          <ContasDespesas
+            despesasMes={despesasMesAtual}
+            onToggleStatus={handleToggleStatus}
+          />
         </div>
       )}
     </div>
   );
-}
-
-// ─── Hook estendido com setter ────────────────────────────────────────────────
-// Wraps useDespesas expondo setDespesas para updates otimistas
-function useDespesasComRefresh() {
-  const [despesas, setDespesas] = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState(null);
-
-  useState(() => {
-    let cancelled = false;
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (cancelled) return;
-      if (!user) { setError('Sessão expirada. Faça login novamente.'); setLoading(false); return; }
-      try {
-        setLoading(true); setError(null);
-        const token = await user.getIdToken(false);
-        const res   = await fetch('/api/despesas', { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) { const b = await res.json().catch(()=>{}); throw new Error(b?.error || `HTTP ${res.status}`); }
-        const data  = await res.json();
-        if (!cancelled) setDespesas(data.items || []);
-      } catch (e) {
-        if (!cancelled) setError(e.message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-      unsub();
-    });
-    return () => { cancelled = true; unsub(); };
-  });
-
-  return { despesas, setDespesas, loading, error };
 }
