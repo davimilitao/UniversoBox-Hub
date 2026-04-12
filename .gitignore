@@ -7,3 +7,12 @@ frontend/.env
 # (evita vazar VITE_FIREBASE_* keys no repositório público)
 backend/public/spa/
 node_modules
+
+# Arquivos temporários do OneDrive
+.tmp.driveupload/
+
+# Worktrees do Claude Code (sessões de agente)
+.claude/worktrees/
+
+# Arquivos temporários sem nome
+Untitled

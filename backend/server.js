@@ -2244,11 +2244,14 @@ app.put('/api/catalogo/produto/:id', requireFirebaseAuth, async (req, res, next)
     if (body.gtin !== undefined)           payload.gtin = body.gtin;
     if (body.marca !== undefined)          payload.marca = body.marca;
 
-    // Imagens: Bling aceita array de URLs via midia.internas
+    // Imagens: Bling aceita URLs externas via midia.imagens.externas
     if (body.imagens && Array.isArray(body.imagens)) {
-      payload.midia = {
-        internas: { link: body.imagens.filter(u => u && typeof u === 'string') }
-      };
+      const urls = body.imagens.filter(u => u && typeof u === 'string');
+      if (urls.length) {
+        payload.midia = {
+          imagens: { externas: urls.map(url => ({ link: url })) }
+        };
+      }
     }
 
     const updateRes = await fetch(`${BLING_API_BASE}/produtos/${produtoId}`, {
@@ -2977,8 +2980,13 @@ app.get('/bling/product-images', async (req, res, next) => {
       try {
         const detail = await blingFetch(`/produtos/${p.id}`);
         const item = detail?.data || {};
-        const imagens = (item.imagens || item.midia?.imagens || [])
-          .map(img => img.link || img.url)
+        // Bling armazena imagens em vários formatos possíveis
+        const internas = (item.midia?.internas?.link || []);
+        const externas = (item.midia?.imagens?.externas || []);
+        const legado   = (item.imagens || []);
+        const allImgs  = [...internas, ...externas, ...legado];
+        const imagens = allImgs
+          .map(img => typeof img === 'string' ? img : (img.link || img.url))
           .filter(u => u && /^https?:\/\//i.test(u));
         imageResults.push({
           id:      item.id,

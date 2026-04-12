@@ -1,11 +1,11 @@
 /**
  * @file AppShell.jsx
  * @description Layout principal — sidebar React + ThemeBackground por tema.
- *   • Rotas não migradas: locked=true → bloqueadas visualmente, sem navegação
+ *   • Todas as telas migradas para React (100% SPA)
  *   • Sistema de temas via CSS custom properties (data-theme no <html>)
  *   • ThemeBackground: animações por tema (portal Rick, sparkles Marvel, etc.)
- * @version 2.0.0
- * @date 2026-04-05
+ * @version 2.1.0
+ * @date 2026-04-10
  */
 
 import { useState, useEffect }           from 'react';
@@ -18,26 +18,22 @@ import {
   BookOpen, Settings2, Box, PlusCircle, FileCode,
   Receipt, TrendingUp, LayoutDashboard, ShoppingBag, Upload,
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
-  Menu, X, LogOut, Boxes, Lock,
+  Menu, X, LogOut, Boxes,
   FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
 } from 'lucide-react';
 
 // ─── Mapa de módulos ──────────────────────────────────────────────────────────
-// locked: true → item visível mas bloqueado — tela ainda não migrada
+// Todas as telas estão migradas para React (100% SPA desde Abril/2026)
 const ROTAS = [
   // Expedição
   { key: 'pedidos',        moduleId: 'pedidos',        label: 'Entregas do Dia',   secao: 'Expedição',  Icon: Package,           react: true,  href: '/expedicao/pedidos'    },
-  { key: 'manual',         moduleId: 'manual',         label: 'Expedir Manual',    secao: 'Expedição',  Icon: ClipboardList,     react: false, href: '/manual',              locked: true },
-  { key: 'ml-dashboard',   moduleId: 'ml-dashboard',   label: 'Dashboard Meli',    secao: 'Expedição',  Icon: BarChart2,         react: false, href: '/ml-dashboard',        locked: true },
   { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,               react: true,  href: '/expedicao/bling'      },
   { key: 'exp-insumos',    moduleId: 'insumos',        label: 'Gestão Insumos',    secao: 'Expedição',  Icon: FlaskConical,      react: true,  href: '/expedicao/insumos'    },
+  { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Expedição',  Icon: ShoppingBag,       react: true,  href: '/expedicao/compras'    },
   // Catálogo
   { key: 'catalogo-pro',   moduleId: 'catalogo',       label: 'Catálogo Pro',      secao: 'Catálogo',   Icon: LayoutGrid,        react: true,  href: '/catalogo/produtos'    },
   { key: 'busca-produto',  moduleId: 'catalogo',       label: 'Busca SKU / EAN',   secao: 'Catálogo',   Icon: Search,            react: true,  href: '/catalogo/automacao'   },
   { key: 'admin',          moduleId: 'admin',          label: 'Admin Produtos',    secao: 'Catálogo',   Icon: Settings2,         react: true,  href: '/catalogo/admin'       },
-  { key: 'embalagens',     moduleId: 'embalagens',     label: 'Embalagens',        secao: 'Catálogo',   Icon: Box,               react: false, href: '/embalagens',          locked: true },
-  { key: 'cadastrar',      moduleId: 'cadastrar',      label: 'Cadastro Rápido',   secao: 'Catálogo',   Icon: PlusCircle,        react: false, href: '/cadastrar',           locked: true },
-  { key: 'enriquecer-xml', moduleId: 'enriquecer-xml', label: 'Cadastro XML',      secao: 'Catálogo',   Icon: FileCode,          react: false, href: '/enriquecer-xml',      locked: true },
   { key: 'importar',       moduleId: 'importar',       label: 'Importar CSV',      secao: 'Catálogo',   Icon: FileUp,            react: true,  href: '/catalogo/importar'    },
   { key: 'image-studio',   moduleId: 'catalogo',       label: 'Image Studio',      secao: 'Catálogo',   Icon: Camera,            react: true,  href: '/catalogo/fotos'       },
   // Financeiro
@@ -45,7 +41,6 @@ const ROTAS = [
   { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Receipt,           react: true,  href: '/financeiro/despesas'  },
   { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/margem'    },
   { key: 'fin-painel',     moduleId: 'financas',       label: 'Painel',            secao: 'Financeiro', Icon: LayoutDashboard,   react: true,  href: '/financeiro/painel'    },
-  { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Expedição',  Icon: ShoppingBag,       react: true,  href: '/expedicao/compras'    },
   // Sistema
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },
   { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal, react: true,  href: '/sistema/config'       },
@@ -269,34 +264,6 @@ function ThemeBackground({ tema }) {
 
 // ─── NavItem ──────────────────────────────────────────────────────────────────
 function NavItem({ rota, ativo, collapsed, onClick }) {
-  // ── LOCKED — tela ainda não migrada ───────────────────────────────────────
-  if (rota.locked) {
-    return (
-      <div
-        className={[
-          'group relative flex items-center gap-2.5 rounded-md text-[13px] font-medium select-none',
-          'opacity-30 cursor-not-allowed',
-          collapsed ? 'px-2 py-2 justify-center' : 'px-2.5 py-1.5',
-        ].join(' ')}
-        title={`${rota.label} — aguardando migração`}
-      >
-        <rota.Icon size={15} className="shrink-0 text-slate-700" />
-        {!collapsed && (
-          <>
-            <span className="truncate leading-none text-slate-700">{rota.label}</span>
-            <span className="ml-auto flex items-center gap-0.5 text-[8px] font-bold text-slate-800 bg-slate-800/60 border border-slate-700/50 px-1.5 py-0.5 rounded uppercase tracking-wider">
-              <Lock size={7} />em breve
-            </span>
-          </>
-        )}
-        {collapsed && (
-          <span className="pointer-events-none absolute left-full ml-2.5 z-[60] px-2.5 py-1.5 rounded-lg bg-slate-800 border border-white/[0.08] text-xs font-medium text-slate-500 whitespace-nowrap shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-            {rota.label} <span className="text-slate-700 ml-1">— em migração</span>
-          </span>
-        )}
-      </div>
-    );
-  }
 
   // ── NORMAL ────────────────────────────────────────────────────────────────
   const cls = [
@@ -356,7 +323,7 @@ function SidebarContent({ perfil, loading, collapsed, setCollapsed, mobile, onCl
   );
 
   function isAtivo(rota) {
-    if (!rota.react || rota.locked) return false;
+    // Todas as rotas estão em React, sem rotas locked
     return location.pathname === rota.href || location.pathname.startsWith(rota.href + '/');
   }
 

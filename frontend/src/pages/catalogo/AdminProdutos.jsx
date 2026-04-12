@@ -560,7 +560,8 @@ export default function AdminProdutos() {
   // ── Buscar fotos no Bling ────────────────────────────────────────────────
   const [blingImgs,       setBlingImgs]       = useState([]);
   const [loadingBlingImg, setLoadingBlingImg] = useState(false);
-  const [blingImgOpen,    setBlingImgOpen]    = useState(false);
+  const [blingImgOpen,    setBlingImgOpen]    = useState(true); // always open
+  const [sendingToBling,  setSendingToBling]  = useState(false);
 
   async function fetchBlingImages() {
     if (!produto) return;
@@ -570,8 +571,7 @@ export default function AdminProdutos() {
       const q   = ean ? `ean=${encodeURIComponent(ean)}` : `sku=${encodeURIComponent(produto.sku)}`;
       const data = await apiFetch(`/bling/product-images?${q}`);
       setBlingImgs(data.images || []);
-      setBlingImgOpen(true);
-      if (!(data.images || []).length) showToast('Nenhuma imagem encontrada no Bling', 'info');
+      if (!(data.images || []).length) showToast('Nenhuma imagem no Bling', 'info');
     } catch (e) {
       if (e.message?.includes('não autenticado')) showToast('Bling não conectado — acesse /bling/auth', 'err');
       else showToast('Erro: ' + e.message, 'err');
@@ -579,9 +579,13 @@ export default function AdminProdutos() {
     setLoadingBlingImg(false);
   }
 
+  // Auto-fetch Bling images when product changes
+  useEffect(() => {
+    if (produto?.sku) fetchBlingImages();
+  }, [produto?.sku]); // eslint-disable-line
+
   async function importBlingImage(url) {
     try {
-      // Fetch image and upload to Cloudinary
       const token = await getAuthToken();
       const imgRes = await fetch(url);
       const blob   = await imgRes.blob();
@@ -596,6 +600,34 @@ export default function AdminProdutos() {
       onPhotoUploaded('stock', data.url);
       showToast('Imagem importada do Bling ✓');
     } catch (e) { showToast('Erro ao importar: ' + e.message, 'err'); }
+  }
+
+  async function sendPhotosToBling() {
+    if (!produto) return;
+    const allLocal = [...stockPhotos, ...boxPhotos].filter(Boolean);
+    if (!allLocal.length) { showToast('Nenhuma foto local para enviar', 'err'); return; }
+    setSendingToBling(true);
+    try {
+      // Busca blingId do produto
+      const ean = produto.ean || produto.eanBox;
+      const q = ean ? `ean=${encodeURIComponent(ean)}` : `sku=${encodeURIComponent(produto.sku)}`;
+      const searchData = await apiFetch(`/bling/product-images?${q}`);
+      const blingProd = searchData.produtos?.[0];
+      if (!blingProd?.id) throw new Error('Produto não encontrado no Bling');
+
+      // Envia via PUT com as imagens externas
+      const token = await getAuthToken();
+      const res = await fetch(`/api/catalogo/produto/${blingProd.id}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imagens: allLocal }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Falha ao enviar');
+      showToast(`${allLocal.length} foto(s) enviada(s) ao Bling ✓`);
+      fetchBlingImages(); // refresh
+    } catch (e) { showToast('Erro: ' + e.message, 'err'); }
+    setSendingToBling(false);
   }
 
   // ── Marca modal ───────────────────────────────────────────────────────────
@@ -1005,60 +1037,59 @@ export default function AdminProdutos() {
               </div>
             </Section>
 
-            {/* ── Fotos do Produto ── */}
-            <Section emoji="📦" title="Fotos do Produto" badge="Sistema"
+            {/* ── Fotos do Bling ── */}
+            <Section emoji="🔗" title="Fotos do Bling" badge="Bling"
+              right={
+                <button onClick={fetchBlingImages} disabled={loadingBlingImg}
+                  className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/20 bg-blue-500/[0.06] text-blue-400 hover:bg-blue-500/15 transition-colors disabled:opacity-40">
+                  {loadingBlingImg ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
+                  Atualizar
+                </button>
+              }
+            >
+              {loadingBlingImg ? (
+                <div className="flex justify-center py-4"><Loader2 size={18} className="animate-spin text-blue-400" /></div>
+              ) : blingImgs.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {blingImgs.map((img, i) => (
+                    <button key={i} onClick={() => importBlingImage(img.url)}
+                      className="relative group w-[88px] h-[88px] rounded-lg overflow-hidden border border-blue-500/20 bg-slate-800 hover:border-blue-400/50 transition-colors"
+                      title="Importar para o sistema local">
+                      <img src={img.url} alt="" className="w-full h-full object-contain p-0.5" />
+                      <div className="absolute inset-0 bg-blue-500/30 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-0.5">
+                        <Plus size={14} className="text-white" />
+                        <span className="text-[8px] text-white font-bold">Importar</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-600">Nenhuma imagem no Bling</p>
+              )}
+            </Section>
+
+            {/* ── Fotos Locais (Sistema) ── */}
+            <Section emoji="📦" title="Fotos Locais" badge="Sistema"
               right={
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-slate-600">{stockPhotos.length + boxPhotos.length}/20</span>
-                  <button
-                    onClick={fetchBlingImages}
-                    disabled={loadingBlingImg}
-                    className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/20 bg-blue-500/[0.06] text-blue-400 hover:bg-blue-500/15 transition-colors disabled:opacity-40"
-                    title="Buscar imagens no Bling por EAN/SKU"
-                  >
-                    {loadingBlingImg
-                      ? <Loader2 size={9} className="animate-spin" />
-                      : <Sparkles size={9} />
-                    }
-                    Importar do Bling
+                  <button onClick={sendPhotosToBling} disabled={sendingToBling || !(stockPhotos.length + boxPhotos.length)}
+                    className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-400 hover:bg-emerald-500/15 transition-colors disabled:opacity-40"
+                    title="Enviar fotos locais para o Bling">
+                    {sendingToBling ? <Loader2 size={9} className="animate-spin" /> : <ExternalLink size={9} />}
+                    Enviar ao Bling
                   </button>
                 </div>
               }
             >
-              {/* Modal Bling images picker */}
-              {blingImgOpen && blingImgs.length > 0 && (
-                <div className="mb-4 p-3 rounded-xl border border-blue-500/20 bg-blue-500/[0.04] animate-fade-in">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">
-                      {blingImgs.length} imagem{blingImgs.length !== 1 ? 's' : ''} encontrada{blingImgs.length !== 1 ? 's' : ''} no Bling
-                    </p>
-                    <button onClick={() => setBlingImgOpen(false)} className="text-slate-600 hover:text-slate-300">
-                      <X size={12} />
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {blingImgs.map((img, i) => (
-                      <button key={i} onClick={() => importBlingImage(img.url)}
-                        className="relative group w-[72px] h-[72px] rounded-lg overflow-hidden border border-white/[0.08] bg-slate-800 hover:border-blue-400/50 transition-colors"
-                        title="Clique para importar">
-                        <img src={img.url} alt="" className="w-full h-full object-contain p-0.5" />
-                        <div className="absolute inset-0 bg-blue-500/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <Plus size={16} className="text-white" />
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div className="space-y-4">
                 <div>
-                  <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">📦 Produto (sem embalagem)</p>
+                  <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">Produto (sem embalagem)</p>
                   <PhotoStrip photos={stockPhotos} kind="stock" sku={produto.sku}
                     onUploaded={onPhotoUploaded} onDelete={deletePhoto} onReplace={replacePhoto} />
                 </div>
                 <div>
-                  <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">🎁 Produto embalado</p>
+                  <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">Produto embalado</p>
                   <PhotoStrip photos={boxPhotos} kind="box" sku={produto.sku}
                     onUploaded={onPhotoUploaded} onDelete={deletePhoto} onReplace={replacePhoto} />
                 </div>
