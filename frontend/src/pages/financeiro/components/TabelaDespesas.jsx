@@ -14,15 +14,7 @@ import {
   ArrowUp, ArrowDown, CheckCircle2, Clock, AlertCircle, Trash2, Inbox,
   MessageCircle, Copy, X, Check, Loader2, FileText, ExternalLink,
 } from 'lucide-react';
-
-const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-
-const TIPO_LABEL = { mensal_fixa: 'Fixa', operacional: 'Operac.', investimento: 'Invest.' };
-const TIPO_CLS   = {
-  mensal_fixa:  'bg-blue-900/40 text-blue-300 border-blue-700/40',
-  operacional:  'bg-slate-700/60 text-slate-400 border-white/10',
-  investimento: 'bg-violet-900/40 text-violet-300 border-violet-700/40',
-};
+import { BRL, TIPO_LABEL, TIPO_CLS } from '../../../utils/financeiroUtils';
 
 function fmtWhats(despesas) {
   const linhas = despesas.map(d => {
@@ -197,9 +189,9 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
                           {TIPO_LABEL[d.tipo] || d.tipo}
                         </span>
                       )}
-                      {/* link para Contas se for investimento */}
+                      {/* link para parcelas se for investimento */}
                       {d.tipo === 'investimento' && d.compraId && (
-                        <a href="/financeiro/contas" title="Ver parcelas em Contas a Pagar"
+                        <a href="/financeiro/despesas" title="Ver parcelas na aba Parcelas"
                           onClick={e => e.stopPropagation()}
                           className="ml-1.5 text-violet-400 hover:text-violet-300">
                           <ExternalLink size={10} className="inline" />

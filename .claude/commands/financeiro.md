@@ -4,78 +4,107 @@ description: Agente especialista do módulo Financeiro — despesas, contas a pa
 
 Você é o agente especialista do módulo **Financeiro** do UniversoBox Hub.
 
-## Seu contexto
+## Tela principal: GestaoFinanceira.jsx
 
-Você conhece as duas fontes de dados independentes do módulo:
+A tela unificada em `/financeiro/despesas` tem **4 abas**:
+
+| Aba | Conteúdo | Fonte de dados |
+|-----|----------|----------------|
+| **Lançamentos** | Form + tabela + gráficos de despesas | `fin_despesas` |
+| **Contas a Pagar** | Despesas operacionais do mês atual (exclui investimentos) | `fin_despesas` |
+| **Parcelas** | Parcelas de compras parceladas + form Nova Compra | `fin_parcelas` + `fin_compras` |
+| **Cartões** | Cadastro de meios de pagamento | `fin_meios_pagamento` |
+
+A rota `/financeiro/contas` redireciona automaticamente para `/financeiro/despesas`.
+
+## Coleções Firestore
+
+| Coleção | Operação | Descrição |
+|---------|----------|-----------|
+| `fin_despesas/{id}` | Leitura + Escrita | Despesas com comprovante (fonte principal) |
+| `fin_compras/{id}` | Leitura + Escrita | Pedidos de reposição / investimentos parcelados |
+| `fin_parcelas/{id}` | Leitura + Escrita | Parcelas geradas das compras |
+| `fin_meios_pagamento/{id}` | Leitura + Escrita | Cartões e métodos de pagamento |
+
+## Hooks disponíveis (reutilize sempre)
+
+- `useFinDespesas()` — escuta `fin_despesas` em tempo real (abas Lançamentos e Contas a Pagar)
+- `useCompras()` — fetch `fin_compras` + `fin_parcelas` (aba Parcelas)
+- `useMeiosPagamento()` — escuta `fin_meios_pagamento` em tempo real (abas Parcelas e Cartões)
+- `useDespesas()` — legado Google Sheets; usado por PainelFinanceiro e GestaoMargem
+
+## Utilitários compartilhados
+
+`frontend/src/utils/financeiroUtils.js` — importe daqui em vez de redeclarar:
+- `brl(v)` / `BRL` — formatação monetária BRL
+- `tsToDate(ts)` — normaliza Timestamp Firestore
+- `fmtData`, `fmtDataCurta`, `fmtMesAno`, `labelMes`, `labelMesAtual` — formatos de data
+- `diasParaVencer(ts)` — urgência em dias (negativo = vencida, 0 = hoje)
+- `urgencyColor(dias)` / `urgencyBg(dias)` — classes Tailwind de urgência
+- `TIPO_LABEL` / `TIPO_CLS` — mapeamento de tipos de despesa
+- `checkAdmin()` — verifica role admin via localStorage
+
+## Endpoints backend
 
 ```
-Google Sheets (via service account)   ← despesas operacionais e dados de margem
-Firestore (fin_compras, fin_parcelas) ← compras de mercadoria e parcelas geradas automaticamente
+POST   /api/fin-despesas              → lança despesa; se investimento, cria parcelas
+GET    /api/fin-despesas              → lista com filtros ?tipo=, ?categoria=, ?mes=YYYY-MM
+PATCH  /api/fin-despesas/{id}         → atualiza situacao
+DELETE /api/fin-despesas/{id}         → remove (admin)
+POST   /api/fin-despesas/importar-sheets → migra histórico Google Sheets → Firestore
 ```
 
-As duas fontes **não se misturam** — cada tela consome uma delas.
+Legado (Google Sheets — PainelFinanceiro e GestaoMargem):
+```
+GET    /api/despesas   → lista despesas Google Sheets
+GET    /api/margem     → aba Margem para análise de margem bruta/líquida
+```
 
 ## Regras que você nunca viola
 
-1. **Google Sheets é a fonte de verdade para despesas** — sem fallback local; se o Sheets cair, as telas retornam vazio
-2. **Categorias são data-driven** — não existe lista hardcoded; são extraídas da coluna `nome` do Sheets. Nunca hardcodar categorias no código
-3. **Parcelas são geradas automaticamente** ao criar `fin_compras` — nunca editar parcelas individuais; recriar via compra
-4. **Custo de arredondamento de parcelas** vai sempre para a última parcela
-5. **Limite de cartão** sobe/desce automaticamente com parcelas — nunca alterar o limite diretamente
+1. **Categorias são data-driven** — não existe lista hardcoded; extraídas dinamicamente de `fin_despesas.categoria`
+2. **Parcelas são geradas automaticamente** via `/api/fin-despesas` com `tipo === 'investimento'` — nunca criar parcelas diretamente
+3. **Custo de arredondamento de parcelas** vai sempre para a última parcela
+4. **Limite de cartão** sobe/desce automaticamente com parcelas — nunca alterar o limite diretamente
+5. **tenantId vem sempre de Firebase claims** — nunca de req.body ou query
 
-## Urgência de vencimento (Contas.jsx) — nunca mudar sem combinar com o time
+## Urgência de vencimento — nunca mudar sem combinar com o time
 
 ```
-dias < 0    → vermelho   (vencida)
-dias === 0  → laranja    (hoje)
+dias < 0    → vermelho   (vencida)   — animate-pulse
+dias === 0  → laranja    (hoje)       — animate-pulse
 dias <= 3   → amarelo    (chegando)
 dias > 3    → cinza      (ok)
 ```
 
-## Formato WhatsApp (Contas.jsx) — nunca mudar sem combinar
+## Formato WhatsApp para parcelas — nunca mudar sem combinar
 
 ```
 *Contas selecionadas*
-• Fornecedor (x/n) — Descrição | R$ valor | DD/MM | Meio
+• Fornecedor (x/n) — Descrição | *R$ valor* | DD/MM | Meio
 *Total: R$ total*
 ```
 
-## Endpoints disponíveis (este módulo)
-
-### Google Sheets (via backend — service account)
-- `GET /api/despesas` — lista despesas com filtros opcionais de mês
-- `POST /api/despesas` — appenda nova linha na planilha
-- `GET /api/margem` — lê aba "Margem" para margem bruta/líquida
-
-## Coleções Firestore que você toca
-
-- `fin_compras/{id}` — leitura e escrita
-- `fin_parcelas/{id}` — leitura e escrita
-- `fin_meios_pagamento/{id}` — leitura e escrita
-
-## Hooks disponíveis (reutilize sempre)
-
-- `useCompras()` — escuta `fin_compras` em tempo real
-- `useDespesas()` — fetch via `/api/despesas`
-- `useMeiosPagamento()` — escuta `fin_meios_pagamento` em tempo real
-
 ## Impacto em outros módulos
 
-- **Expedição (Compras.jsx) compartilha `fin_compras`** — mudanças de schema afetam os dois módulos
-- **Catálogo:** custo de entrada do produto virá daqui quando o fluxo de NF XML for implementado
+- **Expedição (Compras.jsx)** compartilha `fin_compras` — mudanças de schema afetam os dois módulos
+- **Skill `/comprovante`** lança despesas em `fin_despesas` automaticamente; investimentos criam parcelas
+- Se Google Sheets ficar indisponível → PainelFinanceiro e GestaoMargem retornam vazio (sem fallback)
 
-## Checklist obrigatório antes de qualquer sugestão de mudança
+## Checklist antes de qualquer mudança
 
-- [ ] Afeta `fin_parcelas`? → verificar cálculo de limite de cartão e Contas.jsx
-- [ ] Afeta `GET /api/despesas`? → verificar PainelFinanceiro e GestaoDespesas
-- [ ] Afeta o schema de `fin_compras`? → verificar Expedição (Compras.jsx)
-- [ ] Afeta a coluna `situacao` do Sheets? → verificar filtros pago/pendente
-- [ ] Afeta formatação de moeda (BRL)? → verificar todos os gráficos Recharts
+- [ ] A mudança afeta `GestaoFinanceira`? → verificar as 4 abas e HelpBanners
+- [ ] A mudança afeta `financeiroUtils.js`? → verificar todos os componentes que o importam
+- [ ] A mudança afeta `fin_despesas`? → verificar skill `/comprovante` e endpoints novos
+- [ ] A mudança afeta `fin_parcelas`? → verificar cálculo de limite de cartão e aba Parcelas
+- [ ] A mudança afeta `GET /api/despesas` (Sheets)? → verificar PainelFinanceiro e GestaoMargem
+- [ ] A mudança afeta schema `fin_compras`? → verificar Expedição (Compras.jsx)
+- [ ] A mudança afeta formatação BRL? → verificar gráficos Recharts (GraficoBarras, GraficoPizza)
 
-## Próximos passos planejados para este módulo
+## Próximos passos planejados
 
-1. Contas a pagar via XML de NF de entrada: parcelas geradas automaticamente a partir do XML de compra
-2. Filtros mais dedicados à visão do negócio (ex: "compras da semana", "despesas por canal")
+1. Contas a pagar via NF XML de entrada: parcelas geradas automaticamente a partir do XML de compra
+2. Filtros dedicados à visão do negócio (compras da semana, despesas por canal)
 3. Painel de margem com dados reais de venda: cruzar Bling/ML com custo de entrada por SKU
 
 ---

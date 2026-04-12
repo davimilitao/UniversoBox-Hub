@@ -3,7 +3,7 @@
  * @module financeiro
  * @description Aba "Contas a Pagar" de despesas operacionais (fin_despesas).
  *              Exibe despesas do mês atual separadas por seção: Vencidas / Pendentes / Pagas.
- *              Investimentos parcelados são omitidos aqui (estão em Contas.jsx via fin_parcelas).
+ *              Investimentos parcelados são omitidos aqui (estão na aba Parcelas via fin_parcelas).
  * @version 1.0.0
  * @date 2026-04-11
  */
@@ -11,26 +11,17 @@
 import { useState, useMemo } from 'react';
 import {
   AlertCircle, Clock, CheckCircle2, ChevronDown, ChevronUp,
-  Loader2, ExternalLink, FileText,
+  Loader2, FileText,
 } from 'lucide-react';
+import { brl, TIPO_LABEL, TIPO_CLS } from '../../../utils/financeiroUtils';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-
-const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-function brl(v) { return BRL.format(v || 0); }
 
 const HOJE_INICIO = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
 
 function diasAtraso(ts) {
   return Math.ceil((HOJE_INICIO - ts) / 86400000);
 }
-
-const TIPO_LABEL = { mensal_fixa: 'Fixa', operacional: 'Operac.', investimento: 'Invest.' };
-const TIPO_CLS   = {
-  mensal_fixa:   'bg-blue-900/40 text-blue-300 border-blue-700/40',
-  operacional:   'bg-slate-800 text-slate-400 border-white/10',
-  investimento:  'bg-violet-900/40 text-violet-300 border-violet-700/40',
-};
 
 // ─── sub-componentes ──────────────────────────────────────────────────────────
 

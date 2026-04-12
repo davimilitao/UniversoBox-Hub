@@ -10,7 +10,7 @@
  *   1.0.0 — 2026-04-01 — Criação inicial.
  */
 
-const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+import { BRL } from '../../../utils/financeiroUtils';
 
 function Card({ titulo, valor, count, variante = 'default' }) {
   const cls = {
