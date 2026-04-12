@@ -469,14 +469,14 @@ export function GestaoFinanceira() {
   const categorias = useMemo(() => extrairCategorias(despesasComStatus), [despesasComStatus]);
   const tipos      = useMemo(() => extrairTipos(despesasComStatus), [despesasComStatus]);
 
+  const mesAtualLabel = useMemo(() => labelMesAtual(), []);
+
   const mesEfetivo = mesAtivo || meses.find(m => m.label === mesAtualLabel)?.label || meses[0]?.label || '';
 
   const despesasMes = useMemo(() => {
     if (!mesEfetivo) return despesasComStatus;
     return despesasComStatus.filter(d => labelMesAnoTs(d.timestamp) === mesEfetivo);
   }, [despesasComStatus, mesEfetivo]);
-
-  const mesAtualLabel = useMemo(() => labelMesAtual(), []);
   const despesasMesAtual = useMemo(
     () => despesasComStatus.filter(d => labelMesAnoTs(d.timestamp) === mesAtualLabel),
     [despesasComStatus, mesAtualLabel],
