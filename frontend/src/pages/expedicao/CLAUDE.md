@@ -10,7 +10,14 @@ Especialista no fluxo diário de separação e envio de pedidos: da importação
 | `BlingPedidos.jsx` | Importa NFs de saída do Bling e clona como pedidos internos |
 | `PedidosDoDia.jsx` | **CORE** — fila de separação diária com scanner, impressão DANFE e etiqueta |
 | `GestaoInsumos.jsx` | Controle de estoque de insumos (embalagens, etiquetas térmicas) |
-| `Compras.jsx` | Pedidos de reposição e rastreio de itens em trânsito |
+| `Compras.jsx` | Orquestrador 5 abas: Pedidos Abertos, Pedidos Fechados, A Caminho, Novo Pedido, Inteligência |
+| `compras/AbaPedidosAbertos.jsx` | Pedidos manuais aguardando XML NF-e; botão "Importar XML" |
+| `compras/AbaPedidosFechados.jsx` | Pedidos confirmados via NF-e; CTA para lançar no Financeiro |
+| `compras/AbaACaminho.jsx` | Rastreio de itens em trânsito (extraído sem mudanças) |
+| `compras/AbaMontarPedido.jsx` | Montar novo pedido com detecção de duplicatas entre pedidos abertos |
+| `compras/AbaInteligencia.jsx` | Dashboard BI de compras (extraído sem mudanças) |
+| `compras/ModalFecharComXml.jsx` | Upload XML NF-e → match de itens → confirmação e fechamento |
+| `compras/ModalLancarFinanceiro.jsx` | Modal que abre FormLancarDespesa pré-preenchido com dados da NF |
 
 ## Regras de negócio críticas
 
@@ -54,14 +61,36 @@ Se o parsing mudar, o roteamento de etiquetas de envio quebra.
 - `GET /api/transit` — itens a caminho (módulo Compras)
 - `PATCH /api/transit/{itemId}/received` — confirma recebimento
 
+### Compras — reposição de estoque
+- `GET /api/purchase-orders` — lista pedidos; suporta `?status=pending|fechado` (novo)
+- `POST /api/compras` — cria pedido de reposição manual
+- `POST /api/compras/parse-xml` — parseia XML NF-e; retorna `{nf, itens}` sem gravar nada
+- `POST /api/compras/:id/fechar` — fecha pedido via NF-e: atualiza status, grava custoUnitario por item, incrementa `products.stock` via Firestore batch
+- `PATCH /api/purchase-orders/:id` — atualização segura de metadados (`finDespesaId`, `notas`)
+
 ## Coleções Firestore
 
 | Coleção | Operação | Descrição |
 |---------|----------|-----------|
 | `orders/{id}` | Leitura + Escrita | Pedidos internos de separação |
 | `insumos/{id}` | Leitura + Escrita | Estoque de insumos |
-| `fin_compras/{id}` | Leitura | Pedidos de reposição |
+| `purchase_orders/{id}` | Leitura + Escrita | Pedidos de reposição — campos-chave abaixo |
+| `products/{sku}` | Escrita (increment) | `stock` incrementado ao fechar pedido via XML NF-e |
 | `bling_tokens/main` | Leitura (via backend) | Token OAuth2 do Bling |
+
+### Campos de `purchase_orders` adicionados na v2.0.0
+
+| Campo | Tipo | Quando |
+|-------|------|--------|
+| `status` | `'pending'\|'fechado'` | criação / fechamento |
+| `valorTotal` | `number` | fechamento via XML |
+| `fornecedor` | `string` | fechamento via XML |
+| `fornecedorCnpj` | `string` | fechamento via XML |
+| `notaFiscalNumero` | `string` | fechamento via XML |
+| `notaFiscalSerie` | `string` | fechamento via XML |
+| `dataFechamento` | `number` (ms) | fechamento via XML |
+| `finDespesaId` | `string\|null` | lançamento no Financeiro |
+| `items[n].custoUnitario` | `number` | fechamento via XML (match por SKU) |
 
 ## Integrações de hardware
 - **QZ Tray** — necessário para impressão de etiqueta ZPL em impressora térmica (Zebra)
@@ -78,8 +107,27 @@ Se o parsing mudar, o roteamento de etiquetas de envio quebra.
 
 **`PedidosDoDia.jsx` é a operação crítica do negócio — qualquer alteração deve ser testada manualmente antes de ir para produção.**
 
+## Integrações entre módulos (v2.0.0)
+
+### Expedição → Financeiro
+- Ao fechar um pedido via XML, o botão **"Lançar no Financeiro"** abre `ModalLancarFinanceiro`
+- O modal usa `FormLancarDespesa` com `initialValues` pré-preenchido (fornecedor, valor, NF)
+- Após confirmação: `POST /api/fin-despesas` cria despesa tipo `investimento` na categoria `'Compras de Mercadoria'`
+- `PATCH /api/purchase-orders/:id` grava `finDespesaId` linkando os dois registros
+- Despesa tipo `investimento` gera parcelas automaticamente em `fin_parcelas` (aparece em Contas.jsx)
+
+### Expedição → Catálogo
+- `POST /api/compras/:id/fechar` incrementa `products.stock` via Firestore batch para cada SKU com match no XML
+- Produtos que tinham `stock === 0` (ruptura) saem automaticamente da listagem de ruptura do Catálogo
+- Itens do XML sem match de SKU exibem CTA "Cadastrar no catálogo" → link para `/spa/catalogo/admin`
+
+### Detecção de duplicatas (Compras → Compras)
+- `AbaMontarPedido` carrega pedidos abertos e constrói mapa `{sku: [{pedidoId, qty}]}`
+- Badge laranja com tooltip CSS puro indica SKUs já presentes em pedidos abertos
+- Não bloqueia adição — apenas avisa
+
 ## Próximos passos planejados
 
-1. **Tela de Compras — Nota Fiscal de Entrada (XML):** substituir o pedido manual por importação de XML de NF de entrada, criando uma lista de itens a caminho real com EAN e valor da nota
-2. **Link Compras → Catálogo:** ao clicar em "recebido" em um item da NF de entrada, abrir o fluxo de cadastro no módulo Catálogo (AdminProdutos) para novos SKUs
+1. ~~**Tela de Compras — Nota Fiscal de Entrada (XML)**~~ ✅ Implementado em 2026-04-12
+2. ~~**Link Compras → Catálogo**~~ ✅ Implementado via CTA + auto-increment de stock em 2026-04-12
 3. **Alertas de insumos:** cruzar consumo por pedido com estoque atual para gerar sugestão automática de reposição
