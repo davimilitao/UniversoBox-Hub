@@ -1458,15 +1458,26 @@ app.post('/api/compras', async (req, res, next) => {
 });
 
 // GET /api/purchase-orders — log de pedidos do backend (sincronizado entre dispositivos)
+// Filtro ?status= feito em memória para evitar índice composto no Firestore.
+// Pedidos sem campo 'status' (criados antes da v2.0) são tratados como 'pending'.
 app.get('/api/purchase-orders', async (req, res, next) => {
   try {
     const limit = Math.min(Number(req.query.limit || 30), 100);
-    let query = db.collection('purchase_orders').orderBy('createdAtMs', 'desc');
+    const snap = await db.collection('purchase_orders')
+      .orderBy('createdAtMs', 'desc')
+      .limit(limit)
+      .get();
+    let items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (req.query.status) {
-      query = query.where('status', '==', req.query.status);
+      const s = req.query.status;
+      if (s === 'pending') {
+        // inclui pedidos sem campo status (legado) como abertos
+        items = items.filter(it => !it.status || it.status === 'pending');
+      } else {
+        items = items.filter(it => it.status === s);
+      }
     }
-    const snap = await query.limit(limit).get();
-    res.json({ items: snap.docs.map(d => ({ id: d.id, ...d.data() })) });
+    res.json({ items });
   } catch (err) {
     console.error('[GET /api/purchase-orders]', err);
     next(err);
