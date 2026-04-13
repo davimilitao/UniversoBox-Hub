@@ -2,11 +2,13 @@
  * @file server.js
  * @module app
  * @description Servidor Express principal (rotas, estáticos, integrações).
- * @version 0.3.0
- * @date 2026-03-31
+ * @version 0.4.0
+ * @date 2026-04-12
  * @author UniversoLab
  *
  * @changelog
+ *   0.4.0 — 2026-04-12 — NF-e: parse-xml, fechar pedido (atualiza stock), patch metadados;
+ *             GET purchase-orders suporta filtro ?status=.
  *   0.3.0 — 2026-03-31 — Rotas sensíveis: requireAuth JWT → requireFirebaseAuth + requireFirebaseRole;
  *             upload Cloudinary valida/marca tenantId em product_overrides.
  */
@@ -1459,10 +1461,11 @@ app.post('/api/compras', async (req, res, next) => {
 app.get('/api/purchase-orders', async (req, res, next) => {
   try {
     const limit = Math.min(Number(req.query.limit || 30), 100);
-    const snap  = await db.collection('purchase_orders')
-      .orderBy('createdAtMs', 'desc')
-      .limit(limit)
-      .get();
+    let query = db.collection('purchase_orders').orderBy('createdAtMs', 'desc');
+    if (req.query.status) {
+      query = query.where('status', '==', req.query.status);
+    }
+    const snap = await query.limit(limit).get();
     res.json({ items: snap.docs.map(d => ({ id: d.id, ...d.data() })) });
   } catch (err) {
     console.error('[GET /api/purchase-orders]', err);
@@ -1484,6 +1487,165 @@ app.patch('/api/purchase-orders/:id/transit-status', async (req, res, next) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[PATCH /api/purchase-orders/:id/transit-status]', err);
+    next(err);
+  }
+});
+
+// ─── Compras NF-e ──────────────────────────────────────────────────────────
+
+// Multer dedicado para upload de XML NF-e (memória, sem disco, 2 MB max)
+const uploadXml = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_, file, cb) => {
+    const ok = file.mimetype.includes('xml') || file.originalname.toLowerCase().endsWith('.xml');
+    cb(ok ? null : new Error('Apenas arquivos XML são aceitos'), ok);
+  },
+});
+
+// POST /api/compras/parse-xml — parseia XML NF-e de entrada sem gravar no Firestore
+// Suporta layouts: nfeProc (com protocolo) e NFe puro
+app.post('/api/compras/parse-xml', uploadXml.single('xml'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Arquivo XML não recebido' });
+
+    const { XMLParser } = require('fast-xml-parser');
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: '@_',
+      isArray: (name) => name === 'det',
+    });
+
+    let obj;
+    try {
+      obj = parser.parse(req.file.buffer.toString('utf-8'));
+    } catch (parseErr) {
+      return res.status(400).json({ error: 'XML inválido ou corrompido' });
+    }
+
+    // Suporta dois layouts: com wrapper nfeProc ou NFe puro
+    const infNFe =
+      obj?.nfeProc?.NFe?.infNFe ||
+      obj?.NFe?.infNFe ||
+      obj?.nfeProc?.infNFe ||
+      null;
+
+    if (!infNFe) {
+      return res.status(400).json({ error: 'Estrutura de NF-e não reconhecida no XML' });
+    }
+
+    const ide   = infNFe.ide  || {};
+    const emit  = infNFe.emit || {};
+    const total = infNFe.total?.ICMSTot || {};
+    const dets  = Array.isArray(infNFe.det) ? infNFe.det : (infNFe.det ? [infNFe.det] : []);
+
+    const nf = {
+      numero:       String(ide.nNF   || ''),
+      serie:        String(ide.serie || ''),
+      dataEmissao:  String(ide.dhEmi || ide.dEmi || ''),
+      fornecedor:   safeTrim(emit.xNome  || ''),
+      cnpj:         safeTrim(emit.CNPJ   || ''),
+      valorTotal:   parseFloat(total.vNF || 0),
+    };
+
+    const itens = dets.map((d) => {
+      const prod = d.prod || {};
+      const eanRaw = String(prod.cEAN || '').trim();
+      return {
+        codigo:        safeTrim(String(prod.cProd || '')),
+        ean:           eanRaw && eanRaw !== 'SEM GTIN' ? eanRaw : null,
+        descricao:     safeTrim(String(prod.xProd || '')),
+        ncm:           safeTrim(String(prod.NCM   || '')),
+        qty:           parseFloat(prod.qCom || 0),
+        custoUnitario: parseFloat(prod.vUnCom || 0),
+        valorTotal:    parseFloat(prod.vProd  || 0),
+      };
+    });
+
+    res.json({ ok: true, nf, itens });
+  } catch (err) {
+    console.error('[POST /api/compras/parse-xml]', err);
+    next(err);
+  }
+});
+
+// POST /api/compras/:id/fechar — confirma pedido via dados do XML, atualiza estoque
+app.post('/api/compras/:id/fechar', async (req, res, next) => {
+  try {
+    const id = safeTrim(req.params.id);
+    const { valorTotal, fornecedor, fornecedorCnpj, notaFiscalNumero, notaFiscalSerie, itensXml } = req.body;
+
+    if (!id) return res.status(400).json({ error: 'ID do pedido obrigatório' });
+    if (!Array.isArray(itensXml)) return res.status(400).json({ error: 'itensXml deve ser um array' });
+
+    const pedidoRef  = db.collection('purchase_orders').doc(id);
+    const pedidoSnap = await pedidoRef.get();
+
+    if (!pedidoSnap.exists) return res.status(404).json({ error: 'Pedido não encontrado' });
+    if (pedidoSnap.data().status === 'fechado') return res.status(409).json({ error: 'Pedido já foi fechado' });
+
+    // Mescla custoUnitario do XML nos items do pedido
+    const itemsOriginais  = pedidoSnap.data().items || [];
+    const itemsAtualizados = itemsOriginais.map((item) => {
+      const match = itensXml.find((x) => x.sku && x.sku === item.sku);
+      return match ? { ...item, custoUnitario: Number(match.custoUnitario || 0) } : item;
+    });
+
+    // Batch: fecha pedido + incrementa stock dos produtos com match
+    const admin = require('firebase-admin');
+    const batch = db.batch();
+
+    batch.update(pedidoRef, {
+      status:            'fechado',
+      valorTotal:        parseFloat(valorTotal || 0),
+      fornecedor:        safeTrim(fornecedor    || ''),
+      fornecedorCnpj:    safeTrim(fornecedorCnpj || ''),
+      notaFiscalNumero:  safeTrim(notaFiscalNumero || ''),
+      notaFiscalSerie:   safeTrim(notaFiscalSerie  || ''),
+      dataFechamento:    Date.now(),
+      items:             itemsAtualizados,
+      updatedAtMs:       Date.now(),
+    });
+
+    for (const item of itensXml) {
+      if (!item.sku) continue;
+      const qty = Number(item.qty);
+      if (!qty || qty <= 0) continue;
+      const prodRef = db.collection('products').doc(item.sku);
+      batch.update(prodRef, {
+        stock:       admin.firestore.FieldValue.increment(qty),
+        updatedAtMs: Date.now(),
+      });
+    }
+
+    await batch.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[POST /api/compras/:id/fechar]', err);
+    next(err);
+  }
+});
+
+// PATCH /api/purchase-orders/:id — atualiza metadados seguros (whitelist)
+app.patch('/api/purchase-orders/:id', async (req, res, next) => {
+  try {
+    const ALLOWED = ['finDespesaId', 'notas'];
+    const id      = safeTrim(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID obrigatório' });
+
+    const patch = {};
+    for (const k of ALLOWED) {
+      if (req.body[k] !== undefined) patch[k] = req.body[k];
+    }
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ error: 'Nenhum campo válido para atualizar' });
+    }
+    patch.updatedAtMs = Date.now();
+
+    await db.collection('purchase_orders').doc(id).set(patch, { merge: true });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[PATCH /api/purchase-orders/:id]', err);
     next(err);
   }
 });

@@ -118,9 +118,11 @@ Os endpoints `/api/despesas` (Google Sheets) continuam funcionando durante a tra
 
 ## Impacto em outros módulos
 
-- **Expedição (Compras):** `fin_compras` é compartilhada — mudanças de schema afetam ambos
-- **Contas.jsx:** investimentos parcelados lançados via `/comprovante` aparecem aqui automaticamente
-- Se Google Sheets ficar indisponível → PainelFinanceiro e GestaoMargem retornam vazio (sem fallback)
+- **Expedição → Financeiro (novo — 2026-04-12):** `ModalLancarFinanceiro` em `compras/` chama `POST /api/fin-despesas` diretamente com tipo `investimento` e categoria `'Compras de Mercadoria'`. O `finDespesaId` retornado é gravado em `purchase_orders/{id}` via `PATCH /api/purchase-orders/:id`.
+- **`FormLancarDespesa` agora aceita `initialValues`:** prop opcional (default `{}`) que pré-preenche o formulário — qualquer caller existente não é afetado.
+- **`fin_compras` vs `fin_despesas`:** o fluxo de compras da Expedição usa `fin_despesas` (tipo `investimento`), não `fin_compras` diretamente. Mudanças no schema de `fin_despesas` afetam o modal.
+- **Contas.jsx:** investimentos tipo `investimento` lançados pela Expedição aparecem aqui automaticamente (via `fin_parcelas`).
+- Se Google Sheets ficar indisponível → PainelFinanceiro e GestaoMargem retornam vazio (sem fallback).
 
 ## Checklist antes de qualquer mudança
 
@@ -133,6 +135,6 @@ Os endpoints `/api/despesas` (Google Sheets) continuam funcionando durante a tra
 ## Próximos passos planejados
 
 1. Migrar GestaoDespesas para consumir `fin_despesas` (Firestore) em vez de Google Sheets
-2. Contas a pagar via NF XML de entrada: parcelas geradas automaticamente a partir do XML de compra
+2. ~~Contas a pagar via NF XML de entrada~~ ✅ Expedição lança investimento via XML NF-e (2026-04-12)
 3. Filtros dedicados à visão do negócio (por tipo, por categoria, semana atual)
 4. Painel de margem com dados reais de venda: cruzar Bling/ML com custo de entrada por SKU

@@ -4,9 +4,10 @@
  * @description Formulário de lançamento de despesa via POST /api/fin-despesas.
  *              Suporta tipo (mensal_fixa / operacional / investimento) e fornecedor.
  *              Investimento: exibe campos numeroParcelas e meioId.
- * @version 3.0.0
- * @date 2026-04-11
+ * @version 3.1.0
+ * @date 2026-04-12
  * @changelog
+ *   3.1.0 — 2026-04-12 — Prop initialValues para pré-preencher formulário (modal de Compras).
  *   3.0.0 — 2026-04-11 — Migrado para fin-despesas (Firestore); tipo + fornecedor + parcelas.
  *   2.0.0 — 2026-04-01 — Input date nativo, Lucide icons, nova categoria inline.
  */
@@ -43,7 +44,7 @@ const TIPOS = [
   { val: 'investimento', label: 'Investimento',   desc: 'Parcelado — vai p/ Contas a Pagar' },
 ];
 
-export function FormLancarDespesa({ categorias, meiosPagamento = [], onSalvar, salvando }) {
+export function FormLancarDespesa({ categorias, meiosPagamento = [], onSalvar, salvando, initialValues = {} }) {
   const [form, setForm] = useState({
     data:           hojeISO(),
     tipo:           'operacional',
@@ -54,6 +55,7 @@ export function FormLancarDespesa({ categorias, meiosPagamento = [], onSalvar, s
     situacao:       'pago',
     numeroParcelas: '1',
     meioId:         '',
+    ...initialValues,
   });
   const [novaCategoria,  setNovaCategoria]  = useState('');
   const [adicionandoCat, setAdicionandoCat] = useState(false);
