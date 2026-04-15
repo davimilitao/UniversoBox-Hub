@@ -17,6 +17,8 @@ import { useNavigate } from 'react-router-dom';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, isFirebaseClientReady } from '../firebase';
 
+
+
 /** Mesma origem em produção; em dev o Vite proxy encaminha /auth e /api para o Express */
 function apiUrl(path) {
   const base = import.meta.env.VITE_API_BASE_URL;
