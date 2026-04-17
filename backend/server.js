@@ -2177,12 +2177,20 @@ function parsearTextoComprovante(text) {
     setembro:'09', outubro:'10', novembro:'11', dezembro:'12',
   };
 
-  // Valor: maior R$ encontrado no texto
+  // Valor: tenta R$ X.XXX,XX e fallback para número isolado grande
   let valor = 0;
   const valorMatches = [...text.matchAll(/R\$\s*([\d.]+,\d{2})/g)];
   if (valorMatches.length) {
     const valores = valorMatches.map(m => parseFloat(m[1].replace(/\./g, '').replace(',', '.')));
     valor = Math.max(...valores);
+  }
+  if (!valor) {
+    // fallback: número com vírgula no formato brasileiro sem símbolo R$
+    const semSimbolo = [...text.matchAll(/\b(\d{1,3}(?:\.\d{3})*,\d{2})\b/g)];
+    if (semSimbolo.length) {
+      const vals = semSimbolo.map(m => parseFloat(m[1].replace(/\./g, '').replace(',', '.')));
+      valor = Math.max(...vals);
+    }
   }
 
   // Data
@@ -2240,14 +2248,13 @@ app.post('/api/fin-despesas/parse-comprovante', requireFirebaseAuth, uploadMemor
       // Imagem (foto de comprovante): usa Google Vision OCR
       const { google } = require('googleapis');
       const vision = google.vision('v1');
-      const auth = new google.auth.JWT(
-        serviceAccount.client_email,
-        null,
-        serviceAccount.private_key,
-        ['https://www.googleapis.com/auth/cloud-vision']
-      );
+      const auth = new google.auth.GoogleAuth({
+        credentials: serviceAccount,
+        scopes: ['https://www.googleapis.com/auth/cloud-vision'],
+      });
+      const authClient = await auth.getClient();
       const response = await vision.images.annotate({
-        auth,
+        auth: authClient,
         requestBody: {
           requests: [{
             image: { content: req.file.buffer.toString('base64') },
