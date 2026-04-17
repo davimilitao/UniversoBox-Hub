@@ -2532,7 +2532,8 @@ async function blingAgregaMes(mesAno) {
   const dataInicio = `${mesAno}-01`;
   const ultimoDia  = new Date(ano, mes, 0).getDate();
   const dataFim    = `${mesAno}-${String(ultimoDia).padStart(2, '0')}`;
-  const SITUACOES_OK = new Set([2, 5, 7]); // Emitida DANFE, Autorizada s/DANFE, Emitida DANFE
+  // V3 retorna situacao como objeto {id,valor} OU número; excluímos apenas canceladas(9) e inutilizadas(4)
+  const SITUACOES_EXCLUIR = new Set([3, 4, 9]); // cancelada, inutilizada, cancelada V3
 
   let pagina = 1;
   const nfsComValor = [];
@@ -2546,10 +2547,12 @@ async function blingAgregaMes(mesAno) {
     for (const n of notas) {
       const dataEmissao = (n.dataEmissao || n.data || '').split(' ')[0];
       if (dataEmissao < dataInicio || dataEmissao > dataFim) continue;
-      if (!SITUACOES_OK.has(Number(n.situacao))) continue;
+      // situacao pode ser objeto {id,valor} (Bling V3) ou número (V2)
+      const sitId = Number(n.situacao?.id ?? n.situacao);
+      if (SITUACOES_EXCLUIR.has(sitId)) continue;
 
       const mkt = detectarMktPorId(String(n.loja?.id || ''));
-      const vt  = parseFloat(n.valorTotal || n.valor || 0);
+      const vt  = parseFloat(n.valorTotal || n.totalProdutos || n.valor || 0);
 
       if (vt > 0) nfsComValor.push({ id: n.id, mkt, valor: vt });
       else        nfsSemValor.push({ id: n.id, mkt });
@@ -4196,6 +4199,55 @@ app.get('/bling/debug/lista', async (req, res, next) => {
       sit_raw:     primeiro?.situacao,
       tipo_raw:    primeiro?.tipoIntegracao,
       raw_primeiro: primeiro,
+    });
+  } catch(err) { next(err); }
+});
+
+// ── DEBUG: diagnóstico de receita por mês ──────────────────────────────────────
+// GET /bling/debug/receita/:mesAno  ex: /bling/debug/receita/2026-04
+app.get('/bling/debug/receita/:mesAno', async (req, res, next) => {
+  try {
+    const mesAno = req.params.mesAno;
+    const [ano, mes] = mesAno.split('-').map(Number);
+    const dataInicio = `${mesAno}-01`;
+    const ultimoDia  = new Date(ano, mes, 0).getDate();
+    const dataFim    = `${mesAno}-${String(ultimoDia).padStart(2, '0')}`;
+    const SITUACOES_EXCLUIR = new Set([3, 4, 9]);
+
+    const nfsPeriodo = [];   // NFs no intervalo (antes do filtro situacao)
+    const nfsAceitas = [];   // NFs aceitas
+    const nfsRejeit  = [];   // NFs rejeitadas (canceladas/inutilizadas)
+    let paginas = 0;
+
+    for (let pagina = 1; pagina <= 5; pagina++) {
+      paginas++;
+      const resp  = await blingFetch(`/nfe?pagina=${pagina}&limite=100`);
+      const notas = resp.data || [];
+      if (!notas.length) break;
+      for (const n of notas) {
+        const dataEmissao = (n.dataEmissao || n.data || '').split(' ')[0];
+        if (dataEmissao < dataInicio || dataEmissao > dataFim) continue;
+        const sitId = Number(n.situacao?.id ?? n.situacao);
+        const vt  = parseFloat(n.valorTotal || n.totalProdutos || n.valor || 0);
+        const entry = { id: n.id, numero: n.numero, dataEmissao, situacaoRaw: n.situacao, situacaoId: sitId, valorTotal: vt, loja: n.loja?.id };
+        nfsPeriodo.push(entry);
+        if (!SITUACOES_EXCLUIR.has(sitId)) nfsAceitas.push(entry);
+        else                               nfsRejeit.push(entry);
+      }
+      if (notas.length < 100) break;
+    }
+
+    const totalReceita = nfsAceitas.reduce((s, n) => s + n.valorTotal, 0);
+    res.json({
+      mesAno, dataInicio, dataFim,
+      paginasConsultadas: paginas,
+      totalNoPeriodo: nfsPeriodo.length,
+      aceitas: nfsAceitas.length,
+      rejeitadas: nfsRejeit.length,
+      totalReceita,
+      situacoesEncontradas: [...new Set(nfsPeriodo.map(n => n.situacaoNum))],
+      nfsPeriodo: nfsPeriodo.slice(0, 20),
+      nfsRejeitadas: nfsRejeit.slice(0, 10),
     });
   } catch(err) { next(err); }
 });
