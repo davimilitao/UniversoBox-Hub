@@ -2580,6 +2580,142 @@ async function blingAgregaMes(mesAno) {
   return { total, porMarketplace, totalNFs: nfsComValor.length + nfsSemValor.length };
 }
 
+// ── GET /api/painel-financeiro ────────────────────────────────────────────────
+// Painel mensal real: NF-e (receita) + contasreceber + contaspagar do Bling
+// + fin_despesas + fin_parcelas do Firestore.
+// Query: ?mes=YYYY-MM  (padrão: mês atual)
+app.get('/api/painel-financeiro', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const hoje = new Date();
+    const mes  = req.query.mes || `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+    const [ano, mm] = mes.split('-');
+    const inicio = `${ano}-${mm}-01`;
+    const fim    = new Date(Number(ano), Number(mm), 0); // último dia do mês
+    const fimStr = `${ano}-${mm}-${String(fim.getDate()).padStart(2, '0')}`;
+    // Formato DD/MM/YYYY para Bling
+    const inicioFmt = `${inicio.split('-').reverse().join('/')}`;
+    const fimFmt    = `${fimStr.split('-').reverse().join('/')}`;
+
+    // ── 1. Receita: NF-e do Bling ─────────────────────────────────────────────
+    let receitaNFe = { total: 0, porMarketplace: { MERCADO_LIVRE: 0, SHOPEE: 0, OUTROS: 0 } };
+    let blingOk = false;
+    try {
+      receitaNFe = await agregarReceitaBling(inicio, fimStr);
+      blingOk = true;
+    } catch (e) {
+      console.warn('[painel] NF-e indisponível:', e.message);
+    }
+
+    // ── 2. Contas a Receber do Bling ──────────────────────────────────────────
+    let contasReceber = { recebido: 0, pendente: 0, vencido: 0, itens: [] };
+    try {
+      let pagina = 1, continua = true;
+      const itens = [];
+      while (continua) {
+        const r = await blingFetch(
+          `/contasreceber?pagina=${pagina}&limite=100&dataVencimentoInicio=${inicioFmt}&dataVencimentoFim=${fimFmt}`
+        );
+        const dados = r?.data || [];
+        dados.forEach(c => {
+          const val = Number(c.valor || 0);
+          const sit = Number(c.situacao?.id || 0);
+          // 4 = recebida, 1 = aberta, 2 = parcial, 3 = vencida
+          itens.push({ id: c.id, descricao: c.descricao || '', valor: val, situacao: sit, vencimento: c.dataVencimento });
+          if (sit === 4 || sit === 5) contasReceber.recebido += val;
+          else if (sit === 3)         contasReceber.vencido  += val;
+          else                        contasReceber.pendente += val;
+        });
+        continua = dados.length === 100;
+        pagina++;
+      }
+      contasReceber.itens = itens;
+    } catch (e) {
+      console.warn('[painel] contasreceber indisponível:', e.message);
+    }
+
+    // ── 3. Contas a Pagar do Bling ────────────────────────────────────────────
+    let contasPagarBling = { pago: 0, pendente: 0, vencido: 0, itens: [] };
+    try {
+      let pagina = 1, continua = true;
+      const itens = [];
+      while (continua) {
+        const r = await blingFetch(
+          `/contaspagar?pagina=${pagina}&limite=100&dataVencimentoInicio=${inicioFmt}&dataVencimentoFim=${fimFmt}`
+        );
+        const dados = r?.data || [];
+        dados.forEach(c => {
+          const val = Number(c.valor || 0);
+          const sit = Number(c.situacao?.id || 0);
+          itens.push({ id: c.id, descricao: c.descricao || '', valor: val, situacao: sit, vencimento: c.dataVencimento, fornecedor: c.contato?.nome || '' });
+          if (sit === 4 || sit === 5) contasPagarBling.pago    += val;
+          else if (sit === 3)         contasPagarBling.vencido  += val;
+          else                        contasPagarBling.pendente += val;
+        });
+        continua = dados.length === 100;
+        pagina++;
+      }
+      contasPagarBling.itens = itens;
+    } catch (e) {
+      console.warn('[painel] contaspagar indisponível:', e.message);
+    }
+
+    // ── 4. Despesas locais (fin_despesas) ─────────────────────────────────────
+    const inicioTs = admin.firestore.Timestamp.fromDate(new Date(inicio));
+    const fimTs    = admin.firestore.Timestamp.fromDate(new Date(fimStr + 'T23:59:59'));
+    const despSnap = await db.collection('fin_despesas')
+      .where('data', '>=', inicioTs).where('data', '<=', fimTs).get();
+
+    let despesasTotal = 0, despesasPago = 0, despesasPendente = 0;
+    const despPorCategoria = {};
+    despSnap.forEach(d => {
+      const raw = d.data();
+      if (raw.tipo === 'investimento') return; // parcelas já contadas separado
+      const val = Number(raw.valor || 0);
+      despesasTotal += val;
+      if (raw.situacao === 'pago') despesasPago += val; else despesasPendente += val;
+      const cat = raw.categoria || 'Outros';
+      despPorCategoria[cat] = (despPorCategoria[cat] || 0) + val;
+    });
+
+    // ── 5. Parcelas do mês (fin_parcelas) ─────────────────────────────────────
+    const parcSnap = await db.collection('fin_parcelas')
+      .where('vencimento', '>=', inicioTs).where('vencimento', '<=', fimTs).get();
+
+    let parcelasTotal = 0, parcelasPago = 0, parcelasPendente = 0;
+    parcSnap.forEach(d => {
+      const raw = d.data();
+      const val = Number(raw.valor || 0);
+      parcelasTotal += val;
+      if (raw.status === 'pago') parcelasPago += val; else parcelasPendente += val;
+    });
+
+    // ── 6. Resultado ─────────────────────────────────────────────────────────
+    const receitaBruta  = receitaNFe.total;
+    const totalSaidas   = despesasTotal + parcelasTotal;
+    const lucroLiquido  = receitaBruta - totalSaidas;
+    const margemLiquida = receitaBruta > 0 ? lucroLiquido / receitaBruta : 0;
+
+    res.json({
+      mes,
+      blingOk,
+      receita: {
+        bruta: receitaBruta,
+        ML:     receitaNFe.porMarketplace.MERCADO_LIVRE || 0,
+        Shopee: receitaNFe.porMarketplace.SHOPEE        || 0,
+        outros: receitaNFe.porMarketplace.OUTROS        || 0,
+      },
+      contasReceber,
+      contasPagarBling,
+      despesas: { total: despesasTotal, pago: despesasPago, pendente: despesasPendente, porCategoria: despPorCategoria },
+      parcelas: { total: parcelasTotal, pago: parcelasPago, pendente: parcelasPendente },
+      resultado: { lucroLiquido, margemLiquida, totalSaidas },
+    });
+  } catch (err) {
+    console.error('[GET /api/painel-financeiro]', err);
+    next(err);
+  }
+});
+
 // ── GET /api/margem-v2 ───────────────────────────────────────────────────────
 // Agrega dados de margem: Bling NF-e + Firestore fin_despesas/fin_compras
 // Query: ?de=YYYY-MM&ate=YYYY-MM  (padrão: últimos 12 meses)
