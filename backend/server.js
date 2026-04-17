@@ -2272,7 +2272,7 @@ app.post('/api/fin-despesas/parse-comprovante', requireFirebaseAuth, uploadMemor
 
     console.log('[parse-comprovante] texto extraído:\n', text.slice(0, 1000));
     const { valor, data, fornecedor } = parsearTextoComprovante(text);
-    res.json({ ok: true, valor, data, fornecedor });
+    res.json({ ok: true, valor, data, fornecedor, _debug: text.slice(0, 1200) });
   } catch (err) {
     console.error('[parse-comprovante]', err);
     next(err);
