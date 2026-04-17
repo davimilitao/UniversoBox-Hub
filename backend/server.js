@@ -20,7 +20,7 @@ const { setupTenantsPublicRoutes } = require('./routes/tenants');
 const { setupTenantProvisioningRoutes } = require('./routes/tenantProvisioning');
 const catalogoRouter = require('./routes/catalogo');
 const { requireFirebaseAuth, requireFirebaseRole } = require('./middleware/requireFirebaseAuth');
-const { db, serviceAccount } = require('./config/firebase');
+const { db, serviceAccount, admin } = require('./config/firebase');
 const fs = require('fs');
 
 const express = require('express');
@@ -1683,8 +1683,9 @@ app.get('/api/despesas', requireFirebaseAuth, async (req, res, next) => {
 // --- Rota POST: Adicionar nova despesa ---
 app.post('/api/despesas', async (req, res, next) => {
   try {
+    if (!SPREADSHEET_ID) return res.status(500).json({ error: 'SPREADSHEET_ID não configurado' });
     const { data, nome, descricao, valor, situacao } = req.body;
-    
+
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: `${SHEET_NAME}!A:A`, // ANCORAGEM FORÇADA NA COLUNA A
@@ -1698,6 +1699,46 @@ app.post('/api/despesas', async (req, res, next) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[/api/despesas POST]', err);
+    next(err);
+  }
+});
+
+// --- Rota POST: Parsear comprovante (PDF ou imagem) com Claude AI ---
+app.post('/api/despesas/parse-comprovante', requireFirebaseAuth, uploadMemory.single('arquivo'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
+
+    const Anthropic = require('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+    const base64 = req.file.buffer.toString('base64');
+    const mime   = req.file.mimetype || 'application/pdf';
+    const isPdf  = mime === 'application/pdf';
+
+    const contentBlock = isPdf
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+      : { type: 'image',    source: { type: 'base64', media_type: mime,               data: base64 } };
+
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 256,
+      messages: [{
+        role: 'user',
+        content: [
+          contentBlock,
+          {
+            type: 'text',
+            text: 'Extraia do comprovante: 1) valor numérico em reais (ex: 11140.34 sem símbolo), 2) data no formato DD/MM/YYYY, 3) descrição curta com nome do pagador ou beneficiário. Responda APENAS em JSON válido sem markdown: {"valor":0.00,"data":"DD/MM/YYYY","descricao":"..."}',
+          },
+        ],
+      }],
+    });
+
+    const raw = msg.content[0]?.text?.trim() || '{}';
+    const parsed = JSON.parse(raw);
+    res.json({ ok: true, valor: parsed.valor || 0, data: parsed.data || '', descricao: parsed.descricao || '' });
+  } catch (err) {
+    console.error('[parse-comprovante]', err);
     next(err);
   }
 });

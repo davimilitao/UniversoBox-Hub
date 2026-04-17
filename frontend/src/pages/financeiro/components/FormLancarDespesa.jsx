@@ -1,32 +1,29 @@
-/**
- * @file FormLancarDespesa.jsx
- * @module financeiro
- * @description Formulário de lançamento de despesa com input de data nativo e Lucide icons.
- * @version 2.0.0
- * @date 2026-04-01
- * @author UniversoLab
- *
- * @changelog
- *   2.0.0 — 2026-04-01 — Input date nativo, Lucide icons, nova categoria inline.
- *   1.0.0 — 2026-04-01 — Criação inicial.
- */
-
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   CalendarDays, Tag, FileText, DollarSign,
-  CheckCircle2, Clock, Plus, X, Loader2,
+  CheckCircle2, Clock, Plus, Loader2, Upload,
 } from 'lucide-react';
+import { auth } from '../../../firebase';
 
-// Hoje no formato YYYY-MM-DD (nativo do input date)
 function hojeISO() {
   return new Date().toISOString().split('T')[0];
 }
-
-// Converte YYYY-MM-DD → DD/MM/YYYY para o backend
 function isoParaBR(iso) {
   if (!iso) return '';
   const [y, m, d] = iso.split('-');
   return `${d}/${m}/${y}`;
+}
+function brDataParaISO(br) {
+  if (!br) return hojeISO();
+  const parts = br.split('/');
+  if (parts.length !== 3) return hojeISO();
+  const [d, m, y] = parts;
+  return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+}
+
+async function getToken() {
+  const user = auth?.currentUser;
+  return user ? user.getIdToken(false) : null;
 }
 
 export function FormLancarDespesa({ categorias, onSalvar, salvando }) {
@@ -37,25 +34,48 @@ export function FormLancarDespesa({ categorias, onSalvar, salvando }) {
     valor:    '',
     situacao: 'pago',
   });
-  const [novaCategoria,   setNovaCategoria]   = useState('');
-  const [adicionandoCat,  setAdicionandoCat]  = useState(false);
+  const [parseando, setParseando] = useState(false);
+  const fileRef = useRef(null);
 
   function set(field, value) {
     setForm(f => ({ ...f, [field]: value }));
   }
 
+  async function handleImportar(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setParseando(true);
+    try {
+      const token = await getToken();
+      const fd = new FormData();
+      fd.append('arquivo', file);
+      const res = await fetch('/api/despesas/parse-comprovante', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Falha ao ler comprovante');
+      setForm(f => ({
+        ...f,
+        valor:    data.valor ? String(data.valor) : f.valor,
+        data:     data.data  ? brDataParaISO(data.data) : f.data,
+        descricao: data.descricao || f.descricao,
+      }));
+    } catch (err) {
+      alert(`Erro ao importar comprovante: ${err.message}`);
+    } finally {
+      setParseando(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
-    const nome = adicionandoCat ? novaCategoria.trim() : form.nome;
+    const nome = form.nome.trim();
     if (!nome) return;
-
-    // Converte data para DD/MM/YYYY antes de enviar
     await onSalvar({ ...form, data: isoParaBR(form.data), nome });
-
-    // Reset parcial
     setForm(f => ({ ...f, descricao: '', valor: '' }));
-    setNovaCategoria('');
-    setAdicionandoCat(false);
   }
 
   const inputCls = "w-full rounded-lg bg-slate-900 border border-white/10 text-slate-200 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 placeholder-slate-600 [color-scheme:dark]";
@@ -74,10 +94,29 @@ export function FormLancarDespesa({ categorias, onSalvar, salvando }) {
 
   return (
     <form onSubmit={handleSubmit} className="rounded-xl bg-slate-800 border border-white/5 p-5 flex flex-col gap-4">
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-        <Plus size={15} className="text-emerald-400" />
-        Lançar Despesa
-      </h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+          <Plus size={15} className="text-emerald-400" />
+          Lançar Despesa
+        </h2>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={parseando}
+          title="Importar comprovante (PDF ou imagem)"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 border border-white/10 text-slate-300 text-xs transition-colors disabled:opacity-50"
+        >
+          {parseando ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+          {parseando ? 'Lendo...' : 'Importar'}
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf,image/*"
+          className="hidden"
+          onChange={handleImportar}
+        />
+      </div>
 
       {/* Data */}
       <Campo label="Data" icon={CalendarDays}>
@@ -90,55 +129,21 @@ export function FormLancarDespesa({ categorias, onSalvar, salvando }) {
         />
       </Campo>
 
-      {/* Categoria */}
+      {/* Categoria — combobox com sugestões */}
       <Campo label="Categoria" icon={Tag}>
-        {!adicionandoCat ? (
-          <div className="flex gap-2">
-            <select
-              value={form.nome}
-              onChange={e => set('nome', e.target.value)}
-              className={`${inputCls} flex-1`}
-              required
-            >
-              <option value="">Selecione...</option>
-              {categorias.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => setAdicionandoCat(true)}
-              title="Nova categoria"
-              className="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 border border-white/10 transition-colors shrink-0"
-            >
-              <Plus size={15} />
-            </button>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Nome da nova categoria"
-                value={novaCategoria}
-                onChange={e => setNovaCategoria(e.target.value)}
-                className={`${inputCls} flex-1`}
-                autoFocus
-                required
-              />
-              <button
-                type="button"
-                onClick={() => { setAdicionandoCat(false); setNovaCategoria(''); }}
-                className="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-700 text-slate-400 hover:bg-slate-600 border border-white/10 transition-colors shrink-0"
-              >
-                <X size={15} />
-              </button>
-            </div>
-            <p className="text-xs text-emerald-500 flex items-center gap-1">
-              <Plus size={11} /> Criada automaticamente na planilha
-            </p>
-          </div>
-        )}
+        <input
+          type="text"
+          list="categorias-despesa"
+          placeholder="Digite ou selecione..."
+          value={form.nome}
+          onChange={e => set('nome', e.target.value)}
+          className={inputCls}
+          required
+          autoComplete="off"
+        />
+        <datalist id="categorias-despesa">
+          {categorias.map(c => <option key={c} value={c} />)}
+        </datalist>
       </Campo>
 
       {/* Descrição */}
@@ -195,7 +200,6 @@ export function FormLancarDespesa({ categorias, onSalvar, salvando }) {
         </div>
       </div>
 
-      {/* Botão */}
       <button
         type="submit"
         disabled={salvando}
