@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CRITICAL — Working Directory
+
+**ALWAYS use `C:\Projetos\UniversoBox-Hub` as the working directory.**
+NEVER use `C:\Users\milit\OneDrive\Projetos\UniversoBox-Hub` or any OneDrive path.
+- All `git`, `npm`, file edits, and server commands must target `C:\Projetos\UniversoBox-Hub`
+- Slash command specialists (`/financeiro`, `/dev-backend`, etc.) are only visible from this path
+- Worktrees created from the OneDrive path lose access to `.claude/commands/` and cause context loss
+
 ## Development Commands
 
 **Run both servers for development (separate terminals):**
