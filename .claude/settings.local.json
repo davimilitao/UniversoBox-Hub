@@ -3,7 +3,7 @@
     "allow": [
       "mcp__Claude_Preview__preview_start",
       "Bash(npm install:*)",
-      "Bash(Get-ChildItem \"C:\\\\Users\\\\milit\\\\OneDrive\\\\Projetos\\\\UniversoBox-Hub\\\\backend\\\\\" -Force -Name | Select-String \"env)",
+      "Bash(Get-ChildItem \"C:\\\\Projetos\\\\UniversoBox-Hub\\\\backend\\\\\" -Force -Name | Select-String \"env)",
       "Bash(\\\\.env\")"
     ]
   }

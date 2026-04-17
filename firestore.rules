@@ -92,6 +92,11 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // fin_margem_mensal: overrides manuais por mês (Shopee, dividendos, observações)
+    match /fin_margem_mensal/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
     // ── 7) Insumos de embalagem (acesso autenticado) ─────────────────────────────
     match /insumos/{docId} {
       allow read, write: if request.auth != null;
