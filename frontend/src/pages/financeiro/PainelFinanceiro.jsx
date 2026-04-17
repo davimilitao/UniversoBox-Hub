@@ -1,142 +1,285 @@
-/**
- * @file PainelFinanceiro.jsx
- * @module financeiro
- * @description Painel de BI financeiro: resumo de despesas do mês, gráficos e tabela
- *              de pendentes. Fonte de dados: GET /api/despesas (Google Sheets).
- * @version 1.0.0
- * @date 2026-04-01
- * @author UniversoLab
- *
- * @changelog
- *   1.0.0 — 2026-04-01 — Criação inicial com cards, barras, pizza e tabela de pendentes.
- */
+import { useState, useEffect, useCallback } from 'react';
+import { apiFetch } from '../../utils/getAuthToken';
+import { Wifi, WifiOff, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
 
-import { useState, useMemo } from 'react';
-import { useDespesas, parseDataBR, labelMesAno } from '../../hooks/useDespesas';
-import { ResumoCards }     from './components/ResumoCards';
-import { GraficoBarras }   from './components/GraficoBarras';
-import { GraficoPizza }    from './components/GraficoPizza';
-import { TabelaPendentes } from './components/TabelaPendentes';
+const MES_NOMES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
-// ─── Skeleton genérico para loading ───────────────────────────────────────────
-function Skeleton({ height = 'h-40' }) {
-  return <div className={`rounded-xl bg-slate-800 border border-white/5 animate-pulse ${height}`} />;
+function mesLabel(yyyymm) {
+  const [y, m] = yyyymm.split('-');
+  return `${MES_NOMES[Number(m) - 1]} ${y}`;
+}
+function mesAnterior(yyyymm) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const d = new Date(y, m - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function mesSeguinte(yyyymm) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const d = new Date(y, m, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function mesAtual() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function fmtBRL(v) {
+  return (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+function fmtPct(v) {
+  return `${(v || 0).toFixed(1)}%`;
 }
 
-// ─── Ordena e deduplica os meses presentes nos dados ──────────────────────────
-function extrairMeses(despesas) {
-  const vistos = new Set();
-  const meses = [];
-  despesas.forEach(d => {
-    const p = parseDataBR(d.data);
-    if (!p) return;
-    const label = labelMesAno(p);
-    if (!vistos.has(label)) {
-      vistos.add(label);
-      meses.push({ label, ts: new Date(`${p.ano}-${String(p.mes).padStart(2, '0')}-01`).getTime() });
-    }
-  });
-  return meses.sort((a, b) => b.ts - a.ts); // mais recente primeiro
+function Skeleton({ h = 'h-20' }) {
+  return <div className={`rounded-xl bg-slate-800 animate-pulse ${h}`} />;
+}
+
+function KpiCard({ label, valor, sub, cor = 'slate' }) {
+  const cores = {
+    emerald: 'text-emerald-400',
+    red:     'text-red-400',
+    blue:    'text-blue-400',
+    orange:  'text-orange-400',
+    slate:   'text-slate-200',
+  };
+  return (
+    <div className="rounded-xl bg-slate-800 border border-white/5 p-4 flex flex-col gap-1">
+      <span className="text-xs text-slate-500 uppercase tracking-wider">{label}</span>
+      <span className={`text-lg font-bold ${cores[cor]}`}>{valor}</span>
+      {sub && <span className="text-xs text-slate-600">{sub}</span>}
+    </div>
+  );
+}
+
+function SecaoLista({ titulo, items, renderItem, vazio = 'Nenhum registro' }) {
+  if (!items?.length) return (
+    <div className="rounded-xl bg-slate-800 border border-white/5 p-5">
+      <h3 className="text-sm font-semibold text-slate-400 mb-3">{titulo}</h3>
+      <p className="text-slate-600 text-xs">{vazio}</p>
+    </div>
+  );
+  return (
+    <div className="rounded-xl bg-slate-800 border border-white/5 p-5">
+      <h3 className="text-sm font-semibold text-slate-400 mb-3">{titulo} <span className="text-slate-600 font-normal">({items.length})</span></h3>
+      <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
+        {items.map(renderItem)}
+      </div>
+    </div>
+  );
+}
+
+// Situação Bling: 1=pendente, 2=pago/recebido, 3=cancelado, 13=parcial
+function situacaoLabel(id) {
+  const m = { 1: 'Pendente', 2: 'Pago', 3: 'Cancelado', 13: 'Parcial' };
+  return m[id] || `${id}`;
+}
+function situacaoCor(id) {
+  if (id === 2)  return 'text-emerald-400';
+  if (id === 3)  return 'text-slate-600';
+  if (id === 13) return 'text-orange-400';
+  return 'text-orange-300';
 }
 
 export function PainelFinanceiro() {
-  const { despesas, loading, error } = useDespesas();
+  const hoje = mesAtual();
+  const [mes, setMes]       = useState(hoje);
+  const [data, setData]     = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]   = useState('');
 
-  const mesesDisponiveis = useMemo(() => extrairMeses(despesas), [despesas]);
+  const carregar = useCallback(async (m) => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await apiFetch(`/api/painel-financeiro?mes=${m}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${res.status}`);
+      }
+      setData(await res.json());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  // Inicializa com o mês mais recente assim que os dados chegam
-  const [mesSelecionado, setMesSelecionado] = useState('');
-  const mesAtivo = mesSelecionado || mesesDisponiveis[0]?.label || '';
+  useEffect(() => { carregar(mes); }, [mes, carregar]);
 
-  // Filtra despesas do mês ativo
-  const despesasMes = useMemo(() => {
-    if (!mesAtivo) return [];
-    return despesas.filter(d => {
-      const p = parseDataBR(d.data);
-      return p && labelMesAno(p) === mesAtivo;
-    });
-  }, [despesas, mesAtivo]);
+  const navAntes  = () => setMes(m => mesAnterior(m));
+  const navDepois = () => setMes(m => mesSeguinte(m));
+
+  const resultado = data?.resultado;
+  const lucro = resultado?.lucroLiquido ?? 0;
 
   return (
     <div className="text-slate-100 px-4 py-8 max-w-7xl mx-auto flex-1 overflow-y-auto">
 
-      {/* ── Cabeçalho ───────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-xl font-bold text-slate-100">Painel Financeiro</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Despesas operacionais — Google Sheets</p>
+      {/* Cabeçalho */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-slate-100">Painel Financeiro</h1>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {data?.blingOk
+                ? <><Wifi size={12} className="text-emerald-400" /><span className="text-xs text-emerald-400">Bling online</span></>
+                : <><WifiOff size={12} className="text-slate-600" /><span className="text-xs text-slate-600">Bling offline</span></>
+              }
+            </div>
+          </div>
         </div>
 
-        {/* Seletor de mês */}
-        {!loading && mesesDisponiveis.length > 0 && (
-          <select
-            value={mesAtivo}
-            onChange={e => setMesSelecionado(e.target.value)}
-            className="rounded-lg bg-slate-800 border border-white/10 text-slate-200 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
-          >
-            {mesesDisponiveis.map(m => (
-              <option key={m.label} value={m.label}>{m.label}</option>
-            ))}
-          </select>
-        )}
+        {/* Navegação de mês */}
+        <div className="flex items-center gap-2">
+          <button onClick={navAntes}  className="p-1.5 rounded-lg bg-slate-800 border border-white/10 hover:border-white/20 text-slate-400 hover:text-slate-200 transition-colors">
+            <ChevronLeft size={16} />
+          </button>
+          <span className="text-sm font-medium text-slate-200 min-w-[90px] text-center">{mesLabel(mes)}</span>
+          <button onClick={navDepois} disabled={mes >= hoje} className="p-1.5 rounded-lg bg-slate-800 border border-white/10 hover:border-white/20 text-slate-400 hover:text-slate-200 disabled:opacity-30 transition-colors">
+            <ChevronRight size={16} />
+          </button>
+          <button onClick={() => carregar(mes)} disabled={loading} className="p-1.5 rounded-lg bg-slate-800 border border-white/10 hover:border-white/20 text-slate-400 hover:text-slate-200 disabled:opacity-30 transition-colors" title="Recarregar">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
-      {/* ── Estado de erro ──────────────────────────────────────────────────── */}
+      {/* Erro */}
       {error && (
         <div className="rounded-xl bg-red-900/20 border border-red-700/40 p-4 text-red-400 text-sm mb-6">
-          Erro ao carregar despesas: {error}
-        </div>
-      )}
-
-      {/* ── Loading ─────────────────────────────────────────────────────────── */}
-      {loading && (
-        <div className="flex flex-col gap-6">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[...Array(4)].map((_, i) => <Skeleton key={i} height="h-24" />)}
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Skeleton height="h-72" />
-            <Skeleton height="h-72" />
-          </div>
-          <Skeleton height="h-48" />
-        </div>
-      )}
-
-      {/* ── Conteúdo ────────────────────────────────────────────────────────── */}
-      {!loading && !error && (
-        <>
-          {/* Empty state global */}
-          {despesas.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
-              <span className="text-4xl">📊</span>
-              <p className="text-slate-400">Nenhuma despesa encontrada na planilha.</p>
-              <p className="text-slate-600 text-sm">Verifique se SPREADSHEET_ID está configurado no Railway.</p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-6">
-
-              {/* 1. Cards de resumo */}
-              <ResumoCards despesasMes={despesasMes} />
-
-              {/* 2. Gráficos lado a lado */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <GraficoBarras despesas={despesas} />
-                <GraficoPizza  despesasMes={despesasMes} />
-              </div>
-
-              {/* 3. Tabela de pendentes */}
-              <TabelaPendentes despesasMes={despesasMes} />
-
-              {/* Empty state do mês */}
-              {despesasMes.length === 0 && mesAtivo && (
-                <p className="text-center text-slate-600 text-sm -mt-2">
-                  Nenhum lançamento em {mesAtivo}.
-                </p>
-              )}
-            </div>
+          {error}
+          {error.includes('autenticado') && (
+            <a href="/bling/auth" className="ml-2 underline hover:text-red-300">Conectar Bling</a>
           )}
-        </>
+        </div>
       )}
+
+      {/* Loading */}
+      {loading && (
+        <div className="flex flex-col gap-5">
+          <Skeleton h="h-28" />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => <Skeleton key={i} h="h-20" />)}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <Skeleton h="h-60" />
+            <Skeleton h="h-60" />
+            <Skeleton h="h-60" />
+          </div>
+        </div>
+      )}
+
+      {/* Conteúdo */}
+      {!loading && data && (
+        <div className="flex flex-col gap-5">
+
+          {/* Card resultado */}
+          <div className={`rounded-xl border p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${lucro >= 0 ? 'bg-emerald-900/20 border-emerald-700/40' : 'bg-red-900/20 border-red-700/40'}`}>
+            <div className="flex items-center gap-3">
+              {lucro >= 0
+                ? <TrendingUp size={24} className="text-emerald-400 shrink-0" />
+                : <TrendingDown size={24} className="text-red-400 shrink-0" />
+              }
+              <div>
+                <p className="text-xs text-slate-500 uppercase tracking-wider">Resultado do mês</p>
+                <p className={`text-2xl font-bold ${lucro >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtBRL(lucro)}</p>
+                <p className="text-xs text-slate-500">Margem: {fmtPct(resultado?.margemLiquida)}</p>
+              </div>
+            </div>
+            <div className="flex gap-6 text-center">
+              <div>
+                <p className="text-xs text-slate-500">Receita</p>
+                <p className="text-sm font-semibold text-slate-200">{fmtBRL(data.receita.bruta)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Saídas</p>
+                <p className="text-sm font-semibold text-slate-200">{fmtBRL(resultado?.totalSaidas)}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* KPIs */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <KpiCard label="Receita ML"    valor={fmtBRL(data.receita.ML)}     cor="emerald" />
+            <KpiCard label="Receita Shopee" valor={fmtBRL(data.receita.Shopee)} cor="orange"  />
+            <KpiCard label="Despesas locais" valor={fmtBRL(resultado?.totalDespesas)} cor="red" />
+            <KpiCard label="Parcelas cartão" valor={fmtBRL(resultado?.totalParcelas)} cor="blue" />
+          </div>
+
+          {/* Despesas por categoria */}
+          {data.despesas.length > 0 && (() => {
+            const cats = {};
+            data.despesas.forEach(d => {
+              cats[d.categoria] = (cats[d.categoria] || 0) + d.valor;
+            });
+            const sorted = Object.entries(cats).sort((a, b) => b[1] - a[1]);
+            const max = sorted[0]?.[1] || 1;
+            return (
+              <div className="rounded-xl bg-slate-800 border border-white/5 p-5">
+                <h3 className="text-sm font-semibold text-slate-400 mb-4">Despesas por Categoria</h3>
+                <div className="flex flex-col gap-2">
+                  {sorted.map(([cat, val]) => (
+                    <div key={cat} className="flex items-center gap-3">
+                      <span className="text-xs text-slate-400 w-36 truncate shrink-0">{cat}</span>
+                      <div className="flex-1 bg-slate-700 rounded-full h-1.5">
+                        <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: `${(val / max) * 100}%` }} />
+                      </div>
+                      <span className="text-xs text-slate-300 w-24 text-right shrink-0">{fmtBRL(val)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Listas Bling */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <SecaoLista
+              titulo="Contas a Receber (Bling)"
+              items={data.contasReceber}
+              vazio={data.blingOk ? 'Nenhuma conta a receber no mês' : 'Bling offline — conecte para ver dados'}
+              renderItem={item => (
+                <div key={item.id} className="flex items-start justify-between gap-2 py-1.5 border-b border-white/5 last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-slate-300 truncate">{item.descricao || '—'}</p>
+                    <p className="text-[10px] text-slate-600">{item.vencimento}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-medium text-slate-200">{fmtBRL(item.valor)}</p>
+                    <p className={`text-[10px] ${situacaoCor(item.situacao)}`}>{situacaoLabel(item.situacao)}</p>
+                  </div>
+                </div>
+              )}
+            />
+            <SecaoLista
+              titulo="Contas a Pagar (Bling)"
+              items={data.contasPagarBling}
+              vazio={data.blingOk ? 'Nenhuma conta a pagar no mês' : 'Bling offline — conecte para ver dados'}
+              renderItem={item => (
+                <div key={item.id} className="flex items-start justify-between gap-2 py-1.5 border-b border-white/5 last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-slate-300 truncate">{item.fornecedor || item.descricao || '—'}</p>
+                    <p className="text-[10px] text-slate-600">{item.vencimento}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-medium text-slate-200">{fmtBRL(item.valor)}</p>
+                    <p className={`text-[10px] ${situacaoCor(item.situacao)}`}>{situacaoLabel(item.situacao)}</p>
+                  </div>
+                </div>
+              )}
+            />
+          </div>
+
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && !data && !error && (
+        <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
+          <span className="text-4xl">📊</span>
+          <p className="text-slate-400">Selecione um mês para carregar os dados.</p>
+        </div>
+      )}
+
     </div>
   );
 }

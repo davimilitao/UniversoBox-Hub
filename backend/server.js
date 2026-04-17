@@ -80,7 +80,7 @@ app.get('/importar', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'importar.
 app.get('/catalogo', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'catalogo.html')));
 app.get('/compras', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'compras.html')));
 app.get('/financas', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'financas.html')));
-app.get('/bling',   (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'bling.html')));
+app.get('/bling',   (req, res) => res.redirect('/spa/financeiro/painel'));
 app.get('/config',  (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'config.html')));
 app.get('/cadastrar', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'cadastro-produto.html')));
 app.get('/enriquecer-xml', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'enriquecer-xml.html')));
@@ -2350,6 +2350,152 @@ app.post('/api/margem-v2/importar-historico', requireFirebaseAuth, requireFireba
   }
 });
 
+// ── GET /api/painel-financeiro ────────────────────────────────────────────────
+// Retorna dados reais do mês: receita Bling NF-e, contas a receber/pagar Bling,
+// despesas Firestore e parcelas Firestore.
+// Query: ?mes=YYYY-MM  (padrão: mês atual)
+app.get('/api/painel-financeiro', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const tenantId = req.auth?.tenantId || null;
+    const hoje = new Date();
+    const mesDefault = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+    const mes = req.query.mes || mesDefault;
+    if (!/^\d{4}-\d{2}$/.test(mes)) return res.status(400).json({ error: 'mes inválido (YYYY-MM)' });
+
+    const [ano, mesNum] = mes.split('-').map(Number);
+    const ultimoDia = new Date(ano, mesNum, 0).getDate();
+    const inicioFmt = `${mes}-01`;
+    const fimFmt    = `${mes}-${String(ultimoDia).padStart(2, '0')}`;
+    const inicioTs  = new Date(`${inicioFmt}T00:00:00`);
+    const fimTs     = new Date(`${fimFmt}T23:59:59`);
+
+    // ── 1. Receita NF-e Bling ──────────────────────────────────────
+    let receita = { bruta: 0, ML: 0, Shopee: 0, outros: 0 };
+    let blingOk = false;
+    try {
+      const r = await blingAgregaMes(mes);
+      receita.bruta  = r.total;
+      receita.ML     = r.porMarketplace.MERCADO_LIVRE || 0;
+      receita.Shopee = r.porMarketplace.SHOPEE        || 0;
+      receita.outros = r.porMarketplace.OUTROS        || 0;
+      blingOk = true;
+    } catch (_) { /* Bling offline — retorna zeros mas continua */ }
+
+    // ── 2. Contas a Receber Bling ──────────────────────────────────
+    let contasReceber = [];
+    if (blingOk) {
+      try {
+        let pagina = 1;
+        while (pagina <= 5) {
+          const r = await blingFetch(`/contasreceber?pagina=${pagina}&limite=100&dataVencimentoInicio=${inicioFmt}&dataVencimentoFim=${fimFmt}`);
+          const items = r.data || [];
+          contasReceber.push(...items.map(i => ({
+            id:         i.id,
+            descricao:  i.historico || i.descricao || '',
+            valor:      parseFloat(i.valor || 0),
+            vencimento: (i.dataVencimento || '').slice(0, 10),
+            situacao:   i.situacao?.id || i.situacao || 0,
+          })));
+          if (items.length < 100) break;
+          pagina++;
+        }
+      } catch (_) { /* ignora */ }
+    }
+
+    // ── 3. Contas a Pagar Bling ────────────────────────────────────
+    let contasPagarBling = [];
+    if (blingOk) {
+      try {
+        let pagina = 1;
+        while (pagina <= 5) {
+          const r = await blingFetch(`/contaspagar?pagina=${pagina}&limite=100&dataVencimentoInicio=${inicioFmt}&dataVencimentoFim=${fimFmt}`);
+          const items = r.data || [];
+          contasPagarBling.push(...items.map(i => ({
+            id:         i.id,
+            descricao:  i.historico || i.descricao || '',
+            fornecedor: i.fornecedor?.nome || '',
+            valor:      parseFloat(i.valor || 0),
+            vencimento: (i.dataVencimento || '').slice(0, 10),
+            situacao:   i.situacao?.id || i.situacao || 0,
+          })));
+          if (items.length < 100) break;
+          pagina++;
+        }
+      } catch (_) { /* ignora */ }
+    }
+
+    // ── 4. Despesas Firestore (excluindo investimentos) ────────────
+    let despesasFire = [];
+    try {
+      let q = db.collection('fin_despesas')
+        .where('data', '>=', inicioTs)
+        .where('data', '<=', fimTs);
+      if (tenantId) q = q.where('tenantId', '==', tenantId);
+      const snap = await q.get();
+      snap.forEach(doc => {
+        const d = doc.data();
+        if (d.tipo === 'investimento') return;
+        despesasFire.push({
+          id:        doc.id,
+          categoria: d.categoria || 'Outros',
+          fornecedor:d.fornecedor || '',
+          descricao: d.descricao || '',
+          valor:     parseFloat(d.valor || 0),
+          situacao:  d.situacao || 'pendente',
+        });
+      });
+    } catch (_) { /* ignora */ }
+
+    // ── 5. Parcelas Firestore ──────────────────────────────────────
+    let parcelasFire = [];
+    try {
+      let q = db.collection('fin_parcelas')
+        .where('vencimento', '>=', inicioTs)
+        .where('vencimento', '<=', fimTs);
+      if (tenantId) q = q.where('tenantId', '==', tenantId);
+      const snap = await q.get();
+      snap.forEach(doc => {
+        const d = doc.data();
+        parcelasFire.push({
+          id:         doc.id,
+          fornecedor: d.fornecedor || '',
+          descricao:  d.descricao || '',
+          valor:      parseFloat(d.valor || 0),
+          pago:       !!d.pago,
+          meioNome:   d.meioNome || '',
+        });
+      });
+    } catch (_) { /* ignora */ }
+
+    // ── Resultado ─────────────────────────────────────────────────
+    const totalDespesas = despesasFire.reduce((s, d) => s + d.valor, 0);
+    const totalParcelas = parcelasFire.reduce((s, p) => s + p.valor, 0);
+    const totalSaidas   = totalDespesas + totalParcelas;
+    const lucroLiquido  = receita.bruta - totalSaidas;
+    const margem        = receita.bruta > 0 ? (lucroLiquido / receita.bruta) * 100 : 0;
+
+    return res.json({
+      mes,
+      blingOk,
+      receita,
+      contasReceber,
+      contasPagarBling,
+      despesas: despesasFire,
+      parcelas: parcelasFire,
+      resultado: {
+        lucroLiquido,
+        margemLiquida: margem,
+        totalDespesas,
+        totalParcelas,
+        totalSaidas,
+      },
+    });
+  } catch (err) {
+    console.error('[GET /api/painel-financeiro]', err);
+    return next(err);
+  }
+});
+
 // ================================================================
 // BLING INTEGRATION
 // ================================================================
@@ -2781,7 +2927,7 @@ function detectarMkt(nf) {
 }
 
 // ── PÁGINA ────────────────────────────────────────────────────────
-app.get('/bling', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'bling.html')));
+app.get('/bling', (req, res) => res.redirect('/spa/financeiro/painel'));
 
 // ── STATUS ────────────────────────────────────────────────────────
 app.get('/bling/status', async (req, res) => {
@@ -2800,7 +2946,7 @@ app.get('/bling/auth', (req, res) => {
 // ── CALLBACK OAUTH ────────────────────────────────────────────────
 app.get('/bling/callback', async (req, res) => {
   const { code, error } = req.query;
-  if (error || !code) return res.redirect('/bling?error=auth_denied');
+  if (error || !code) return res.redirect('/spa/financeiro/painel?bling=error&msg=auth_denied');
   try {
     const creds = Buffer.from(`${BLING_CLIENT_ID}:${BLING_CLIENT_SECRET}`).toString('base64');
     const tokenRes = await fetch(BLING_TOKEN_URL, {
@@ -2808,10 +2954,10 @@ app.get('/bling/callback', async (req, res) => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Basic ${creds}` },
       body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: BLING_REDIRECT_URI }).toString(),
     });
-    if (!tokenRes.ok) { console.error('[bling/callback]', await tokenRes.text()); return res.redirect('/bling?error=token_failed'); }
+    if (!tokenRes.ok) { console.error('[bling/callback]', await tokenRes.text()); return res.redirect('/spa/financeiro/painel?bling=error&msg=token_failed'); }
     await blingSaveToken(await tokenRes.json());
-    res.redirect('/bling?success=1');
-  } catch(e) { console.error('[bling/callback]', e); res.redirect('/bling?error=callback_error'); }
+    res.redirect('/spa/financeiro/painel?bling=ok');
+  } catch(e) { console.error('[bling/callback]', e); res.redirect('/spa/financeiro/painel?bling=error&msg=callback_error'); }
 });
 
 // ── DESCONECTAR ───────────────────────────────────────────────────
@@ -5227,7 +5373,7 @@ function detectarMkt(nf) {
 }
 
 // ── PÁGINA ────────────────────────────────────────────────────────
-app.get('/bling', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'bling.html')));
+app.get('/bling', (req, res) => res.redirect('/spa/financeiro/painel'));
 
 // ── STATUS ────────────────────────────────────────────────────────
 app.get('/bling/status', async (req, res) => {
@@ -5246,7 +5392,7 @@ app.get('/bling/auth', (req, res) => {
 // ── CALLBACK OAUTH ────────────────────────────────────────────────
 app.get('/bling/callback', async (req, res) => {
   const { code, error } = req.query;
-  if (error || !code) return res.redirect('/bling?error=auth_denied');
+  if (error || !code) return res.redirect('/spa/financeiro/painel?bling=error&msg=auth_denied');
   try {
     const creds = Buffer.from(`${BLING_CLIENT_ID}:${BLING_CLIENT_SECRET}`).toString('base64');
     const tokenRes = await fetch(BLING_TOKEN_URL, {
@@ -5254,10 +5400,10 @@ app.get('/bling/callback', async (req, res) => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Basic ${creds}` },
       body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: BLING_REDIRECT_URI }).toString(),
     });
-    if (!tokenRes.ok) { console.error('[bling/callback]', await tokenRes.text()); return res.redirect('/bling?error=token_failed'); }
+    if (!tokenRes.ok) { console.error('[bling/callback]', await tokenRes.text()); return res.redirect('/spa/financeiro/painel?bling=error&msg=token_failed'); }
     await blingSaveToken(await tokenRes.json());
-    res.redirect('/bling?success=1');
-  } catch(e) { console.error('[bling/callback]', e); res.redirect('/bling?error=callback_error'); }
+    res.redirect('/spa/financeiro/painel?bling=ok');
+  } catch(e) { console.error('[bling/callback]', e); res.redirect('/spa/financeiro/painel?bling=error&msg=callback_error'); }
 });
 
 // ── DESCONECTAR ───────────────────────────────────────────────────
