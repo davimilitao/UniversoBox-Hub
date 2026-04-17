@@ -4200,6 +4200,55 @@ app.get('/bling/debug/lista', async (req, res, next) => {
   } catch(err) { next(err); }
 });
 
+// ── DEBUG: diagnóstico de receita por mês ──────────────────────────────────────
+// GET /bling/debug/receita/:mesAno  ex: /bling/debug/receita/2026-04
+app.get('/bling/debug/receita/:mesAno', async (req, res, next) => {
+  try {
+    const mesAno = req.params.mesAno;
+    const [ano, mes] = mesAno.split('-').map(Number);
+    const dataInicio = `${mesAno}-01`;
+    const ultimoDia  = new Date(ano, mes, 0).getDate();
+    const dataFim    = `${mesAno}-${String(ultimoDia).padStart(2, '0')}`;
+    const SITUACOES_OK = new Set([2, 5, 7]);
+
+    const nfsPeriodo = [];   // NFs no intervalo (antes do filtro situacao)
+    const nfsAceitas = [];   // NFs aceitas (situacao ok + valor > 0)
+    const nfsRejeit  = [];   // NFs rejeitadas (situacao fora do filtro)
+    let paginas = 0;
+
+    outerLoop: for (let pagina = 1; pagina <= 5; pagina++) {
+      paginas++;
+      const resp  = await blingFetch(`/nfe?pagina=${pagina}&limite=100`);
+      const notas = resp.data || [];
+      if (!notas.length) break;
+      for (const n of notas) {
+        const dataEmissao = (n.dataEmissao || n.data || '').split(' ')[0];
+        if (dataEmissao < dataInicio || dataEmissao > dataFim) continue;
+        const sit = Number(n.situacao);
+        const vt  = parseFloat(n.valorTotal || n.valor || 0);
+        const entry = { id: n.id, numero: n.numero, dataEmissao, situacao: n.situacao, situacaoNum: sit, valorTotal: vt, loja: n.loja?.id };
+        nfsPeriodo.push(entry);
+        if (SITUACOES_OK.has(sit)) nfsAceitas.push(entry);
+        else                       nfsRejeit.push(entry);
+      }
+      if (notas.length < 100) break;
+    }
+
+    const totalReceita = nfsAceitas.reduce((s, n) => s + n.valorTotal, 0);
+    res.json({
+      mesAno, dataInicio, dataFim,
+      paginasConsultadas: paginas,
+      totalNoPeriodo: nfsPeriodo.length,
+      aceitas: nfsAceitas.length,
+      rejeitadas: nfsRejeit.length,
+      totalReceita,
+      situacoesEncontradas: [...new Set(nfsPeriodo.map(n => n.situacaoNum))],
+      nfsPeriodo: nfsPeriodo.slice(0, 20),
+      nfsRejeitadas: nfsRejeit.slice(0, 10),
+    });
+  } catch(err) { next(err); }
+});
+
 // ── CLONAR NF → CRIAR PEDIDO ─────────────────────────────────────
 app.post('/bling/clonar', async (req, res, next) => {
   try {
