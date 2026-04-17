@@ -332,7 +332,7 @@ function SidebarContent({ perfil, loading, collapsed, setCollapsed, mobile, onCl
     localStorage.removeItem('expedicao_token');
     // Reset theme
     document.documentElement.removeAttribute('data-theme');
-    window.location.href = '/login';
+    window.location.href = '/spa/login';
   }
 
   return (
