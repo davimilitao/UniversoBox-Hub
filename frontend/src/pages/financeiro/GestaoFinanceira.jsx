@@ -638,18 +638,15 @@ export function GestaoFinanceira() {
         <div className="p-6 flex flex-col gap-5">
           <HelpBanner
             abaId="contas-pagar"
-            titulo="Contas a Pagar — Despesas Operacionais"
+            titulo="Contas a Pagar — Visão Unificada"
             itens={[
-              'Exibe despesas fixas e operacionais do mês atual com status de pagamento.',
-              'Vencidas aparecem primeiro — clique em Pagar para registrar o pagamento.',
-              'Investimentos parcelados não aparecem aqui — estão na aba Parcelas.',
+              'Mostra todas as despesas operacionais pendentes + parcelas de cartão em uma lista só.',
+              'Ordenado por urgência: Vencidas → Vence hoje → Próximos 7 dias → Pendentes.',
+              'Parcelas roxas vêm da aba Cartões/Compras. Despesas verdes vêm de Lançamentos.',
             ]}
-            dica="Esta aba mostra apenas o mês atual. Para ver outros meses, use a aba Lançamentos com filtro de mês."
+            dica="Clique em Pagar para registrar o pagamento. Botão fica verde com opção de desfazer."
           />
-          <ContasDespesas
-            despesasMes={despesasMesAtual}
-            onToggleStatus={handleToggleStatus}
-          />
+          <ContasDespesas />
         </div>
       )}
 
