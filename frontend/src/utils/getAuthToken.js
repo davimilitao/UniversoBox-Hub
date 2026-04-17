@@ -8,18 +8,33 @@
 import { auth } from '../firebase';
 
 /**
+ * Aguarda o Firebase resolver o estado de auth (onAuthStateChanged resolve na 1ª vez).
+ * Necessário pois auth.currentUser é null nos primeiros ms após o carregamento.
+ */
+function waitForAuth(timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (!auth) return resolve(null);
+    const timer = setTimeout(() => { unsub(); resolve(null); }, timeoutMs);
+    const unsub = auth.onAuthStateChanged(user => {
+      clearTimeout(timer);
+      unsub();
+      resolve(user);
+    });
+  });
+}
+
+/**
  * Retorna um idToken válido (auto-refresh se expirado).
- * Fallback para localStorage se Firebase não estiver disponível.
+ * Espera o Firebase resolver o auth antes de retornar.
  */
 export async function getAuthToken() {
   try {
-    const user = auth?.currentUser;
+    // currentUser pode ser null na inicialização — aguarda resolução
+    const user = auth?.currentUser ?? await waitForAuth();
     if (user) {
-      // force: false — retorna o token cacheado se ainda válido, renova se expirado
       return await user.getIdToken(false);
     }
   } catch {}
-  // Fallback: token salvo no login (pode estar expirado — apenas para dev/fallback)
   return localStorage.getItem('expedicao_token') || '';
 }
 
