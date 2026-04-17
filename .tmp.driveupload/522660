@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Enriquecer Produtos por XML</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/erp.css"/>
+  <link rel="stylesheet" href="/erp-custom.css">
+  <style>
+    .drop-zone {
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      border:2px dashed var(--border-default);border-radius:var(--r-lg);
+      padding:32px 20px;cursor:pointer;transition:border-color .2s,background .2s;
+      background:var(--depth-3);text-align:center;
+    }
+    .drop-zone:hover,.drop-zone.over{border-color:var(--accent-blue);background:var(--depth-4);}
+    .drop-zone input{display:none;}
+    .drop-icon{font-size:36px;opacity:.4;margin-bottom:10px;}
+    .drop-title{font-size:14px;font-weight:700;color:var(--text-secondary);}
+    .drop-sub{font-size:12px;color:var(--text-muted);margin-top:4px;}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:var(--r-md);border:none;cursor:pointer;font-family:var(--font-body);font-size:13px;font-weight:700;transition:opacity .15s;}
+    .btn:hover{opacity:.85;}
+    .btn-primary{background:var(--accent-blue);color:#fff;}
+    .btn-secondary{background:var(--depth-4);color:var(--text-primary);border:1px solid var(--border-default);}
+    .btn-sm{padding:5px 10px;font-size:11px;}
+    .btn-green{background:var(--accent-green);color:#fff;}
+    .item-card{background:var(--depth-3);border:1px solid var(--border-default);border-radius:var(--r-md);padding:14px 16px;transition:border-color .2s;}
+    .item-card.ok{border-color:var(--accent-green);}
+    .item-card.erro{border-color:var(--accent-red);}
+    .pdf-drop{display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--depth-4);border:1px dashed var(--border-default);border-radius:var(--r-sm);padding:8px 12px;font-size:12px;color:var(--text-muted);transition:border-color .15s;}
+    .pdf-drop:hover{border-color:var(--accent-blue);}
+    .foto-drop{display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--depth-4);border:1px dashed var(--border-default);border-radius:var(--r-sm);padding:8px 12px;font-size:12px;color:var(--text-muted);transition:border-color .15s;}
+    .foto-drop:hover{border-color:var(--accent-green);}
+    .extrato{font-size:11px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);border-radius:var(--r-sm);padding:6px 10px;color:var(--accent-green);margin-top:6px;}
+    .tag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:999px;background:var(--depth-5);color:var(--text-muted);}
+    .tag-green{background:rgba(16,185,129,.15);color:var(--accent-green);}
+    .tag-yellow{background:rgba(234,179,8,.15);color:var(--accent-yellow);}
+    .progresso-bar{height:4px;background:var(--depth-5);border-radius:999px;margin-top:8px;overflow:hidden;}
+    .progresso-fill{height:100%;background:var(--accent-blue);border-radius:999px;transition:width .3s;}
+    .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--depth-5);color:var(--text-primary);padding:10px 20px;border-radius:var(--r-md);font-size:13px;font-weight:700;opacity:0;transition:all .3s;z-index:9999;pointer-events:none;}
+    .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+    .toast.ok{background:rgba(16,185,129,.9);color:#fff;}
+    .toast.err{background:rgba(239,68,68,.9);color:#fff;}
+  </style>
+</head>
+<body>
+<div id="toast" class="toast"></div>
+<script src="/auth-guard.js"></script>
+
+<div id="menuContainer"></div>
+<script src="/menu.js"></script>
+
+<div style="max-width:960px;margin:0 auto;padding:24px 16px;">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;">
+    <a href="/cadastrar" class="btn btn-secondary btn-sm">← Cadastrar Produto</a>
+    <div>
+      <div style="font-size:20px;font-weight:700;color:var(--text-primary);">📦 Enriquecer Produtos por XML da NF</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Importe o XML, associe PDFs e fotos, atualize no Bling em lote</div>
+    </div>
+  </div>
+
+  <!-- Drop XML -->
+  <div id="secaoUpload">
+    <label class="drop-zone" id="dropZoneXml" style="margin-bottom:0;">
+      <input type="file" id="xmlInput" accept=".xml"/>
+      <div class="drop-icon">📦</div>
+      <div class="drop-title">Arraste o XML da Nota Fiscal aqui</div>
+      <div class="drop-sub">ou clique para selecionar — lista todos os produtos automaticamente</div>
+      <div id="xmlStatus" style="margin-top:10px;display:none;font-size:13px;font-weight:700;"></div>
+    </label>
+  </div>
+
+  <!-- Lista de produtos -->
+  <div id="secaoProdutos" style="display:none;margin-top:20px;">
+
+    <!-- Barra de ações -->
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+      <div style="font-size:15px;font-weight:700;color:var(--text-primary);" id="tituloLista">Produtos da NF</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-sm" id="btnTodos">✓ Todos</button>
+        <button class="btn btn-secondary btn-sm" id="btnNenhum">✗ Nenhum</button>
+        <button class="btn btn-secondary btn-sm" id="btnNovaNF" style="border-color:var(--accent-blue);color:var(--accent-blue);">📦 Nova NF</button>
+        <button class="btn btn-green" id="btnEnriquecer" style="font-size:13px;">🚀 Enriquecer selecionados no Bling</button>
+      </div>
+    </div>
+
+    <!-- Progresso geral -->
+    <div id="secaoProgresso" style="display:none;margin-bottom:16px;background:var(--depth-3);border:1px solid var(--border-default);border-radius:var(--r-md);padding:14px 16px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+        <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="textoProgresso">Processando…</span>
+        <span style="font-size:12px;color:var(--text-muted);" id="contadorProgresso">0/0</span>
+      </div>
+      <div class="progresso-bar"><div class="progresso-fill" id="barraProgresso" style="width:0%;"></div></div>
+    </div>
+
+    <!-- Cards dos produtos -->
+    <div id="listagem" style="display:flex;flex-direction:column;gap:10px;"></div>
+
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+'use strict';
+
+if(typeof pdfjsLib !== 'undefined'){
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+const TERMINAL_KEY = 'expedicao_pro_terminal_id';
+function tid(){let i=localStorage.getItem(TERMINAL_KEY);if(!i){i=crypto.randomUUID();localStorage.setItem(TERMINAL_KEY,i);}return i;}
+
+async function api(path,opts={}){
+  const token=localStorage.getItem('expedicao_token')||'';
+  const isForm = opts.body instanceof FormData;
+  const res=await fetch(path,{...opts,headers:{
+    ...(isForm?{}:{'content-type':'application/json'}),
+    'x-terminal-id':tid(),'authorization':`Bearer ${token}`,
+    ...(opts.headers||{})
+  }});
+  const d=await res.json().catch(()=>({}));
+  if(res.status===401){window.location.href='/login';return null;}
+  if(!res.ok)throw new Error(d.error||`HTTP ${res.status}`);
+  return d;
+}
+
+function esc(s){return(s??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'})[m]);}
+
+let _tt=null;
+function toast(msg,type='info'){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.className=`toast show ${type}`;
+  clearTimeout(_tt);_tt=setTimeout(()=>el.classList.remove('show'),3500);
+}
+
+// ── Estado global ─────────────────────────────────────────────────────────
+let produtos = [];
+
+// ── Leitura do XML ────────────────────────────────────────────────────────
+function lerXML(file) {
+  const status = document.getElementById('xmlStatus');
+  status.style.display = 'block';
+  status.innerHTML = '<span style="color:var(--accent-blue);">⏳ Lendo XML…</span>';
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(e.target.result, 'text/xml');
+      const dets = doc.querySelectorAll('det');
+      if (!dets.length) throw new Error('Nenhum produto encontrado no XML');
+
+      const emit = doc.querySelector('emit');
+      const fornecedor = emit?.querySelector('xNome')?.textContent?.trim() || 'Fornecedor';
+      const nNF = doc.querySelector('ide nNF')?.textContent?.trim() || '';
+
+      produtos = Array.from(dets).map((det, idx) => {
+        const g = t => det.querySelector(t)?.textContent?.trim() || '';
+        const ean = g('cEAN') === 'SEM GTIN' ? '' : g('cEAN');
+        return {
+          idx,
+          cProd:    g('cProd'),
+          ean,
+          nome:     g('xProd'),
+          ncm:      g('NCM'),
+          qtd:      parseFloat(g('qCom')) || 0,
+          vlrUnit:  parseFloat(g('vUnCom')) || 0,
+          // enriquecimento
+          marca: '', altura: 0, largura: 0, profundidade: 0,
+          pesoLiquido: 0, pesoBruto: 0,
+          fotos: [],
+          blingId: null,
+          status: 'pendente', // pendente | ok | erro
+          erroMsg: '',
+        };
+      });
+
+      status.innerHTML = `<span style="color:var(--accent-green);">✓ ${produtos.length} produto(s) — NF ${nNF} · ${fornecedor}</span>`;
+      document.getElementById('tituloLista').textContent = `${produtos.length} produto(s) — NF ${nNF} · ${fornecedor}`;
+      renderizarLista();
+      document.getElementById('secaoProdutos').style.display = 'block';
+    } catch(err) {
+      status.innerHTML = `<span style="color:var(--accent-red);">✗ ${err.message}</span>`;
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+// ── Render lista ──────────────────────────────────────────────────────────
+function renderizarLista() {
+  const lista = document.getElementById('listagem');
+  lista.innerHTML = produtos.map(p => `
+    <div class="item-card" id="card_${p.idx}">
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+
+        <input type="checkbox" id="chk_${p.idx}" checked
+          style="margin-top:4px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--accent-blue);"/>
+
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+            <span style="font-size:13px;font-weight:700;color:var(--text-primary);">${esc(p.nome)}</span>
+            <span class="tag">${esc(p.cProd)}</span>
+            ${p.ean ? `<span class="tag tag-green">EAN ${esc(p.ean)}</span>` : '<span class="tag tag-yellow">Sem EAN</span>'}
+            <span class="tag">NCM ${esc(p.ncm)}</span>
+            <span class="tag">Qtd ${p.qtd}</span>
+            <span class="tag">R$ ${p.vlrUnit.toFixed(2)}/un</span>
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+            <!-- PDF drop -->
+            <label class="pdf-drop" id="pdfLabel_${p.idx}" style="flex:1;min-width:200px;">
+              <input type="file" accept=".pdf" style="display:none;" id="pdf_${p.idx}"/>
+              <span>📄</span>
+              <span id="pdfNome_${p.idx}">Ficha técnica PDF (opcional)</span>
+            </label>
+
+            <!-- Fotos drop -->
+            <label class="foto-drop" id="fotoLabel_${p.idx}" style="flex:1;min-width:200px;">
+              <input type="file" accept="image/*" multiple style="display:none;" id="fotos_${p.idx}"/>
+              <span>📷</span>
+              <span id="fotoNome_${p.idx}">Fotos do produto (opcional)</span>
+            </label>
+          </div>
+
+          <!-- Extrato do PDF -->
+          <div id="extrato_${p.idx}" style="display:none;" class="extrato"></div>
+
+          <!-- Preview de fotos -->
+          <div id="fotosPreview_${p.idx}" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"></div>
+        </div>
+
+        <!-- Status por item -->
+        <div id="status_${p.idx}" style="font-size:11px;font-weight:700;white-space:nowrap;flex-shrink:0;padding-top:3px;"></div>
+      </div>
+    </div>
+  `).join('');
+
+  // Bind events
+  produtos.forEach(p => {
+    // PDF
+    const pdfInput = document.getElementById(`pdf_${p.idx}`);
+    pdfInput.addEventListener('change', function() {
+      if (this.files[0]) processarPDFitem(this.files[0], p.idx);
+    });
+    const pdfLabel = document.getElementById(`pdfLabel_${p.idx}`);
+    pdfLabel.addEventListener('dragover', e => { e.preventDefault(); pdfLabel.style.borderColor='var(--accent-blue)'; });
+    pdfLabel.addEventListener('dragleave', () => { pdfLabel.style.borderColor=''; });
+    pdfLabel.addEventListener('drop', e => {
+      e.preventDefault(); pdfLabel.style.borderColor='';
+      const f = e.dataTransfer.files[0];
+      if (f?.name.toLowerCase().endsWith('.pdf')) processarPDFitem(f, p.idx);
+    });
+
+    // Fotos
+    document.getElementById(`fotos_${p.idx}`).addEventListener('change', function() {
+      if (this.files.length) processarFotosItem(this.files, p.idx);
+    });
+  });
+}
+
+// ── Extração PDF por item ─────────────────────────────────────────────────
+async function processarPDFitem(file, idx) {
+  const nomeEl  = document.getElementById(`pdfNome_${idx}`);
+  const extratoEl = document.getElementById(`extrato_${idx}`);
+  nomeEl.textContent = '⏳ Extraindo…';
+  extratoEl.style.display = 'none';
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      fullText += content.items.map(it => it.str).join(' ') + '\n';
+    }
+    const campos = extrairCampos(fullText);
+    const p = produtos[idx];
+
+    if (campos.marca)        p.marca        = campos.marca;
+    if (campos.altura)       p.altura       = campos.altura;
+    if (campos.largura)      p.largura      = campos.largura;
+    if (campos.profundidade) p.profundidade = campos.profundidade;
+    if (campos.pesoLiquido)  p.pesoLiquido  = campos.pesoLiquido;
+    if (campos.pesoBruto)    p.pesoBruto    = campos.pesoBruto;
+    if (campos.ncm && !p.ncm) p.ncm        = campos.ncm;
+
+    nomeEl.textContent = `✓ ${file.name}`;
+    const linhas = [];
+    if (campos.marca)        linhas.push(`Marca: ${campos.marca}`);
+    if (campos.altura)       linhas.push(`${campos.altura}×${campos.largura}×${campos.profundidade} cm`);
+    if (campos.pesoLiquido)  linhas.push(`Peso: ${campos.pesoLiquido} kg`);
+    if (campos.pesoBruto)    linhas.push(`Bruto: ${campos.pesoBruto} kg`);
+    if (linhas.length) {
+      extratoEl.style.display = 'block';
+      extratoEl.textContent = linhas.join(' · ');
+    }
+  } catch(err) {
+    nomeEl.textContent = `✗ Erro: ${err.message}`;
+    nomeEl.style.color = 'var(--accent-red)';
+  }
+}
+
+// ── Fotos por item ────────────────────────────────────────────────────────
+function processarFotosItem(files, idx) {
+  const preview = document.getElementById(`fotosPreview_${idx}`);
+  const nomeEl  = document.getElementById(`fotoNome_${idx}`);
+  if (!produtos[idx].fotos) produtos[idx].fotos = [];
+
+  Array.from(files).forEach(file => {
+    produtos[idx].fotos.push(file);
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(file);
+    img.style.cssText = 'width:56px;height:56px;object-fit:cover;border-radius:var(--r-sm);border:2px solid var(--accent-green);';
+    preview.appendChild(img);
+  });
+  nomeEl.textContent = `✓ ${produtos[idx].fotos.length} foto(s)`;
+  nomeEl.style.color = 'var(--accent-green)';
+}
+
+// ── Extração de campos do PDF (mesma lógica do cadastro-produto) ──────────
+function extrairCampos(texto){
+  const t=texto.replace(/\s+/g,' ');
+  const campos={};
+
+  const marcaSufixo=t.match(/\b(?:Safety\s*1st|Tiny\s*Love|Cosco\s*Kids?|Buba|Maxi-Cosi|Chicco|Tutti\s*Baby|Vittak)/i);
+  if(marcaSufixo) campos.marca=marcaSufixo[0].trim();
+
+  const ncmMatch=t.match(/NCM\s*(\d{8})/);
+  if(ncmMatch)campos.ncm=ncmMatch[1];
+
+  const tNorm = t.replace(/\r?\n/g,' ').replace(/\s+/g,' ');
+  function parseDims(a,l,p){return{altura:parseFloat(a.replace(',','.')),largura:parseFloat(l.replace(',','.')),profundidade:parseFloat(p.replace(',','.'))};}
+  const NUM='([\\d,.]+)', SEP='\\s*[xX×]\\s*';
+
+  const dimsEmb=tNorm.match(new RegExp(`Medidas?\\s*\\(A\\s*[xX]\\s*L\\s*[xX]\\s*P[^)]*\\)\\s*${NUM}${SEP}${NUM}${SEP}${NUM}`,'i'));
+  if(dimsEmb){const d=parseDims(dimsEmb[1],dimsEmb[2],dimsEmb[3]);if(d.altura&&d.largura&&d.profundidade){campos.altura=d.altura;campos.largura=d.largura;campos.profundidade=d.profundidade;}}
+
+  if(!campos.altura){
+    const dimsProd=tNorm.match(new RegExp(`Dimens[oõ]es?\\s+Externa[^(]*?\\([^)]*\\)\\s*${NUM}${SEP}${NUM}${SEP}${NUM}`,'i'));
+    if(dimsProd){const d=parseDims(dimsProd[1],dimsProd[2],dimsProd[3]);if(d.altura&&d.largura&&d.profundidade){campos.altura=d.altura;campos.largura=d.largura;campos.profundidade=d.profundidade;}}
+  }
+
+  if(!campos.altura){
+    const gen=tNorm.match(new RegExp(`${NUM}${SEP}${NUM}${SEP}${NUM}\\s*cm`,'i'));
+    if(gen){const d=parseDims(gen[1],gen[2],gen[3]);if(d.altura>0&&d.largura>0&&d.profundidade>0){campos.altura=d.altura;campos.largura=d.largura;campos.profundidade=d.profundidade;}}
+  }
+
+  const pesoM=tNorm.match(/Peso\s+do\s+Produto\s*([\d,.]+)\s*(g|kg)?/i);
+  if(pesoM){let p=parseFloat(pesoM[1].replace(',','.'));const u=(pesoM[2]||'').toLowerCase();if(u==='g'||(!u&&p>10))p=p/1000;campos.pesoLiquido=+p.toFixed(3);}
+
+  const pesoBM=tNorm.match(/Peso\s*\(?\s*Bruto\s*\)?\s*([\d,.]+)\s*(g|kg)?/i);
+  if(pesoBM){let pb=parseFloat(pesoBM[1].replace(',','.'));const u=(pesoBM[2]||'').toLowerCase();if(u==='g'||(!u&&pb>20))pb=pb/1000;campos.pesoBruto=+pb.toFixed(3);}
+
+  return campos;
+}
+
+// ── Enriquecimento em lote ────────────────────────────────────────────────
+document.getElementById('btnEnriquecer').addEventListener('click', async () => {
+  const selecionados = produtos.filter((_, i) => document.getElementById(`chk_${i}`)?.checked);
+  if (!selecionados.length) { toast('Selecione ao menos um produto', 'err'); return; }
+
+  const secProg = document.getElementById('secaoProgresso');
+  const txtProg = document.getElementById('textoProgresso');
+  const cntProg = document.getElementById('contadorProgresso');
+  const barra   = document.getElementById('barraProgresso');
+  secProg.style.display = 'block';
+
+  let ok = 0, erros = 0, total = selecionados.length;
+
+  for (const p of selecionados) {
+    const statusEl = document.getElementById(`status_${p.idx}`);
+    const card     = document.getElementById(`card_${p.idx}`);
+    statusEl.style.color = 'var(--accent-blue)';
+    statusEl.textContent = '⏳';
+    txtProg.textContent = `Processando: ${esc(p.nome.slice(0,40))}…`;
+
+    try {
+      // 1. Busca ID no Bling
+      let blingId = p.blingId;
+      if (!blingId) {
+        let resp = null;
+        if (p.ean) {
+          try { resp = await api(`/produtos/buscar-por-ean?ean=${encodeURIComponent(p.ean)}`); } catch(_){}
+        }
+        if (!resp && p.cProd) {
+          try { resp = await api(`/produtos/buscar-por-codigo?codigo=${encodeURIComponent(p.cProd)}`); } catch(_){}
+        }
+        if (!resp?.produto?.id) throw new Error('Não encontrado no Bling');
+        blingId = resp.produto.id;
+        produtos[p.idx].blingId = blingId;
+      }
+
+      // 2. Envia fotos se houver
+      if (p.fotos?.length) {
+        statusEl.textContent = '📷';
+        const fd = new FormData();
+        p.fotos.forEach(f => fd.append('fotos', f));
+        fd.append('blingId', String(blingId));
+        await fetch('/produtos/fotos-bling', {
+          method: 'POST',
+          headers: { 'authorization': `Bearer ${localStorage.getItem('expedicao_token')||''}` },
+          body: fd,
+        });
+      }
+
+      // 3. Atualiza dados no Bling
+      const temDados = p.marca || p.altura || p.pesoLiquido || p.pesoBruto || p.ncm;
+      if (temDados) {
+        statusEl.textContent = '🔄';
+        await api('/produtos/enriquecer', {
+          method: 'POST',
+          body: JSON.stringify({ blingId, dados: p }),
+        });
+      }
+
+      statusEl.style.color = 'var(--accent-green)';
+      statusEl.textContent = '✓';
+      card.classList.add('ok');
+      ok++;
+    } catch(err) {
+      statusEl.style.color = 'var(--accent-red)';
+      statusEl.textContent = '✗';
+      card.classList.add('erro');
+      // Mostra erro no extrato
+      const extratoEl = document.getElementById(`extrato_${p.idx}`);
+      extratoEl.style.display = 'block';
+      extratoEl.style.background = 'rgba(239,68,68,.08)';
+      extratoEl.style.borderColor = 'rgba(239,68,68,.2)';
+      extratoEl.style.color = 'var(--accent-red)';
+      extratoEl.textContent = `Erro: ${err.message}`;
+      erros++;
+    }
+
+    const feitos = ok + erros;
+    cntProg.textContent = `${feitos}/${total}`;
+    barra.style.width = `${(feitos/total)*100}%`;
+  }
+
+  txtProg.textContent = `Concluído: ${ok} atualizados, ${erros} erro(s)`;
+  toast(`${ok} produto(s) atualizado(s)${erros ? ` · ${erros} erro(s)` : ''}`, ok > 0 ? 'ok' : 'err');
+});
+
+// ── Botões auxiliares ─────────────────────────────────────────────────────
+document.getElementById('btnTodos').addEventListener('click', () => {
+  produtos.forEach((_, i) => { const c=document.getElementById(`chk_${i}`); if(c) c.checked=true; });
+});
+document.getElementById('btnNenhum').addEventListener('click', () => {
+  produtos.forEach((_, i) => { const c=document.getElementById(`chk_${i}`); if(c) c.checked=false; });
+});
+document.getElementById('btnNovaNF').addEventListener('click', () => {
+  produtos = [];
+  document.getElementById('secaoProdutos').style.display = 'none';
+  document.getElementById('xmlStatus').style.display = 'none';
+  document.getElementById('xmlInput').value = '';
+  document.getElementById('secaoProgresso').style.display = 'none';
+});
+
+// ── Drop zone XML ─────────────────────────────────────────────────────────
+const dropZoneXml = document.getElementById('dropZoneXml');
+document.getElementById('xmlInput').addEventListener('change', function() {
+  if (this.files[0]) lerXML(this.files[0]);
+});
+dropZoneXml.addEventListener('dragover', e => { e.preventDefault(); dropZoneXml.classList.add('over'); });
+dropZoneXml.addEventListener('dragleave', () => dropZoneXml.classList.remove('over'));
+dropZoneXml.addEventListener('drop', e => {
+  e.preventDefault(); dropZoneXml.classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f) lerXML(f);
+});
+</script>
+</body>
+</html>

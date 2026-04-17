@@ -1,0 +1,9 @@
+# railway.toml
+# Root directory deve ser "/" (vazio) no painel do Railway.
+# Atualizado: 2026-04-01
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "node backend/server.js"

@@ -1,0 +1,639 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNIVERSBOX HUB — Global Design System
+   Inspiração: Linear, Vercel, Raycast, Superhuman
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. THEME SYSTEM — CSS Custom Properties ─────────────────────────────── */
+/* Applied via: document.documentElement.setAttribute('data-theme', name)    */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Backgrounds */
+  --bg-app:      #020617;
+  --bg-sidebar:  #020617;
+  --bg-surface:  #0f172a;
+  --bg-card:     rgba(15, 23, 42, 0.4);
+
+  /* Accent — Emerald */
+  --accent:      #10b981;
+  --accent-dim:  rgba(16, 185, 129, 0.12);
+  --accent-text: #34d399;
+  --accent-glow: rgba(16, 185, 129, 0.20);
+  --accent-h: 160; --accent-s: 84%; --accent-l: 39%;
+
+  /* Text */
+  --text-primary:   #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted:     #475569;
+
+  /* Border */
+  --border: rgba(255, 255, 255, 0.06);
+}
+
+/* ── UBER — True black, cirúrgico ─────────────────────────────────────────── */
+[data-theme="uber"] {
+  color-scheme: dark;
+  --bg-app:      #000000;
+  --bg-sidebar:  #000000;
+  --bg-surface:  #111111;
+  --bg-card:     rgba(20, 20, 20, 0.6);
+  --accent:      #ffffff;
+  --accent-dim:  rgba(255, 255, 255, 0.07);
+  --accent-text: #ffffff;
+  --accent-glow: rgba(255, 255, 255, 0.12);
+  --text-primary:   #ffffff;
+  --text-secondary: #9ca3af;
+  --text-muted:     #4b5563;
+  --border: rgba(255, 255, 255, 0.08);
+}
+
+/* ── IFOOD — Vermelho quente, energia ────────────────────────────────────── */
+[data-theme="ifood"] {
+  color-scheme: dark;
+  --bg-app:      #0f0404;
+  --bg-sidebar:  #0a0202;
+  --bg-surface:  #1a0707;
+  --bg-card:     rgba(25, 6, 6, 0.7);
+  --accent:      #EA1D2C;
+  --accent-dim:  rgba(234, 29, 44, 0.12);
+  --accent-text: #ff5662;
+  --accent-glow: rgba(234, 29, 44, 0.25);
+  --text-primary:   #fff5f5;
+  --text-secondary: #fca5a5;
+  --text-muted:     #7f1d1d;
+  --border: rgba(234, 29, 44, 0.12);
+}
+
+/* ── 99 — Amarelo táxi, urbano ───────────────────────────────────────────── */
+[data-theme="99"] {
+  color-scheme: dark;
+  --bg-app:      #090800;
+  --bg-sidebar:  #060500;
+  --bg-surface:  #131000;
+  --bg-card:     rgba(18, 15, 0, 0.8);
+  --accent:      #FFD100;
+  --accent-dim:  rgba(255, 209, 0, 0.10);
+  --accent-text: #FFD100;
+  --accent-glow: rgba(255, 209, 0, 0.22);
+  --text-primary:   #fffde7;
+  --text-secondary: #fde68a;
+  --text-muted:     #78716c;
+  --border: rgba(255, 209, 0, 0.08);
+}
+
+/* ── MARVEL — Vermelho + Ouro, épico ─────────────────────────────────────── */
+[data-theme="marvel"] {
+  color-scheme: dark;
+  --bg-app:      #0d0508;
+  --bg-sidebar:  #08030a;
+  --bg-surface:  #180b10;
+  --bg-card:     rgba(18, 5, 10, 0.8);
+  --accent:      #ED1D24;
+  --accent-dim:  rgba(237, 29, 36, 0.12);
+  --accent-text: #ff4d53;
+  --accent-glow: rgba(237, 29, 36, 0.30);
+  --accent2:     #F0A500;
+  --text-primary:   #fff1f2;
+  --text-secondary: #fca5a5;
+  --text-muted:     #7c2d2d;
+  --border: rgba(237, 29, 36, 0.10);
+}
+
+/* ── RICK & MORTY — Portal verde, interestelar ───────────────────────────── */
+[data-theme="rick"] {
+  color-scheme: dark;
+  --bg-app:      #06080f;
+  --bg-sidebar:  #040609;
+  --bg-surface:  #0c1120;
+  --bg-card:     rgba(6, 10, 20, 0.8);
+  --accent:      #6FD08C;
+  --accent-dim:  rgba(111, 208, 140, 0.10);
+  --accent-text: #6FD08C;
+  --accent-glow: rgba(111, 208, 140, 0.25);
+  --accent2:     #00B4D8;
+  --text-primary:   #ecfdf5;
+  --text-secondary: #6ee7b7;
+  --text-muted:     #065f46;
+  --border: rgba(111, 208, 140, 0.08);
+}
+
+/* ── 2. Full-height SPA shell ─────────────────────────────────────────────── */
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── 3. Scrollbar — thin overlay style ──────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--accent-dim, rgba(255,255,255,0.08));
+  border-radius: 999px;
+  transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-glow, rgba(255,255,255,0.18));
+}
+::-webkit-scrollbar-corner { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--accent-dim, rgba(255,255,255,0.08)) transparent; }
+
+/* ── 4. Text rendering ───────────────────────────────────────────────────── */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── 5. Selection ────────────────────────────────────────────────────────── */
+::selection {
+  background: var(--accent-dim, rgba(16, 185, 129, 0.25));
+  color: var(--text-primary, #ecfdf5);
+}
+
+/* ── 6. Focus visible ────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent-glow, rgba(16,185,129,0.6));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+:focus:not(:focus-visible) { outline: none; }
+
+/* ── 7. Transitions ──────────────────────────────────────────────────────── */
+* {
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 0ms;
+}
+/* Quando o tema está sendo trocado, habilita transição suave em tudo */
+.theme-transitioning *,
+.theme-transitioning *::before,
+.theme-transitioning *::after {
+  transition-duration: 350ms !important;
+  transition-timing-function: ease !important;
+}
+/* Exceção: elementos com animação não devem ter transição interferindo */
+.theme-transitioning [class*="animate-"],
+.theme-transitioning canvas { transition: none !important; }
+
+/* ── 8. Input search cleanup ─────────────────────────────────────────────── */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration { -webkit-appearance: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── General purpose ─────────────────────────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+@keyframes slide-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+
+.animate-fade-in        { animation: fade-in        0.18s ease both; }
+.animate-slide-in-right { animation: slide-in-right 0.20s ease both; }
+.animate-slide-in-up    { animation: slide-in-up    0.18s ease both; }
+.animate-scale-in       { animation: scale-in       0.15s ease both; }
+
+/* ── MARVEL sparkles ─────────────────────────────────────────────────────── */
+@keyframes marvel-spark {
+  0%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); }
+  40%      { opacity: 1; transform: scale(1.6) rotate(45deg); }
+  60%      { opacity: 0.8; transform: scale(1.2) rotate(90deg); }
+}
+.animate-marvel-spark {
+  animation: marvel-spark linear infinite;
+}
+
+/* ── RICK portal pulse ───────────────────────────────────────────────────── */
+@keyframes rick-portal-pulse {
+  0%, 100% { transform: scale(1) rotate(0deg);   opacity: 0.6; filter: hue-rotate(0deg); }
+  33%      { transform: scale(1.08) rotate(2deg); opacity: 1;   filter: hue-rotate(15deg); }
+  66%      { transform: scale(0.96) rotate(-2deg); opacity: 0.8; filter: hue-rotate(-10deg); }
+}
+.animate-rick-portal {
+  animation: rick-portal-pulse 5s ease-in-out infinite;
+}
+
+/* ── RICK portal inner ring ──────────────────────────────────────────────── */
+@keyframes rick-portal-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.animate-rick-spin {
+  animation: rick-portal-spin 12s linear infinite;
+}
+
+/* ── IFOOD pulse glow ────────────────────────────────────────────────────── */
+@keyframes ifood-glow {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%      { opacity: 0.7; transform: scale(1.04); }
+}
+.animate-ifood-glow {
+  animation: ifood-glow 4s ease-in-out infinite;
+}
+
+/* ── 99 stripe drift ─────────────────────────────────────────────────────── */
+@keyframes taxi-drift {
+  from { background-position: 0 0; }
+  to   { background-position: 40px 40px; }
+}
+.animate-taxi-drift {
+  animation: taxi-drift 8s linear infinite;
+}
+
+/* ── UBER scan line ──────────────────────────────────────────────────────── */
+@keyframes uber-scan {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+.animate-uber-scan {
+  animation: uber-scan 8s linear infinite;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UTILITIES
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
+.glass {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, var(--accent, #10b981), var(--accent2, #3b82f6));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.row-hover { transition: background-color 80ms ease; }
+.row-hover:hover { background-color: rgba(255, 255, 255, 0.025); }
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.6;
+}
+
+/* ── Locked nav items ────────────────────────────────────────────────────── */
+.nav-locked {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(0.5);
+}
+
+/* react-image-crop override for dark theme */
+.ReactCrop__crop-selection {
+  border-color: var(--accent, #10b981) !important;
+}
+.ReactCrop__drag-handle::after {
+  background-color: var(--accent, #10b981) !important;
+  border-color: var(--accent, #10b981) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THEME OVERRIDES — redireciona as classes Tailwind hardcoded para cada tema
+   O Tailwind gera CSS estático (bg-slate-950, text-emerald-400…) que não
+   conhece CSS vars. Estes overrides forçam cada palette de tema nos seletores
+   mais usados em toda a aplicação. O tema "dark" é o padrão → sem override.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Transição suave ao trocar tema — apenas no html/body/root */
+html, body, #root {
+  transition: background-color 400ms ease;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   UBER — Preto puro / Branco cirúrgico
+   ════════════════════════════════════════════════════════════════════════════ */
+[data-theme="uber"] body,
+[data-theme="uber"] #root                 { background-color: #000000; }
+
+/* backgrounds */
+[data-theme="uber"] .bg-slate-950         { background-color: #000000 !important; }
+[data-theme="uber"] .bg-slate-900         { background-color: #0a0a0a !important; }
+[data-theme="uber"] .bg-slate-800         { background-color: #141414 !important; }
+[data-theme="uber"] .bg-slate-700         { background-color: #1e1e1e !important; }
+[data-theme="uber"] .bg-slate-600         { background-color: #282828 !important; }
+/* opacity variants */
+[data-theme="uber"] .bg-slate-900\/10     { background-color: rgba(10,10,10,.10) !important; }
+[data-theme="uber"] .bg-slate-900\/20     { background-color: rgba(10,10,10,.20) !important; }
+[data-theme="uber"] .bg-slate-900\/30     { background-color: rgba(10,10,10,.30) !important; }
+[data-theme="uber"] .bg-slate-900\/40     { background-color: rgba(10,10,10,.40) !important; }
+[data-theme="uber"] .bg-slate-900\/50     { background-color: rgba(10,10,10,.50) !important; }
+[data-theme="uber"] .bg-slate-900\/60     { background-color: rgba(10,10,10,.60) !important; }
+[data-theme="uber"] .bg-slate-900\/80     { background-color: rgba(10,10,10,.80) !important; }
+[data-theme="uber"] .bg-slate-800\/10     { background-color: rgba(20,20,20,.10) !important; }
+[data-theme="uber"] .bg-slate-800\/30     { background-color: rgba(20,20,20,.30) !important; }
+[data-theme="uber"] .bg-slate-800\/40     { background-color: rgba(20,20,20,.40) !important; }
+[data-theme="uber"] .bg-slate-800\/50     { background-color: rgba(20,20,20,.50) !important; }
+[data-theme="uber"] .bg-slate-800\/60     { background-color: rgba(20,20,20,.60) !important; }
+[data-theme="uber"] .bg-slate-700\/30     { background-color: rgba(30,30,30,.30) !important; }
+[data-theme="uber"] .bg-slate-700\/50     { background-color: rgba(30,30,30,.50) !important; }
+/* accent white */
+[data-theme="uber"] .text-emerald-400,
+[data-theme="uber"] .text-emerald-300,
+[data-theme="uber"] .text-emerald-500     { color: #ffffff !important; }
+[data-theme="uber"] .text-emerald-400\/60 { color: rgba(255,255,255,.60) !important; }
+[data-theme="uber"] .text-emerald-400\/80 { color: rgba(255,255,255,.80) !important; }
+[data-theme="uber"] .bg-emerald-500\/5    { background-color: rgba(255,255,255,.03) !important; }
+[data-theme="uber"] .bg-emerald-500\/10   { background-color: rgba(255,255,255,.05) !important; }
+[data-theme="uber"] .bg-emerald-500\/15   { background-color: rgba(255,255,255,.07) !important; }
+[data-theme="uber"] .bg-emerald-500\/20   { background-color: rgba(255,255,255,.10) !important; }
+[data-theme="uber"] .bg-emerald-500\/25   { background-color: rgba(255,255,255,.12) !important; }
+[data-theme="uber"] .bg-emerald-500       { background-color: #ffffff !important; color: #000000 !important; }
+[data-theme="uber"] .bg-emerald-600       { background-color: #e5e5e5 !important; color: #000000 !important; }
+[data-theme="uber"] .hover\:bg-emerald-500\/20:hover { background-color: rgba(255,255,255,.10) !important; }
+[data-theme="uber"] .hover\:bg-emerald-600:hover     { background-color: #e0e0e0 !important; }
+[data-theme="uber"] .hover\:text-emerald-400:hover,
+[data-theme="uber"] .hover\:text-emerald-300:hover   { color: #ffffff !important; }
+[data-theme="uber"] .border-emerald-500\/20 { border-color: rgba(255,255,255,.12) !important; }
+[data-theme="uber"] .border-emerald-500\/30 { border-color: rgba(255,255,255,.20) !important; }
+[data-theme="uber"] .border-emerald-500     { border-color: #ffffff !important; }
+[data-theme="uber"] .hover\:border-emerald-500\/30:hover { border-color: rgba(255,255,255,.20) !important; }
+[data-theme="uber"] .focus\:border-emerald-500:focus { border-color: rgba(255,255,255,.60) !important; }
+[data-theme="uber"] .ring-emerald-500\/20   { --tw-ring-color: rgba(255,255,255,.10); }
+[data-theme="uber"] .from-emerald-500       { --tw-gradient-from: #ffffff !important; }
+[data-theme="uber"] .to-teal-500            { --tw-gradient-to:   #cccccc !important; }
+[data-theme="uber"] .border-slate-700\/50   { border-color: rgba(40,40,40,.50) !important; }
+[data-theme="uber"] .border-slate-800\/50   { border-color: rgba(25,25,25,.50) !important; }
+[data-theme="uber"] .border-slate-700       { border-color: #1e1e1e !important; }
+[data-theme="uber"] .border-slate-800       { border-color: #141414 !important; }
+[data-theme="uber"] .divide-slate-800\/50 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(20,20,20,.50) !important; }
+[data-theme="uber"] .glass { background: rgba(10,10,10,.88) !important; border-color: rgba(255,255,255,.06) !important; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   IFOOD — Vermelho quente / Dark Crimson
+   ════════════════════════════════════════════════════════════════════════════ */
+[data-theme="ifood"] body,
+[data-theme="ifood"] #root                 { background-color: #0a0202; }
+
+[data-theme="ifood"] .bg-slate-950         { background-color: #080101 !important; }
+[data-theme="ifood"] .bg-slate-900         { background-color: #140303 !important; }
+[data-theme="ifood"] .bg-slate-800         { background-color: #1e0606 !important; }
+[data-theme="ifood"] .bg-slate-700         { background-color: #280909 !important; }
+[data-theme="ifood"] .bg-slate-600         { background-color: #320c0c !important; }
+[data-theme="ifood"] .bg-slate-900\/10     { background-color: rgba(20,3,3,.10) !important; }
+[data-theme="ifood"] .bg-slate-900\/20     { background-color: rgba(20,3,3,.20) !important; }
+[data-theme="ifood"] .bg-slate-900\/30     { background-color: rgba(20,3,3,.30) !important; }
+[data-theme="ifood"] .bg-slate-900\/40     { background-color: rgba(20,3,3,.40) !important; }
+[data-theme="ifood"] .bg-slate-900\/50     { background-color: rgba(20,3,3,.50) !important; }
+[data-theme="ifood"] .bg-slate-900\/60     { background-color: rgba(20,3,3,.60) !important; }
+[data-theme="ifood"] .bg-slate-900\/80     { background-color: rgba(20,3,3,.80) !important; }
+[data-theme="ifood"] .bg-slate-800\/10     { background-color: rgba(30,6,6,.10) !important; }
+[data-theme="ifood"] .bg-slate-800\/30     { background-color: rgba(30,6,6,.30) !important; }
+[data-theme="ifood"] .bg-slate-800\/40     { background-color: rgba(30,6,6,.40) !important; }
+[data-theme="ifood"] .bg-slate-800\/50     { background-color: rgba(30,6,6,.50) !important; }
+[data-theme="ifood"] .bg-slate-800\/60     { background-color: rgba(30,6,6,.60) !important; }
+[data-theme="ifood"] .bg-slate-700\/30     { background-color: rgba(40,9,9,.30) !important; }
+[data-theme="ifood"] .bg-slate-700\/50     { background-color: rgba(40,9,9,.50) !important; }
+/* accent crimson */
+[data-theme="ifood"] .text-emerald-400     { color: #ff5662 !important; }
+[data-theme="ifood"] .text-emerald-300     { color: #ff7a83 !important; }
+[data-theme="ifood"] .text-emerald-500     { color: #EA1D2C !important; }
+[data-theme="ifood"] .text-emerald-400\/60 { color: rgba(255,86,98,.60) !important; }
+[data-theme="ifood"] .text-emerald-400\/80 { color: rgba(255,86,98,.80) !important; }
+[data-theme="ifood"] .bg-emerald-500\/5    { background-color: rgba(234,29,44,.04) !important; }
+[data-theme="ifood"] .bg-emerald-500\/10   { background-color: rgba(234,29,44,.08) !important; }
+[data-theme="ifood"] .bg-emerald-500\/15   { background-color: rgba(234,29,44,.12) !important; }
+[data-theme="ifood"] .bg-emerald-500\/20   { background-color: rgba(234,29,44,.16) !important; }
+[data-theme="ifood"] .bg-emerald-500\/25   { background-color: rgba(234,29,44,.20) !important; }
+[data-theme="ifood"] .bg-emerald-500       { background-color: #EA1D2C !important; }
+[data-theme="ifood"] .bg-emerald-600       { background-color: #c7151f !important; }
+[data-theme="ifood"] .hover\:bg-emerald-500\/20:hover { background-color: rgba(234,29,44,.16) !important; }
+[data-theme="ifood"] .hover\:bg-emerald-600:hover     { background-color: #c7151f !important; }
+[data-theme="ifood"] .hover\:text-emerald-400:hover,
+[data-theme="ifood"] .hover\:text-emerald-300:hover   { color: #ff5662 !important; }
+[data-theme="ifood"] .border-emerald-500\/20 { border-color: rgba(234,29,44,.20) !important; }
+[data-theme="ifood"] .border-emerald-500\/30 { border-color: rgba(234,29,44,.30) !important; }
+[data-theme="ifood"] .border-emerald-500     { border-color: #EA1D2C !important; }
+[data-theme="ifood"] .hover\:border-emerald-500\/30:hover { border-color: rgba(234,29,44,.30) !important; }
+[data-theme="ifood"] .focus\:border-emerald-500:focus { border-color: rgba(234,29,44,.80) !important; }
+[data-theme="ifood"] .ring-emerald-500\/20   { --tw-ring-color: rgba(234,29,44,.15); }
+[data-theme="ifood"] .from-emerald-500       { --tw-gradient-from: #EA1D2C !important; }
+[data-theme="ifood"] .to-teal-500            { --tw-gradient-to:   #ff5662 !important; }
+[data-theme="ifood"] .border-slate-700\/50   { border-color: rgba(40,9,9,.50) !important; }
+[data-theme="ifood"] .border-slate-800\/50   { border-color: rgba(30,6,6,.50) !important; }
+[data-theme="ifood"] .border-slate-700       { border-color: #280909 !important; }
+[data-theme="ifood"] .border-slate-800       { border-color: #1e0606 !important; }
+[data-theme="ifood"] .divide-slate-800\/50 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(30,6,6,.50) !important; }
+[data-theme="ifood"] .glass     { background: rgba(10,2,2,.88) !important; border-color: rgba(234,29,44,.10) !important; }
+[data-theme="ifood"] .text-slate-100,
+[data-theme="ifood"] .text-slate-200         { color: #fff5f5 !important; }
+[data-theme="ifood"] .text-slate-300,
+[data-theme="ifood"] .text-slate-400         { color: #fca5a5 !important; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   99 — Âmbar escuro / Amarelo táxi
+   ════════════════════════════════════════════════════════════════════════════ */
+[data-theme="99"] body,
+[data-theme="99"] #root                    { background-color: #060500; }
+
+[data-theme="99"] .bg-slate-950            { background-color: #040300 !important; }
+[data-theme="99"] .bg-slate-900            { background-color: #0d0b00 !important; }
+[data-theme="99"] .bg-slate-800            { background-color: #161400 !important; }
+[data-theme="99"] .bg-slate-700            { background-color: #1e1a00 !important; }
+[data-theme="99"] .bg-slate-600            { background-color: #282300 !important; }
+[data-theme="99"] .bg-slate-900\/10        { background-color: rgba(13,11,0,.10) !important; }
+[data-theme="99"] .bg-slate-900\/20        { background-color: rgba(13,11,0,.20) !important; }
+[data-theme="99"] .bg-slate-900\/30        { background-color: rgba(13,11,0,.30) !important; }
+[data-theme="99"] .bg-slate-900\/40        { background-color: rgba(13,11,0,.40) !important; }
+[data-theme="99"] .bg-slate-900\/50        { background-color: rgba(13,11,0,.50) !important; }
+[data-theme="99"] .bg-slate-900\/60        { background-color: rgba(13,11,0,.60) !important; }
+[data-theme="99"] .bg-slate-900\/80        { background-color: rgba(13,11,0,.80) !important; }
+[data-theme="99"] .bg-slate-800\/10        { background-color: rgba(22,20,0,.10) !important; }
+[data-theme="99"] .bg-slate-800\/30        { background-color: rgba(22,20,0,.30) !important; }
+[data-theme="99"] .bg-slate-800\/40        { background-color: rgba(22,20,0,.40) !important; }
+[data-theme="99"] .bg-slate-800\/50        { background-color: rgba(22,20,0,.50) !important; }
+[data-theme="99"] .bg-slate-800\/60        { background-color: rgba(22,20,0,.60) !important; }
+[data-theme="99"] .bg-slate-700\/30        { background-color: rgba(30,26,0,.30) !important; }
+[data-theme="99"] .bg-slate-700\/50        { background-color: rgba(30,26,0,.50) !important; }
+/* accent yellow */
+[data-theme="99"] .text-emerald-400,
+[data-theme="99"] .text-emerald-300        { color: #FFD100 !important; }
+[data-theme="99"] .text-emerald-500        { color: #e6bc00 !important; }
+[data-theme="99"] .text-emerald-400\/60    { color: rgba(255,209,0,.60) !important; }
+[data-theme="99"] .text-emerald-400\/80    { color: rgba(255,209,0,.80) !important; }
+[data-theme="99"] .bg-emerald-500\/5       { background-color: rgba(255,209,0,.04) !important; }
+[data-theme="99"] .bg-emerald-500\/10      { background-color: rgba(255,209,0,.08) !important; }
+[data-theme="99"] .bg-emerald-500\/15      { background-color: rgba(255,209,0,.11) !important; }
+[data-theme="99"] .bg-emerald-500\/20      { background-color: rgba(255,209,0,.15) !important; }
+[data-theme="99"] .bg-emerald-500\/25      { background-color: rgba(255,209,0,.18) !important; }
+[data-theme="99"] .bg-emerald-500          { background-color: #FFD100 !important; color: #060500 !important; }
+[data-theme="99"] .bg-emerald-600          { background-color: #e6bc00 !important; color: #060500 !important; }
+[data-theme="99"] .hover\:bg-emerald-500\/20:hover { background-color: rgba(255,209,0,.15) !important; }
+[data-theme="99"] .hover\:bg-emerald-600:hover     { background-color: #e6bc00 !important; }
+[data-theme="99"] .hover\:text-emerald-400:hover,
+[data-theme="99"] .hover\:text-emerald-300:hover   { color: #FFD100 !important; }
+[data-theme="99"] .border-emerald-500\/20  { border-color: rgba(255,209,0,.15) !important; }
+[data-theme="99"] .border-emerald-500\/30  { border-color: rgba(255,209,0,.28) !important; }
+[data-theme="99"] .border-emerald-500      { border-color: #FFD100 !important; }
+[data-theme="99"] .hover\:border-emerald-500\/30:hover { border-color: rgba(255,209,0,.28) !important; }
+[data-theme="99"] .focus\:border-emerald-500:focus { border-color: rgba(255,209,0,.80) !important; }
+[data-theme="99"] .ring-emerald-500\/20    { --tw-ring-color: rgba(255,209,0,.15); }
+[data-theme="99"] .from-emerald-500        { --tw-gradient-from: #FFD100 !important; }
+[data-theme="99"] .to-teal-500             { --tw-gradient-to:   #ffa500 !important; }
+[data-theme="99"] .border-slate-700\/50    { border-color: rgba(30,26,0,.50) !important; }
+[data-theme="99"] .border-slate-800\/50    { border-color: rgba(22,20,0,.50) !important; }
+[data-theme="99"] .border-slate-700        { border-color: #1e1a00 !important; }
+[data-theme="99"] .border-slate-800        { border-color: #161400 !important; }
+[data-theme="99"] .divide-slate-800\/50 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(22,20,0,.50) !important; }
+[data-theme="99"] .glass    { background: rgba(6,5,0,.88) !important; border-color: rgba(255,209,0,.08) !important; }
+[data-theme="99"] .text-slate-100,
+[data-theme="99"] .text-slate-200          { color: #fffde7 !important; }
+[data-theme="99"] .text-slate-300,
+[data-theme="99"] .text-slate-400          { color: #fde68a !important; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   MARVEL — Carmesim épico + Ouro
+   ════════════════════════════════════════════════════════════════════════════ */
+[data-theme="marvel"] body,
+[data-theme="marvel"] #root                { background-color: #08030a; }
+
+[data-theme="marvel"] .bg-slate-950        { background-color: #060208 !important; }
+[data-theme="marvel"] .bg-slate-900        { background-color: #120408 !important; }
+[data-theme="marvel"] .bg-slate-800        { background-color: #1a070e !important; }
+[data-theme="marvel"] .bg-slate-700        { background-color: #230913 !important; }
+[data-theme="marvel"] .bg-slate-600        { background-color: #2c0c18 !important; }
+[data-theme="marvel"] .bg-slate-900\/10    { background-color: rgba(18,4,8,.10) !important; }
+[data-theme="marvel"] .bg-slate-900\/20    { background-color: rgba(18,4,8,.20) !important; }
+[data-theme="marvel"] .bg-slate-900\/30    { background-color: rgba(18,4,8,.30) !important; }
+[data-theme="marvel"] .bg-slate-900\/40    { background-color: rgba(18,4,8,.40) !important; }
+[data-theme="marvel"] .bg-slate-900\/50    { background-color: rgba(18,4,8,.50) !important; }
+[data-theme="marvel"] .bg-slate-900\/60    { background-color: rgba(18,4,8,.60) !important; }
+[data-theme="marvel"] .bg-slate-900\/80    { background-color: rgba(18,4,8,.80) !important; }
+[data-theme="marvel"] .bg-slate-800\/10    { background-color: rgba(26,7,14,.10) !important; }
+[data-theme="marvel"] .bg-slate-800\/30    { background-color: rgba(26,7,14,.30) !important; }
+[data-theme="marvel"] .bg-slate-800\/40    { background-color: rgba(26,7,14,.40) !important; }
+[data-theme="marvel"] .bg-slate-800\/50    { background-color: rgba(26,7,14,.50) !important; }
+[data-theme="marvel"] .bg-slate-800\/60    { background-color: rgba(26,7,14,.60) !important; }
+[data-theme="marvel"] .bg-slate-700\/30    { background-color: rgba(35,9,19,.30) !important; }
+[data-theme="marvel"] .bg-slate-700\/50    { background-color: rgba(35,9,19,.50) !important; }
+/* accent marvel red */
+[data-theme="marvel"] .text-emerald-400    { color: #ff4d53 !important; }
+[data-theme="marvel"] .text-emerald-300    { color: #ff7a80 !important; }
+[data-theme="marvel"] .text-emerald-500    { color: #ED1D24 !important; }
+[data-theme="marvel"] .text-emerald-400\/60 { color: rgba(255,77,83,.60) !important; }
+[data-theme="marvel"] .text-emerald-400\/80 { color: rgba(255,77,83,.80) !important; }
+[data-theme="marvel"] .bg-emerald-500\/5   { background-color: rgba(237,29,36,.04) !important; }
+[data-theme="marvel"] .bg-emerald-500\/10  { background-color: rgba(237,29,36,.08) !important; }
+[data-theme="marvel"] .bg-emerald-500\/15  { background-color: rgba(237,29,36,.12) !important; }
+[data-theme="marvel"] .bg-emerald-500\/20  { background-color: rgba(237,29,36,.16) !important; }
+[data-theme="marvel"] .bg-emerald-500\/25  { background-color: rgba(237,29,36,.20) !important; }
+[data-theme="marvel"] .bg-emerald-500      { background-color: #ED1D24 !important; }
+[data-theme="marvel"] .bg-emerald-600      { background-color: #c7161b !important; }
+[data-theme="marvel"] .hover\:bg-emerald-500\/20:hover { background-color: rgba(237,29,36,.16) !important; }
+[data-theme="marvel"] .hover\:bg-emerald-600:hover     { background-color: #c7161b !important; }
+[data-theme="marvel"] .hover\:text-emerald-400:hover,
+[data-theme="marvel"] .hover\:text-emerald-300:hover   { color: #ff4d53 !important; }
+[data-theme="marvel"] .border-emerald-500\/20 { border-color: rgba(237,29,36,.20) !important; }
+[data-theme="marvel"] .border-emerald-500\/30 { border-color: rgba(237,29,36,.30) !important; }
+[data-theme="marvel"] .border-emerald-500     { border-color: #ED1D24 !important; }
+[data-theme="marvel"] .hover\:border-emerald-500\/30:hover { border-color: rgba(237,29,36,.30) !important; }
+[data-theme="marvel"] .focus\:border-emerald-500:focus { border-color: rgba(237,29,36,.80) !important; }
+[data-theme="marvel"] .ring-emerald-500\/20   { --tw-ring-color: rgba(237,29,36,.15); }
+[data-theme="marvel"] .from-emerald-500       { --tw-gradient-from: #ED1D24 !important; }
+[data-theme="marvel"] .to-teal-500            { --tw-gradient-to:   #F0A500 !important; }
+[data-theme="marvel"] .border-slate-700\/50   { border-color: rgba(35,9,19,.50) !important; }
+[data-theme="marvel"] .border-slate-800\/50   { border-color: rgba(26,7,14,.50) !important; }
+[data-theme="marvel"] .border-slate-700       { border-color: #230913 !important; }
+[data-theme="marvel"] .border-slate-800       { border-color: #1a070e !important; }
+[data-theme="marvel"] .divide-slate-800\/50 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(26,7,14,.50) !important; }
+[data-theme="marvel"] .glass  { background: rgba(8,3,10,.88) !important; border-color: rgba(237,29,36,.10) !important; }
+[data-theme="marvel"] .text-slate-100,
+[data-theme="marvel"] .text-slate-200         { color: #fff1f2 !important; }
+[data-theme="marvel"] .text-slate-300,
+[data-theme="marvel"] .text-slate-400         { color: #fca5a5 !important; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   RICK & MORTY — Espaço profundo / Verde portal
+   ════════════════════════════════════════════════════════════════════════════ */
+[data-theme="rick"] body,
+[data-theme="rick"] #root                  { background-color: #04060c; }
+
+[data-theme="rick"] .bg-slate-950          { background-color: #030508 !important; }
+[data-theme="rick"] .bg-slate-900          { background-color: #080d18 !important; }
+[data-theme="rick"] .bg-slate-800          { background-color: #0e1525 !important; }
+[data-theme="rick"] .bg-slate-700          { background-color: #141d32 !important; }
+[data-theme="rick"] .bg-slate-600          { background-color: #1a253f !important; }
+[data-theme="rick"] .bg-slate-900\/10      { background-color: rgba(8,13,24,.10) !important; }
+[data-theme="rick"] .bg-slate-900\/20      { background-color: rgba(8,13,24,.20) !important; }
+[data-theme="rick"] .bg-slate-900\/30      { background-color: rgba(8,13,24,.30) !important; }
+[data-theme="rick"] .bg-slate-900\/40      { background-color: rgba(8,13,24,.40) !important; }
+[data-theme="rick"] .bg-slate-900\/50      { background-color: rgba(8,13,24,.50) !important; }
+[data-theme="rick"] .bg-slate-900\/60      { background-color: rgba(8,13,24,.60) !important; }
+[data-theme="rick"] .bg-slate-900\/80      { background-color: rgba(8,13,24,.80) !important; }
+[data-theme="rick"] .bg-slate-800\/10      { background-color: rgba(14,21,37,.10) !important; }
+[data-theme="rick"] .bg-slate-800\/30      { background-color: rgba(14,21,37,.30) !important; }
+[data-theme="rick"] .bg-slate-800\/40      { background-color: rgba(14,21,37,.40) !important; }
+[data-theme="rick"] .bg-slate-800\/50      { background-color: rgba(14,21,37,.50) !important; }
+[data-theme="rick"] .bg-slate-800\/60      { background-color: rgba(14,21,37,.60) !important; }
+[data-theme="rick"] .bg-slate-700\/30      { background-color: rgba(20,29,50,.30) !important; }
+[data-theme="rick"] .bg-slate-700\/50      { background-color: rgba(20,29,50,.50) !important; }
+/* accent portal green */
+[data-theme="rick"] .text-emerald-400,
+[data-theme="rick"] .text-emerald-300      { color: #6FD08C !important; }
+[data-theme="rick"] .text-emerald-500      { color: #52b870 !important; }
+[data-theme="rick"] .text-emerald-400\/60  { color: rgba(111,208,140,.60) !important; }
+[data-theme="rick"] .text-emerald-400\/80  { color: rgba(111,208,140,.80) !important; }
+[data-theme="rick"] .bg-emerald-500\/5     { background-color: rgba(111,208,140,.04) !important; }
+[data-theme="rick"] .bg-emerald-500\/10    { background-color: rgba(111,208,140,.08) !important; }
+[data-theme="rick"] .bg-emerald-500\/15    { background-color: rgba(111,208,140,.11) !important; }
+[data-theme="rick"] .bg-emerald-500\/20    { background-color: rgba(111,208,140,.15) !important; }
+[data-theme="rick"] .bg-emerald-500\/25    { background-color: rgba(111,208,140,.18) !important; }
+[data-theme="rick"] .bg-emerald-500        { background-color: #6FD08C !important; color: #030508 !important; }
+[data-theme="rick"] .bg-emerald-600        { background-color: #52b870 !important; color: #030508 !important; }
+[data-theme="rick"] .hover\:bg-emerald-500\/20:hover { background-color: rgba(111,208,140,.15) !important; }
+[data-theme="rick"] .hover\:bg-emerald-600:hover     { background-color: #52b870 !important; }
+[data-theme="rick"] .hover\:text-emerald-400:hover,
+[data-theme="rick"] .hover\:text-emerald-300:hover   { color: #6FD08C !important; }
+[data-theme="rick"] .border-emerald-500\/20 { border-color: rgba(111,208,140,.15) !important; }
+[data-theme="rick"] .border-emerald-500\/30 { border-color: rgba(111,208,140,.28) !important; }
+[data-theme="rick"] .border-emerald-500     { border-color: #6FD08C !important; }
+[data-theme="rick"] .hover\:border-emerald-500\/30:hover { border-color: rgba(111,208,140,.28) !important; }
+[data-theme="rick"] .focus\:border-emerald-500:focus { border-color: rgba(111,208,140,.80) !important; }
+[data-theme="rick"] .ring-emerald-500\/20   { --tw-ring-color: rgba(111,208,140,.15); }
+[data-theme="rick"] .from-emerald-500       { --tw-gradient-from: #6FD08C !important; }
+[data-theme="rick"] .to-teal-500            { --tw-gradient-to:   #00B4D8 !important; }
+[data-theme="rick"] .border-slate-700\/50   { border-color: rgba(20,29,50,.50) !important; }
+[data-theme="rick"] .border-slate-800\/50   { border-color: rgba(14,21,37,.50) !important; }
+[data-theme="rick"] .border-slate-700       { border-color: #141d32 !important; }
+[data-theme="rick"] .border-slate-800       { border-color: #0e1525 !important; }
+[data-theme="rick"] .divide-slate-800\/50 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(14,21,37,.50) !important; }
+[data-theme="rick"] .glass  { background: rgba(4,6,12,.88) !important; border-color: rgba(111,208,140,.08) !important; }
+[data-theme="rick"] .text-slate-100,
+[data-theme="rick"] .text-slate-200         { color: #ecfdf5 !important; }
+[data-theme="rick"] .text-slate-300,
+[data-theme="rick"] .text-slate-400         { color: #6ee7b7 !important; }

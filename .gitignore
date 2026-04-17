@@ -1,0 +1,8 @@
+.env
+backend/keys/
+backend/.env
+frontend/.env
+
+# Build do frontend — gerado pelo Railway no deploy, nunca commitar
+# (evita vazar VITE_FIREBASE_* keys no repositório público)
+backend/public/spa/

@@ -1,0 +1,5 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='512' height='512' viewBox='0 0 512 512'>
+  <rect width='512' height='512' rx='92.16' fill='#020617'/>
+  <rect x='76.8' y='76.8' width='358.4' height='358.4' rx='51.2' fill='#059669'/>
+  <text x='50%' y='54%' dominant-baseline='middle' text-anchor='middle' fill='white' font-family='Arial,sans-serif' font-weight='900' font-size='194.56'>UB</text>
+</svg>
