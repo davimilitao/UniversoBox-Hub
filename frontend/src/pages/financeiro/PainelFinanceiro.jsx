@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../../utils/getAuthToken';
-import { Wifi, WifiOff, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, RefreshCw, Wallet, AlertTriangle } from 'lucide-react';
 
 const MES_NOMES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
@@ -62,6 +62,86 @@ function SecaoLista({ titulo, items, renderItem, vazio = 'Nenhum registro' }) {
       <h3 className="text-sm font-semibold text-slate-400 mb-3">{titulo} <span className="text-slate-600 font-normal">({items.length})</span></h3>
       <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
         {items.map(renderItem)}
+      </div>
+    </div>
+  );
+}
+
+function parseBRL(str) {
+  const clean = String(str).replace(/[R$\s.]/g, '').replace(',', '.');
+  const v = parseFloat(clean);
+  return isNaN(v) ? 0 : v;
+}
+
+function SaldoCaixa({ mes, saidasPendentes }) {
+  const chave = `painel_saldo_${mes}`;
+  const load  = k => localStorage.getItem(`${chave}_${k}`) || '';
+
+  const [mp,    setMp]    = useState(load('mp'));
+  const [banco, setBanco] = useState(load('banco'));
+  const [outro, setOutro] = useState(load('outro'));
+
+  useEffect(() => {
+    localStorage.setItem(`${chave}_mp`,    mp);
+    localStorage.setItem(`${chave}_banco`, banco);
+    localStorage.setItem(`${chave}_outro`, outro);
+  }, [mp, banco, outro, chave]);
+
+  const saldoTotal  = parseBRL(mp) + parseBRL(banco) + parseBRL(outro);
+  const caixaLiq    = saldoTotal - saidasPendentes;
+  const positivo    = caixaLiq >= 0;
+
+  const inputCls = "w-full rounded-lg bg-slate-900 border border-white/10 text-slate-200 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-slate-600 [color-scheme:dark]";
+
+  return (
+    <div className="rounded-xl bg-slate-800 border border-white/5 p-5 flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <Wallet size={15} className="text-emerald-400" />
+        <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">Saldo em Caixa</h3>
+        <span className="text-xs text-slate-600 ml-1">— atualize manualmente</span>
+      </div>
+
+      {/* Inputs */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {[
+          { label: 'Mercado Pago', val: mp,    set: setMp    },
+          { label: 'Banco',        val: banco,  set: setBanco },
+          { label: 'Outros',       val: outro,  set: setOutro },
+        ].map(({ label, val, set }) => (
+          <div key={label}>
+            <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">{label}</label>
+            <input
+              type="number" step="0.01" min="0"
+              placeholder="0,00"
+              value={val}
+              onChange={e => set(e.target.value)}
+              className={inputCls}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* Projeção */}
+      <div className={`rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${positivo ? 'bg-emerald-900/20 border-emerald-700/30' : 'bg-red-900/20 border-red-700/30'}`}>
+        <div className="flex items-center gap-2">
+          {positivo
+            ? <TrendingUp size={18} className="text-emerald-400 shrink-0" />
+            : <AlertTriangle size={18} className="text-red-400 shrink-0" />}
+          <div>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Caixa líquido projetado</p>
+            <p className={`text-xl font-bold ${positivo ? 'text-emerald-400' : 'text-red-400'}`}>{fmtBRL(caixaLiq)}</p>
+          </div>
+        </div>
+        <div className="flex gap-6 text-center text-xs">
+          <div>
+            <p className="text-slate-500">Saldo total</p>
+            <p className="text-slate-200 font-semibold">{fmtBRL(saldoTotal)}</p>
+          </div>
+          <div>
+            <p className="text-slate-500">Saídas pendentes</p>
+            <p className="text-orange-400 font-semibold">{fmtBRL(saidasPendentes)}</p>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -204,6 +284,12 @@ export function PainelFinanceiro() {
             <KpiCard label="Despesas locais" valor={fmtBRL(data.despesas?.total)} cor="red" />
             <KpiCard label="Parcelas cartão" valor={fmtBRL(data.parcelas?.total)} cor="blue" />
           </div>
+
+          {/* Saldo em caixa */}
+          <SaldoCaixa
+            mes={mes}
+            saidasPendentes={(data.despesas?.pendente || 0) + (data.parcelas?.pendente || 0)}
+          />
 
           {/* Despesas por categoria */}
           {Object.keys(data.despesas?.porCategoria || {}).length > 0 && (() => {
