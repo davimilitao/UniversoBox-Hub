@@ -135,7 +135,7 @@ export function FormLancarDespesa({ categorias = [], meiosPagamento = [], onSalv
           {parseando ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
           {parseando ? 'Lendo...' : 'Importar'}
         </button>
-        <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={handleImportar} />
+        <input ref={fileRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="hidden" onChange={handleImportar} />
       </div>
 
       {/* Tipo */}
