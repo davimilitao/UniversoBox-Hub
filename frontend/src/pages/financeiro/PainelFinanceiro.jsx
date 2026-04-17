@@ -201,17 +201,13 @@ export function PainelFinanceiro() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <KpiCard label="Receita ML"    valor={fmtBRL(data.receita.ML)}     cor="emerald" />
             <KpiCard label="Receita Shopee" valor={fmtBRL(data.receita.Shopee)} cor="orange"  />
-            <KpiCard label="Despesas locais" valor={fmtBRL(resultado?.totalDespesas)} cor="red" />
-            <KpiCard label="Parcelas cartão" valor={fmtBRL(resultado?.totalParcelas)} cor="blue" />
+            <KpiCard label="Despesas locais" valor={fmtBRL(data.despesas?.total)} cor="red" />
+            <KpiCard label="Parcelas cartão" valor={fmtBRL(data.parcelas?.total)} cor="blue" />
           </div>
 
           {/* Despesas por categoria */}
-          {data.despesas.length > 0 && (() => {
-            const cats = {};
-            data.despesas.forEach(d => {
-              cats[d.categoria] = (cats[d.categoria] || 0) + d.valor;
-            });
-            const sorted = Object.entries(cats).sort((a, b) => b[1] - a[1]);
+          {Object.keys(data.despesas?.porCategoria || {}).length > 0 && (() => {
+            const sorted = Object.entries(data.despesas.porCategoria).sort((a, b) => b[1] - a[1]);
             const max = sorted[0]?.[1] || 1;
             return (
               <div className="rounded-xl bg-slate-800 border border-white/5 p-5">
@@ -235,7 +231,7 @@ export function PainelFinanceiro() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <SecaoLista
               titulo="Contas a Receber (Bling)"
-              items={data.contasReceber}
+              items={data.contasReceber?.itens || []}
               vazio={data.blingOk ? 'Nenhuma conta a receber no mês' : 'Bling offline — conecte para ver dados'}
               renderItem={item => (
                 <div key={item.id} className="flex items-start justify-between gap-2 py-1.5 border-b border-white/5 last:border-0">
@@ -252,7 +248,7 @@ export function PainelFinanceiro() {
             />
             <SecaoLista
               titulo="Contas a Pagar (Bling)"
-              items={data.contasPagarBling}
+              items={data.contasPagarBling?.itens || []}
               vazio={data.blingOk ? 'Nenhuma conta a pagar no mês' : 'Bling offline — conecte para ver dados'}
               renderItem={item => (
                 <div key={item.id} className="flex items-start justify-between gap-2 py-1.5 border-b border-white/5 last:border-0">
