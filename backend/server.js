@@ -2532,7 +2532,8 @@ async function blingAgregaMes(mesAno) {
   const dataInicio = `${mesAno}-01`;
   const ultimoDia  = new Date(ano, mes, 0).getDate();
   const dataFim    = `${mesAno}-${String(ultimoDia).padStart(2, '0')}`;
-  const SITUACOES_OK = new Set([2, 5, 7]); // Emitida DANFE, Autorizada s/DANFE, Emitida DANFE
+  // V3 retorna situacao como objeto {id,valor} OU número; excluímos apenas canceladas(9) e inutilizadas(4)
+  const SITUACOES_EXCLUIR = new Set([3, 4, 9]); // cancelada, inutilizada, cancelada V3
 
   let pagina = 1;
   const nfsComValor = [];
@@ -2546,10 +2547,12 @@ async function blingAgregaMes(mesAno) {
     for (const n of notas) {
       const dataEmissao = (n.dataEmissao || n.data || '').split(' ')[0];
       if (dataEmissao < dataInicio || dataEmissao > dataFim) continue;
-      if (!SITUACOES_OK.has(Number(n.situacao))) continue;
+      // situacao pode ser objeto {id,valor} (Bling V3) ou número (V2)
+      const sitId = Number(n.situacao?.id ?? n.situacao);
+      if (SITUACOES_EXCLUIR.has(sitId)) continue;
 
       const mkt = detectarMktPorId(String(n.loja?.id || ''));
-      const vt  = parseFloat(n.valorTotal || n.valor || 0);
+      const vt  = parseFloat(n.valorTotal || n.totalProdutos || n.valor || 0);
 
       if (vt > 0) nfsComValor.push({ id: n.id, mkt, valor: vt });
       else        nfsSemValor.push({ id: n.id, mkt });
@@ -4209,14 +4212,14 @@ app.get('/bling/debug/receita/:mesAno', async (req, res, next) => {
     const dataInicio = `${mesAno}-01`;
     const ultimoDia  = new Date(ano, mes, 0).getDate();
     const dataFim    = `${mesAno}-${String(ultimoDia).padStart(2, '0')}`;
-    const SITUACOES_OK = new Set([2, 5, 7]);
+    const SITUACOES_EXCLUIR = new Set([3, 4, 9]);
 
     const nfsPeriodo = [];   // NFs no intervalo (antes do filtro situacao)
-    const nfsAceitas = [];   // NFs aceitas (situacao ok + valor > 0)
-    const nfsRejeit  = [];   // NFs rejeitadas (situacao fora do filtro)
+    const nfsAceitas = [];   // NFs aceitas
+    const nfsRejeit  = [];   // NFs rejeitadas (canceladas/inutilizadas)
     let paginas = 0;
 
-    outerLoop: for (let pagina = 1; pagina <= 5; pagina++) {
+    for (let pagina = 1; pagina <= 5; pagina++) {
       paginas++;
       const resp  = await blingFetch(`/nfe?pagina=${pagina}&limite=100`);
       const notas = resp.data || [];
@@ -4224,12 +4227,12 @@ app.get('/bling/debug/receita/:mesAno', async (req, res, next) => {
       for (const n of notas) {
         const dataEmissao = (n.dataEmissao || n.data || '').split(' ')[0];
         if (dataEmissao < dataInicio || dataEmissao > dataFim) continue;
-        const sit = Number(n.situacao);
-        const vt  = parseFloat(n.valorTotal || n.valor || 0);
-        const entry = { id: n.id, numero: n.numero, dataEmissao, situacao: n.situacao, situacaoNum: sit, valorTotal: vt, loja: n.loja?.id };
+        const sitId = Number(n.situacao?.id ?? n.situacao);
+        const vt  = parseFloat(n.valorTotal || n.totalProdutos || n.valor || 0);
+        const entry = { id: n.id, numero: n.numero, dataEmissao, situacaoRaw: n.situacao, situacaoId: sitId, valorTotal: vt, loja: n.loja?.id };
         nfsPeriodo.push(entry);
-        if (SITUACOES_OK.has(sit)) nfsAceitas.push(entry);
-        else                       nfsRejeit.push(entry);
+        if (!SITUACOES_EXCLUIR.has(sitId)) nfsAceitas.push(entry);
+        else                               nfsRejeit.push(entry);
       }
       if (notas.length < 100) break;
     }
