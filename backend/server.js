@@ -2169,40 +2169,45 @@ app.delete('/api/fin-despesas/:id', requireFirebaseAuth, requireFirebaseRole(['a
   }
 });
 
-// POST /api/fin-despesas/parse-comprovante — lê PDF/imagem com Claude AI e extrai dados
+// POST /api/fin-despesas/parse-comprovante — extrai dados de PDF de comprovante com regex
 app.post('/api/fin-despesas/parse-comprovante', requireFirebaseAuth, uploadMemory.single('arquivo'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
+    if (req.file.mimetype !== 'application/pdf') {
+      return res.status(400).json({ error: 'Envie o comprovante em PDF.' });
+    }
 
-    const Anthropic = require('@anthropic-ai/sdk');
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const pdfParse = require('pdf-parse');
+    const { text } = await pdfParse(req.file.buffer);
 
-    const base64 = req.file.buffer.toString('base64');
-    const mime   = req.file.mimetype || 'application/pdf';
-    const isPdf  = mime === 'application/pdf';
+    // ── Valor: R$ 11.140,34 ou R$ 11140.34
+    let valor = 0;
+    const valorM = text.match(/R\$\s*([\d.]+,\d{2})/);
+    if (valorM) valor = parseFloat(valorM[1].replace(/\./g, '').replace(',', '.'));
 
-    const contentBlock = isPdf
-      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
-      : { type: 'image',    source: { type: 'base64', media_type: mime,               data: base64 } };
+    // ── Data: "16/abril/2026", "16 de abril de 2026" ou "16/04/2026"
+    let data = '';
+    const MESES = {
+      janeiro:'01', fevereiro:'02', março:'03', marco:'03', abril:'04',
+      maio:'05', junho:'06', julho:'07', agosto:'08',
+      setembro:'09', outubro:'10', novembro:'11', dezembro:'12',
+    };
+    const dataM = text.match(/(\d{1,2})[\/\s]+([a-záêçãõ]+)[\/\s]+(\d{4})/i);
+    if (dataM) {
+      const dia = dataM[1].padStart(2, '0');
+      const mes = MESES[dataM[2].toLowerCase()] || dataM[2].padStart(2, '0');
+      data = `${dia}/${mes}/${dataM[3]}`;
+    } else {
+      const dataNum = text.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      if (dataNum) data = `${dataNum[1]}/${dataNum[2]}/${dataNum[3]}`;
+    }
 
-    const msg = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 256,
-      messages: [{
-        role: 'user',
-        content: [
-          contentBlock,
-          {
-            type: 'text',
-            text: 'Extraia do comprovante: 1) valor numérico em reais (ex: 11140.34 sem símbolo), 2) data no formato DD/MM/YYYY, 3) nome curto do pagador ou beneficiário (máx 40 chars). Responda APENAS em JSON válido sem markdown: {"valor":0.00,"data":"DD/MM/YYYY","fornecedor":"..."}',
-          },
-        ],
-      }],
-    });
+    // ── Fornecedor: linha após "Para" (beneficiário do PIX)
+    let fornecedor = '';
+    const paraM = text.match(/Para\s*\r?\n\s*([^\r\n]+)/i);
+    if (paraM) fornecedor = paraM[1].trim().slice(0, 60);
 
-    const raw    = msg.content[0]?.text?.trim() || '{}';
-    const parsed = JSON.parse(raw);
-    res.json({ ok: true, valor: parsed.valor || 0, data: parsed.data || '', fornecedor: parsed.fornecedor || '' });
+    res.json({ ok: true, valor, data, fornecedor });
   } catch (err) {
     console.error('[parse-comprovante]', err);
     next(err);
