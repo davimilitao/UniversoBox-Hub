@@ -2360,6 +2360,323 @@ app.get('/api/margem', requireFirebaseAuth, async (req, res, next) => {
 });
 
 // ================================================================
+// MARGEM V2 — Dados reais: Bling NF-e + Firestore fin_despesas/fin_compras
+// ================================================================
+
+// Categorias que representam impostos/tributos (separadas das despesas operacionais)
+const CATEGORIAS_IMPOSTO = ['das', 'simples nacional', 'simples', 'imposto', 'icms', 'iss', 'irpj', 'csll', 'pis', 'cofins', 'tributo'];
+
+function ehCategoriaImposto(categoria) {
+  const c = String(categoria || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return CATEGORIAS_IMPOSTO.some(k => c.includes(k));
+}
+
+// Agrega NF-e de saída do Bling para um mês (YYYY-MM)
+// Retorna { total, porMarketplace: { MERCADO_LIVRE, SHOPEE, OUTROS }, totalNFs }
+async function blingAgregaMes(mesAno) {
+  const [ano, mes] = mesAno.split('-').map(Number);
+  const dataInicio = `${mesAno}-01`;
+  const ultimoDia  = new Date(ano, mes, 0).getDate();
+  const dataFim    = `${mesAno}-${String(ultimoDia).padStart(2, '0')}`;
+  const SITUACOES_OK = new Set([2, 5, 7]); // Emitida DANFE, Autorizada s/DANFE, Emitida DANFE
+
+  let pagina = 1;
+  const nfsComValor = [];
+  const nfsSemValor = [];
+
+  while (true) {
+    const resp  = await blingFetch(`/nfe?pagina=${pagina}&limite=100`);
+    const notas = resp.data || [];
+    if (!notas.length) break;
+
+    for (const n of notas) {
+      const dataEmissao = (n.dataEmissao || n.data || '').split(' ')[0];
+      if (dataEmissao < dataInicio || dataEmissao > dataFim) continue;
+      if (!SITUACOES_OK.has(Number(n.situacao))) continue;
+
+      const mkt = detectarMktPorId(String(n.loja?.id || ''));
+      const vt  = parseFloat(n.valorTotal || n.valor || 0);
+
+      if (vt > 0) nfsComValor.push({ id: n.id, mkt, valor: vt });
+      else        nfsSemValor.push({ id: n.id, mkt });
+    }
+
+    if (notas.length < 100) break;
+    if (++pagina > 20) break; // safety: máx 2.000 NFs
+  }
+
+  // NFs sem valorTotal no listing → busca detalhes individuais (máx 30)
+  await Promise.allSettled(
+    nfsSemValor.slice(0, 30).map(async ({ id, mkt }) => {
+      try {
+        const det = await blingFetch(`/nfe/${id}`);
+        const vt  = parseFloat((det.data || det).valorTotal || 0);
+        if (vt > 0) nfsComValor.push({ id, mkt, valor: vt });
+      } catch (_) {}
+    })
+  );
+
+  const porMarketplace = { MERCADO_LIVRE: 0, SHOPEE: 0, OUTROS: 0 };
+  let total = 0;
+  for (const { mkt, valor } of nfsComValor) {
+    total += valor;
+    porMarketplace[mkt] = (porMarketplace[mkt] || 0) + valor;
+  }
+
+  return { total, porMarketplace, totalNFs: nfsComValor.length + nfsSemValor.length };
+}
+
+// ── GET /api/margem-v2 ───────────────────────────────────────────────────────
+// Agrega dados de margem: Bling NF-e + Firestore fin_despesas/fin_compras
+// Query: ?de=YYYY-MM&ate=YYYY-MM  (padrão: últimos 12 meses)
+app.get('/api/margem-v2', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const tenantId = req.auth?.tenantId || null;
+
+    const hoje       = new Date();
+    const ateDefault = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+    const deDefault  = (() => {
+      const d = new Date(hoje);
+      d.setMonth(d.getMonth() - 11);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    })();
+
+    const de  = req.query.de  || deDefault;
+    const ate = req.query.ate || ateDefault;
+
+    function gerarMeses(de, ate) {
+      const meses = [];
+      let [y, m] = de.split('-').map(Number);
+      const [aY, aM] = ate.split('-').map(Number);
+      while (y < aY || (y === aY && m <= aM)) {
+        meses.push(`${y}-${String(m).padStart(2, '0')}`);
+        if (++m > 12) { m = 1; y++; }
+      }
+      return meses;
+    }
+    const meses = gerarMeses(de, ate);
+
+    // ── 1. fin_despesas → despesas + impostos por mês ────────────────────────
+    const deTs  = new Date(de  + '-01T00:00:00');
+    const ateTs = new Date(ate + '-01T00:00:00');
+    ateTs.setMonth(ateTs.getMonth() + 1);
+
+    let despQuery = db.collection('fin_despesas')
+      .where('data', '>=', deTs)
+      .where('data', '<',  ateTs);
+    if (tenantId) despQuery = despQuery.where('tenantId', '==', tenantId);
+
+    const despSnap = await despQuery.get();
+    const despPorMes = {};
+    const catsPorMes = {};
+
+    despSnap.forEach(doc => {
+      const d  = doc.data();
+      const dt = d.data?.toDate ? d.data.toDate() : new Date(d.data);
+      const mm = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+      if (!despPorMes[mm]) despPorMes[mm] = { imposto: 0, despesas: 0 };
+      if (!catsPorMes[mm]) catsPorMes[mm] = {};
+
+      const valor = Number(d.valor || 0);
+      const cat   = String(d.categoria || 'Outros');
+
+      if (ehCategoriaImposto(cat)) {
+        despPorMes[mm].imposto += valor;
+      } else {
+        despPorMes[mm].despesas += valor;
+        catsPorMes[mm][cat] = (catsPorMes[mm][cat] || 0) + valor;
+      }
+    });
+
+    // ── 2. fin_compras → custo de mercadoria por mês ─────────────────────────
+    let compQuery = db.collection('fin_compras')
+      .where('createdAt', '>=', deTs)
+      .where('createdAt', '<',  ateTs);
+    if (tenantId) compQuery = compQuery.where('tenantId', '==', tenantId);
+
+    const compSnap = await compQuery.get();
+    const custoPorMes = {};
+
+    compSnap.forEach(doc => {
+      const d  = doc.data();
+      const dt = d.createdAt?.toDate ? d.createdAt.toDate() : new Date(d.createdAt);
+      const mm = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+      custoPorMes[mm] = (custoPorMes[mm] || 0) + Number(d.totalBruto || 0);
+    });
+
+    // ── 3. fin_margem_mensal → overrides manuais (Shopee, dividendos) ────────
+    const manualPorMes = {};
+    for (const mm of meses) {
+      const docId = tenantId ? `${tenantId}_${mm}` : mm;
+      const snap  = await db.collection('fin_margem_mensal').doc(docId).get();
+      if (snap.exists) manualPorMes[mm] = snap.data();
+    }
+
+    // ── 4. Bling NF-e → receita bruta ────────────────────────────────────────
+    let blingOk = true;
+    const receitaPorMes = {};
+    try {
+      await blingEnsureToken();
+      for (const mm of meses) {
+        receitaPorMes[mm] = await blingAgregaMes(mm);
+      }
+    } catch (err) {
+      blingOk = false;
+      console.warn('[/api/margem-v2] Bling indisponível:', err.message);
+    }
+
+    // ── 5. Google Sheets fallback (histórico) ────────────────────────────────
+    const sheetsPorMes = {};
+    if (!blingOk && SPREADSHEET_ID) {
+      try {
+        const shResp = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: 'Margem!A4:AD' });
+        const shRows = shResp.data.values || [];
+        const shHdrs = (shRows[0] || []).map(h => String(h).trim());
+        const nrm = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const col = name => shHdrs.findIndex(h => nrm(h).includes(nrm(name)));
+        const brl = str => {
+          if (!str) return 0;
+          const neg = String(str).includes('-');
+          const v = parseFloat(String(str).replace(/[R$\s\-]/g, '').replace(/\./g, '').replace(',', '.')) || 0;
+          return neg ? -v : v;
+        };
+        const MESES_PT = { jan:1, fev:2, mar:3, abr:4, mai:5, jun:6, jul:7, ago:8, set:9, out:10, nov:11, dez:12 };
+        const [iData, iRec, iCusto, iImp, iDesp, iLB] = [
+          col('Data'), col('Receita Bruta'), col('Custo Mercadoria'),
+          col('Imposto'), col('Despesas R'), col('Soma de Lucro'),
+        ];
+        for (let i = 1; i < shRows.length; i++) {
+          const r = shRows[i];
+          const dataStr = String(r[iData] || '').trim();
+          if (!dataStr || dataStr.toLowerCase().includes('total')) continue;
+          const match = dataStr.toLowerCase().match(/([a-z]+)[.-]+(\d+)/);
+          if (!match) continue;
+          const mesNum = MESES_PT[match[1].slice(0, 3)];
+          const anoNum = 2000 + Number(match[2]);
+          if (!mesNum) continue;
+          const mm = `${anoNum}-${String(mesNum).padStart(2, '0')}`;
+          sheetsPorMes[mm] = {
+            receitaBruta:    brl(r[iRec]),
+            custoMercadoria: brl(r[iCusto]),
+            imposto:         brl(r[iImp]),
+            totalDespesas:   brl(r[iDesp]),
+            lucroBruto:      brl(r[iLB]),
+          };
+        }
+      } catch (e) {
+        console.warn('[/api/margem-v2] Sheets fallback falhou:', e.message);
+      }
+    }
+
+    // ── 6. Monta items ────────────────────────────────────────────────────────
+    const NOMES_MES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+    function labelMes(mm) {
+      const [a, m] = mm.split('-');
+      return `${NOMES_MES[Number(m) - 1]}.-${String(a).slice(2)}`;
+    }
+
+    const items = meses.map(mm => {
+      const desp    = despPorMes[mm]    || { imposto: 0, despesas: 0 };
+      const custo   = custoPorMes[mm]   || 0;
+      const receita = receitaPorMes[mm] || null;
+      const manual  = manualPorMes[mm]  || {};
+      const hist    = sheetsPorMes[mm]  || null;
+
+      let receitaBruta, fonte;
+      if (receita) {
+        receitaBruta = receita.total + Number(manual.receitaShopeeManual || 0);
+        fonte = (desp.despesas > 0 || desp.imposto > 0) ? 'automatico' : 'parcial';
+      } else if (hist) {
+        receitaBruta = hist.receitaBruta;
+        fonte = 'historico';
+      } else {
+        receitaBruta = Number(manual.receitaBrutaManual || 0);
+        fonte = 'manual';
+      }
+
+      const imposto       = receita ? desp.imposto       : hist ? hist.imposto       : Number(manual.impostoManual || 0);
+      const totalDespesas = receita ? desp.despesas       : hist ? hist.totalDespesas : 0;
+      const custoMerc     = receita ? custo               : hist ? hist.custoMercadoria : 0;
+      const lucroBruto    = receitaBruta - custoMerc;
+      const lucroLiquido  = lucroBruto - imposto - totalDespesas;
+      const margemBruta   = receitaBruta > 0 ? lucroBruto   / receitaBruta : 0;
+      const margemLiquida = receitaBruta > 0 ? lucroLiquido / receitaBruta : 0;
+      const despesasPerc  = receitaBruta > 0 ? totalDespesas / receitaBruta : 0;
+
+      return {
+        mesAno: mm, data: labelMes(mm),
+        receitaBruta,
+        receitaML:      receita ? (receita.porMarketplace.MERCADO_LIVRE || 0) : 0,
+        receitaShopee:  (receita ? (receita.porMarketplace.SHOPEE || 0) : 0) + Number(manual.receitaShopeeManual || 0),
+        custoMercadoria: custoMerc,
+        lucroBruto, margemBruta, imposto,
+        totalDespesas, despesasPerc, lucroLiquido, margemLiquida,
+        dividendos:  Number(manual.dividendos  || 0),
+        observacoes: manual.observacoes || '',
+        fonte,
+        despesas: catsPorMes[mm] || {},
+        fontes: {
+          receita:  receita ? 'bling'      : hist ? 'sheets' : 'manual',
+          custo:    custo > 0 ? 'firestore' : hist ? 'sheets' : 'manual',
+          despesas: (desp.despesas > 0 || desp.imposto > 0) ? 'firestore' : hist ? 'sheets' : 'manual',
+          imposto:  desp.imposto > 0 ? 'firestore' : hist ? 'sheets' : 'manual',
+        },
+      };
+    });
+
+    // Totais
+    const totais = items.reduce((acc, d) => {
+      acc.receitaBruta    += d.receitaBruta;
+      acc.custoMercadoria += d.custoMercadoria;
+      acc.lucroBruto      += d.lucroBruto;
+      acc.imposto         += d.imposto;
+      acc.totalDespesas   += d.totalDespesas;
+      acc.lucroLiquido    += d.lucroLiquido;
+      acc.dividendos      += d.dividendos;
+      return acc;
+    }, { receitaBruta:0, custoMercadoria:0, lucroBruto:0, imposto:0, totalDespesas:0, lucroLiquido:0, dividendos:0 });
+
+    if (totais.receitaBruta > 0) {
+      totais.margemBruta   = totais.lucroBruto   / totais.receitaBruta;
+      totais.margemLiquida = totais.lucroLiquido  / totais.receitaBruta;
+      totais.despesasPerc  = totais.totalDespesas / totais.receitaBruta;
+    } else {
+      totais.margemBruta = totais.margemLiquida = totais.despesasPerc = 0;
+    }
+    Object.assign(totais, { data: 'Total Geral', mesAno: 'Total', isTotal: true, fonte: 'total', despesas: {}, fontes: {} });
+
+    return res.json({ items, totais, blingOk });
+  } catch (err) {
+    console.error('[GET /api/margem-v2]', err);
+    return next(err);
+  }
+});
+
+// ── PATCH /api/margem-mensal/:mesAno ─────────────────────────────────────────
+// Salva overrides manuais (Shopee, dividendos, observações) em fin_margem_mensal
+// Body: { receitaShopeeManual?, dividendos?, observacoes? }
+app.patch('/api/margem-mensal/:mesAno', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const tenantId = req.auth?.tenantId || null;
+    const { mesAno } = req.params;
+    if (!/^\d{4}-\d{2}$/.test(mesAno)) return res.status(400).json({ error: 'mesAno inválido (YYYY-MM)' });
+
+    const { receitaShopeeManual, dividendos, observacoes } = req.body;
+    const docId  = tenantId ? `${tenantId}_${mesAno}` : mesAno;
+    const update = { mesAno, tenantId: tenantId || null, uid: req.auth.uid, updatedAt: new Date() };
+    if (receitaShopeeManual !== undefined) update.receitaShopeeManual = Number(receitaShopeeManual);
+    if (dividendos          !== undefined) update.dividendos          = Number(dividendos);
+    if (observacoes         !== undefined) update.observacoes         = String(observacoes);
+
+    await db.collection('fin_margem_mensal').doc(docId).set(update, { merge: true });
+    return res.json({ ok: true, docId });
+  } catch (err) {
+    console.error('[PATCH /api/margem-mensal]', err);
+    return next(err);
+  }
+});
+
+// ================================================================
 // BLING INTEGRATION
 // ================================================================
 // ================================================================
