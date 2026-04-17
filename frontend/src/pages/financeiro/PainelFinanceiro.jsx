@@ -1,292 +1,285 @@
-/**
- * @file PainelFinanceiro.jsx
- * @module financeiro
- * @description Painel financeiro real: receita Bling (NF-e + contasreceber)
- *              + despesas/parcelas Firestore = resultado real do mês.
- * @version 2.0.0
- * @date 2026-04-17
- */
-
 import { useState, useEffect, useCallback } from 'react';
-import {
-  TrendingUp, TrendingDown, DollarSign, CreditCard,
-  ShoppingCart, AlertCircle, RefreshCw, ChevronLeft,
-  ChevronRight, Loader2, CheckCircle2, Clock, Wifi, WifiOff,
-} from 'lucide-react';
 import { apiFetch } from '../../utils/getAuthToken';
-import { brl } from '../../utils/financeiroUtils';
+import { Wifi, WifiOff, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+const MES_NOMES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
-function mesLabel(mesStr) {
-  const [ano, mm] = mesStr.split('-');
-  const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-  return `${MESES[Number(mm) - 1]} ${ano}`;
+function mesLabel(yyyymm) {
+  const [y, m] = yyyymm.split('-');
+  return `${MES_NOMES[Number(m) - 1]} ${y}`;
 }
-
-function pct(val, total) {
-  if (!total) return '0%';
-  return `${(val / total * 100).toFixed(1)}%`;
-}
-
-function mesAnterior(mes) {
-  const [a, m] = mes.split('-').map(Number);
-  const d = new Date(a, m - 2, 1);
+function mesAnterior(yyyymm) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const d = new Date(y, m - 2, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
-function mesSeguinte(mes) {
-  const [a, m] = mes.split('-').map(Number);
-  const d = new Date(a, m, 1);
+function mesSeguinte(yyyymm) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const d = new Date(y, m, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 function mesAtual() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
+function fmtBRL(v) {
+  return (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+function fmtPct(v) {
+  return `${(v || 0).toFixed(1)}%`;
+}
 
-// ─── sub-componentes ──────────────────────────────────────────────────────────
+function Skeleton({ h = 'h-20' }) {
+  return <div className={`rounded-xl bg-slate-800 animate-pulse ${h}`} />;
+}
 
-function KpiCard({ label, valor, sub, cor = 'slate', Icone, pctVal }) {
-  const clr = {
-    green:  'bg-emerald-900/20 border-emerald-700/30 text-emerald-400',
-    red:    'bg-red-900/20 border-red-700/30 text-red-400',
-    blue:   'bg-blue-900/20 border-blue-700/30 text-blue-400',
-    amber:  'bg-amber-900/20 border-amber-700/30 text-amber-400',
-    purple: 'bg-purple-900/20 border-purple-700/30 text-purple-400',
-    slate:  'bg-slate-800 border-white/[0.06] text-slate-300',
+function KpiCard({ label, valor, sub, cor = 'slate' }) {
+  const cores = {
+    emerald: 'text-emerald-400',
+    red:     'text-red-400',
+    blue:    'text-blue-400',
+    orange:  'text-orange-400',
+    slate:   'text-slate-200',
   };
   return (
-    <div className={`rounded-xl p-4 border flex flex-col gap-1 ${clr[cor]}`}>
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">{label}</span>
-        {Icone && <Icone size={14} className="opacity-50" />}
-      </div>
-      <span className="text-2xl font-black tabular-nums">{brl(valor)}</span>
-      {(sub || pctVal) && (
-        <span className="text-xs opacity-60">{pctVal ? `${pctVal} da receita` : sub}</span>
-      )}
+    <div className="rounded-xl bg-slate-800 border border-white/5 p-4 flex flex-col gap-1">
+      <span className="text-xs text-slate-500 uppercase tracking-wider">{label}</span>
+      <span className={`text-lg font-bold ${cores[cor]}`}>{valor}</span>
+      {sub && <span className="text-xs text-slate-600">{sub}</span>}
     </div>
   );
 }
 
-function BarraHorizontal({ label, valor, total, cor }) {
-  const pctNum = total > 0 ? (valor / total * 100) : 0;
-  const corBar = { ML: 'bg-yellow-400', Shopee: 'bg-orange-400', outros: 'bg-slate-500',
-                   pago: 'bg-emerald-500', pendente: 'bg-amber-400', vencido: 'bg-red-500' };
+function SecaoLista({ titulo, items, renderItem, vazio = 'Nenhum registro' }) {
+  if (!items?.length) return (
+    <div className="rounded-xl bg-slate-800 border border-white/5 p-5">
+      <h3 className="text-sm font-semibold text-slate-400 mb-3">{titulo}</h3>
+      <p className="text-slate-600 text-xs">{vazio}</p>
+    </div>
+  );
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex justify-between text-xs">
-        <span className="text-slate-400">{label}</span>
-        <span className="text-slate-300 font-medium">{brl(valor)} <span className="text-slate-600">({pctNum.toFixed(0)}%)</span></span>
-      </div>
-      <div className="h-1.5 rounded-full bg-slate-800">
-        <div className={`h-full rounded-full ${corBar[cor] || 'bg-slate-500'} transition-all`}
-          style={{ width: `${Math.min(pctNum, 100)}%` }} />
+    <div className="rounded-xl bg-slate-800 border border-white/5 p-5">
+      <h3 className="text-sm font-semibold text-slate-400 mb-3">{titulo} <span className="text-slate-600 font-normal">({items.length})</span></h3>
+      <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
+        {items.map(renderItem)}
       </div>
     </div>
   );
 }
 
-function SecaoCard({ titulo, children }) {
-  return (
-    <div className="rounded-xl bg-slate-800/50 border border-white/[0.06] p-4 flex flex-col gap-3">
-      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">{titulo}</h3>
-      {children}
-    </div>
-  );
+// Situação Bling: 1=pendente, 2=pago/recebido, 3=cancelado, 13=parcial
+function situacaoLabel(id) {
+  const m = { 1: 'Pendente', 2: 'Pago', 3: 'Cancelado', 13: 'Parcial' };
+  return m[id] || `${id}`;
 }
-
-function Skeleton() {
-  return <div className="h-28 rounded-xl bg-slate-800 border border-white/5 animate-pulse" />;
+function situacaoCor(id) {
+  if (id === 2)  return 'text-emerald-400';
+  if (id === 3)  return 'text-slate-600';
+  if (id === 13) return 'text-orange-400';
+  return 'text-orange-300';
 }
-
-// ─── componente principal ──────────────────────────────────────────────────────
 
 export function PainelFinanceiro() {
-  const [mes,     setMes]     = useState(mesAtual());
-  const [dados,   setDados]   = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [erro,    setErro]    = useState(null);
+  const hoje = mesAtual();
+  const [mes, setMes]       = useState(hoje);
+  const [data, setData]     = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]   = useState('');
 
-  const carregarDados = useCallback(async (m) => {
+  const carregar = useCallback(async (m) => {
     setLoading(true);
-    setErro(null);
+    setError('');
     try {
-      const r = await apiFetch(`/api/painel-financeiro?mes=${m}`);
-      if (!r.ok && r.status) throw new Error(`Erro ${r.status}`);
-      const data = await (r.json ? r.json() : r);
-      setDados(data);
+      const res = await apiFetch(`/api/painel-financeiro?mes=${m}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${res.status}`);
+      }
+      setData(await res.json());
     } catch (e) {
-      setErro(e.message);
+      setError(e.message);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { carregarDados(mes); }, [mes, carregarDados]);
+  useEffect(() => { carregar(mes); }, [mes, carregar]);
 
-  const isAtual = mes === mesAtual();
+  const navAntes  = () => setMes(m => mesAnterior(m));
+  const navDepois = () => setMes(m => mesSeguinte(m));
 
-  // ── render ────────────────────────────────────────────────────────────────
+  const resultado = data?.resultado;
+  const lucro = resultado?.lucroLiquido ?? 0;
 
   return (
-    <div className="flex flex-col gap-5 pb-10">
+    <div className="text-slate-100 px-4 py-8 max-w-7xl mx-auto flex-1 overflow-y-auto">
 
-      {/* ── Header: navegação de mês ──────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 bg-slate-800 border border-white/10 rounded-xl px-3 py-2">
-          <button onClick={() => setMes(mesAnterior(mes))}
-            className="p-0.5 text-slate-400 hover:text-white transition-colors">
-            <ChevronLeft size={16} />
-          </button>
-          <span className="text-sm font-bold text-slate-200 min-w-[90px] text-center">
-            {mesLabel(mes)}
-          </span>
-          <button onClick={() => setMes(mesSeguinte(mes))} disabled={isAtual}
-            className="p-0.5 text-slate-400 hover:text-white disabled:opacity-30 transition-colors">
-            <ChevronRight size={16} />
-          </button>
+      {/* Cabeçalho */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-slate-100">Painel Financeiro</h1>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {data?.blingOk
+                ? <><Wifi size={12} className="text-emerald-400" /><span className="text-xs text-emerald-400">Bling online</span></>
+                : <><WifiOff size={12} className="text-slate-600" /><span className="text-xs text-slate-600">Bling offline</span></>
+              }
+            </div>
+          </div>
         </div>
 
+        {/* Navegação de mês */}
         <div className="flex items-center gap-2">
-          {dados && (
-            <span className={`flex items-center gap-1 text-xs ${dados.blingOk ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {dados.blingOk ? <Wifi size={12} /> : <WifiOff size={12} />}
-              {dados.blingOk ? 'Bling conectado' : 'Bling offline'}
-            </span>
-          )}
-          <button onClick={() => carregarDados(mes)} disabled={loading}
-            className="p-2 rounded-lg bg-slate-800 border border-white/10 text-slate-400
-              hover:text-white transition-colors disabled:opacity-50">
+          <button onClick={navAntes}  className="p-1.5 rounded-lg bg-slate-800 border border-white/10 hover:border-white/20 text-slate-400 hover:text-slate-200 transition-colors">
+            <ChevronLeft size={16} />
+          </button>
+          <span className="text-sm font-medium text-slate-200 min-w-[90px] text-center">{mesLabel(mes)}</span>
+          <button onClick={navDepois} disabled={mes >= hoje} className="p-1.5 rounded-lg bg-slate-800 border border-white/10 hover:border-white/20 text-slate-400 hover:text-slate-200 disabled:opacity-30 transition-colors">
+            <ChevronRight size={16} />
+          </button>
+          <button onClick={() => carregar(mes)} disabled={loading} className="p-1.5 rounded-lg bg-slate-800 border border-white/10 hover:border-white/20 text-slate-400 hover:text-slate-200 disabled:opacity-30 transition-colors" title="Recarregar">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
 
-      {erro && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-900/20 border border-red-700/30 text-red-400 text-sm">
-          <AlertCircle size={15} /> {erro}
+      {/* Erro */}
+      {error && (
+        <div className="rounded-xl bg-red-900/20 border border-red-700/40 p-4 text-red-400 text-sm mb-6">
+          {error}
+          {error.includes('autenticado') && (
+            <a href="/bling/auth" className="ml-2 underline hover:text-red-300">Conectar Bling</a>
+          )}
         </div>
       )}
 
-      {loading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {[...Array(8)].map((_, i) => <Skeleton key={i} />)}
+      {/* Loading */}
+      {loading && (
+        <div className="flex flex-col gap-5">
+          <Skeleton h="h-28" />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => <Skeleton key={i} h="h-20" />)}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <Skeleton h="h-60" />
+            <Skeleton h="h-60" />
+            <Skeleton h="h-60" />
+          </div>
         </div>
-      ) : dados ? (
-        <>
-          {/* ── Card resultado principal ─────────────────────────────────── */}
-          <div className={`rounded-2xl p-6 border flex flex-col gap-1 ${
-            dados.resultado.lucroLiquido >= 0
-              ? 'bg-emerald-900/20 border-emerald-700/30'
-              : 'bg-red-900/20 border-red-700/30'
-          }`}>
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider opacity-60">
-              {dados.resultado.lucroLiquido >= 0
-                ? <TrendingUp size={14} className="text-emerald-400" />
-                : <TrendingDown size={14} className="text-red-400" />}
-              Resultado de {mesLabel(mes)}
+      )}
+
+      {/* Conteúdo */}
+      {!loading && data && (
+        <div className="flex flex-col gap-5">
+
+          {/* Card resultado */}
+          <div className={`rounded-xl border p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${lucro >= 0 ? 'bg-emerald-900/20 border-emerald-700/40' : 'bg-red-900/20 border-red-700/40'}`}>
+            <div className="flex items-center gap-3">
+              {lucro >= 0
+                ? <TrendingUp size={24} className="text-emerald-400 shrink-0" />
+                : <TrendingDown size={24} className="text-red-400 shrink-0" />
+              }
+              <div>
+                <p className="text-xs text-slate-500 uppercase tracking-wider">Resultado do mês</p>
+                <p className={`text-2xl font-bold ${lucro >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtBRL(lucro)}</p>
+                <p className="text-xs text-slate-500">Margem: {fmtPct(resultado?.margemLiquida)}</p>
+              </div>
             </div>
-            <span className={`text-4xl font-black tabular-nums ${
-              dados.resultado.lucroLiquido >= 0 ? 'text-emerald-400' : 'text-red-400'
-            }`}>
-              {brl(dados.resultado.lucroLiquido)}
-            </span>
-            <span className="text-sm opacity-60">
-              Margem: {pct(dados.resultado.lucroLiquido, dados.receita.bruta)} &nbsp;·&nbsp;
-              Receita: {brl(dados.receita.bruta)} &nbsp;·&nbsp;
-              Saídas: {brl(dados.resultado.totalSaidas)}
-            </span>
+            <div className="flex gap-6 text-center">
+              <div>
+                <p className="text-xs text-slate-500">Receita</p>
+                <p className="text-sm font-semibold text-slate-200">{fmtBRL(data.receita.bruta)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Saídas</p>
+                <p className="text-sm font-semibold text-slate-200">{fmtBRL(resultado?.totalSaidas)}</p>
+              </div>
+            </div>
           </div>
 
-          {/* ── KPIs principais ──────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <KpiCard label="Receita Bruta"   valor={dados.receita.bruta}
-              Icone={TrendingUp}  cor="green"
-              pctVal={pct(dados.receita.bruta, dados.receita.bruta)} />
-            <KpiCard label="Recebido (Bling)" valor={dados.contasReceber.recebido}
-              Icone={CheckCircle2} cor="blue"
-              sub={`Pendente: ${brl(dados.contasReceber.pendente)}`} />
-            <KpiCard label="Despesas locais" valor={dados.despesas.total}
-              Icone={ShoppingCart} cor="amber"
-              pctVal={pct(dados.despesas.total, dados.receita.bruta)} />
-            <KpiCard label="Parcelas cartão" valor={dados.parcelas.total}
-              Icone={CreditCard} cor="purple"
-              sub={`Pago: ${brl(dados.parcelas.pago)} · Pendente: ${brl(dados.parcelas.pendente)}`} />
+          {/* KPIs */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <KpiCard label="Receita ML"    valor={fmtBRL(data.receita.ML)}     cor="emerald" />
+            <KpiCard label="Receita Shopee" valor={fmtBRL(data.receita.Shopee)} cor="orange"  />
+            <KpiCard label="Despesas locais" valor={fmtBRL(resultado?.totalDespesas)} cor="red" />
+            <KpiCard label="Parcelas cartão" valor={fmtBRL(resultado?.totalParcelas)} cor="blue" />
           </div>
 
-          {/* ── Detalhamento ─────────────────────────────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-            {/* Receita por marketplace */}
-            <SecaoCard titulo="Receita por Canal">
-              <BarraHorizontal label="Mercado Livre" valor={dados.receita.ML}
-                total={dados.receita.bruta} cor="ML" />
-              <BarraHorizontal label="Shopee"        valor={dados.receita.Shopee}
-                total={dados.receita.bruta} cor="Shopee" />
-              <BarraHorizontal label="Outros"        valor={dados.receita.outros}
-                total={dados.receita.bruta} cor="outros" />
-            </SecaoCard>
-
-            {/* Contas a receber Bling */}
-            <SecaoCard titulo="Contas a Receber (Bling)">
-              <BarraHorizontal label="Recebido"  valor={dados.contasReceber.recebido}
-                total={dados.contasReceber.recebido + dados.contasReceber.pendente + dados.contasReceber.vencido}
-                cor="pago" />
-              <BarraHorizontal label="Pendente"  valor={dados.contasReceber.pendente}
-                total={dados.contasReceber.recebido + dados.contasReceber.pendente + dados.contasReceber.vencido}
-                cor="pendente" />
-              {dados.contasReceber.vencido > 0 && (
-                <BarraHorizontal label="Vencido" valor={dados.contasReceber.vencido}
-                  total={dados.contasReceber.recebido + dados.contasReceber.pendente + dados.contasReceber.vencido}
-                  cor="vencido" />
-              )}
-              {dados.contasReceber.recebido === 0 && dados.contasReceber.pendente === 0 && (
-                <p className="text-xs text-slate-600 text-center py-2">Sem dados de contas a receber</p>
-              )}
-            </SecaoCard>
-
-            {/* Contas a pagar Bling */}
-            <SecaoCard titulo="Contas a Pagar (Bling)">
-              <BarraHorizontal label="Pago"     valor={dados.contasPagarBling.pago}
-                total={dados.contasPagarBling.pago + dados.contasPagarBling.pendente + dados.contasPagarBling.vencido}
-                cor="pago" />
-              <BarraHorizontal label="Pendente" valor={dados.contasPagarBling.pendente}
-                total={dados.contasPagarBling.pago + dados.contasPagarBling.pendente + dados.contasPagarBling.vencido}
-                cor="pendente" />
-              {dados.contasPagarBling.vencido > 0 && (
-                <BarraHorizontal label="Vencido" valor={dados.contasPagarBling.vencido}
-                  total={dados.contasPagarBling.pago + dados.contasPagarBling.pendente + dados.contasPagarBling.vencido}
-                  cor="vencido" />
-              )}
-              {dados.contasPagarBling.pago === 0 && dados.contasPagarBling.pendente === 0 && (
-                <p className="text-xs text-slate-600 text-center py-2">Sem contas a pagar registradas no Bling</p>
-              )}
-            </SecaoCard>
-          </div>
-
-          {/* ── Despesas por categoria ───────────────────────────────────── */}
-          {Object.keys(dados.despesas.porCategoria).length > 0 && (
-            <SecaoCard titulo="Despesas por Categoria">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {Object.entries(dados.despesas.porCategoria)
-                  .sort(([,a],[,b]) => b - a)
-                  .map(([cat, val]) => (
-                    <div key={cat} className="flex justify-between items-center py-1.5 border-b border-white/[0.04]">
-                      <span className="text-xs text-slate-400 truncate">{cat}</span>
-                      <div className="text-right shrink-0 ml-4">
-                        <span className="text-xs font-semibold text-slate-200">{brl(val)}</span>
-                        <span className="text-[10px] text-slate-600 ml-1">
-                          {pct(val, dados.despesas.total)}
-                        </span>
+          {/* Despesas por categoria */}
+          {data.despesas.length > 0 && (() => {
+            const cats = {};
+            data.despesas.forEach(d => {
+              cats[d.categoria] = (cats[d.categoria] || 0) + d.valor;
+            });
+            const sorted = Object.entries(cats).sort((a, b) => b[1] - a[1]);
+            const max = sorted[0]?.[1] || 1;
+            return (
+              <div className="rounded-xl bg-slate-800 border border-white/5 p-5">
+                <h3 className="text-sm font-semibold text-slate-400 mb-4">Despesas por Categoria</h3>
+                <div className="flex flex-col gap-2">
+                  {sorted.map(([cat, val]) => (
+                    <div key={cat} className="flex items-center gap-3">
+                      <span className="text-xs text-slate-400 w-36 truncate shrink-0">{cat}</span>
+                      <div className="flex-1 bg-slate-700 rounded-full h-1.5">
+                        <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: `${(val / max) * 100}%` }} />
                       </div>
+                      <span className="text-xs text-slate-300 w-24 text-right shrink-0">{fmtBRL(val)}</span>
                     </div>
                   ))}
+                </div>
               </div>
-            </SecaoCard>
-          )}
-        </>
-      ) : null}
+            );
+          })()}
+
+          {/* Listas Bling */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <SecaoLista
+              titulo="Contas a Receber (Bling)"
+              items={data.contasReceber}
+              vazio={data.blingOk ? 'Nenhuma conta a receber no mês' : 'Bling offline — conecte para ver dados'}
+              renderItem={item => (
+                <div key={item.id} className="flex items-start justify-between gap-2 py-1.5 border-b border-white/5 last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-slate-300 truncate">{item.descricao || '—'}</p>
+                    <p className="text-[10px] text-slate-600">{item.vencimento}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-medium text-slate-200">{fmtBRL(item.valor)}</p>
+                    <p className={`text-[10px] ${situacaoCor(item.situacao)}`}>{situacaoLabel(item.situacao)}</p>
+                  </div>
+                </div>
+              )}
+            />
+            <SecaoLista
+              titulo="Contas a Pagar (Bling)"
+              items={data.contasPagarBling}
+              vazio={data.blingOk ? 'Nenhuma conta a pagar no mês' : 'Bling offline — conecte para ver dados'}
+              renderItem={item => (
+                <div key={item.id} className="flex items-start justify-between gap-2 py-1.5 border-b border-white/5 last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-slate-300 truncate">{item.fornecedor || item.descricao || '—'}</p>
+                    <p className="text-[10px] text-slate-600">{item.vencimento}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-medium text-slate-200">{fmtBRL(item.valor)}</p>
+                    <p className={`text-[10px] ${situacaoCor(item.situacao)}`}>{situacaoLabel(item.situacao)}</p>
+                  </div>
+                </div>
+              )}
+            />
+          </div>
+
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && !data && !error && (
+        <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
+          <span className="text-4xl">📊</span>
+          <p className="text-slate-400">Selecione um mês para carregar os dados.</p>
+        </div>
+      )}
+
     </div>
   );
 }
