@@ -2169,44 +2169,102 @@ app.delete('/api/fin-despesas/:id', requireFirebaseAuth, requireFirebaseRole(['a
   }
 });
 
-// POST /api/fin-despesas/parse-comprovante — extrai dados de PDF de comprovante com regex
+// ── helper: extrai valor/data/fornecedor de texto bruto de comprovante
+function parsearTextoComprovante(text) {
+  const MESES = {
+    janeiro:'01', fevereiro:'02', março:'03', marco:'03', abril:'04',
+    maio:'05', junho:'06', julho:'07', agosto:'08',
+    setembro:'09', outubro:'10', novembro:'11', dezembro:'12',
+  };
+
+  // Valor: maior R$ encontrado no texto
+  let valor = 0;
+  const valorMatches = [...text.matchAll(/R\$\s*([\d.]+,\d{2})/g)];
+  if (valorMatches.length) {
+    const valores = valorMatches.map(m => parseFloat(m[1].replace(/\./g, '').replace(',', '.')));
+    valor = Math.max(...valores);
+  }
+
+  // Data
+  let data = '';
+  const dataPorExtenso = text.match(/(\d{1,2})\s+de\s+([a-záêçãõ]+)\s+de\s+(\d{4})/i)
+                      || text.match(/(\d{1,2})[\/\s]+([a-záêçãõ]{4,})[\/\s]+(\d{4})/i);
+  if (dataPorExtenso) {
+    const dia = dataPorExtenso[1].padStart(2, '0');
+    const mes = MESES[dataPorExtenso[2].toLowerCase()] || '01';
+    data = `${dia}/${mes}/${dataPorExtenso[3]}`;
+  } else {
+    const dataNum = text.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (dataNum) data = `${dataNum[1]}/${dataNum[2]}/${dataNum[3]}`;
+  }
+
+  // Fornecedor: múltiplos padrões em ordem de confiança
+  let fornecedor = '';
+  const padFornecedor = [
+    /favorecido[:\s]*\r?\n?\s*([^\r\n]{3,60})/i,
+    /recebedor[:\s]*\r?\n?\s*([^\r\n]{3,60})/i,
+    /benefici[aá]rio[:\s]*\r?\n?\s*([^\r\n]{3,60})/i,
+    /destinat[aá]rio[:\s]*\r?\n?\s*([^\r\n]{3,60})/i,
+    /\bpara\b\s*\r?\n\s*([^\r\n]{3,60})/i,
+    /\bpara\b\s+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][^\r\n]{2,59})/,
+    /\bnome[:\s]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][^\r\n]{2,59})/i,
+  ];
+  for (const pat of padFornecedor) {
+    const m = text.match(pat);
+    if (m) {
+      const candidato = m[1].trim();
+      if (!/^\d[\d.\-\/\s]+$/.test(candidato)) {
+        fornecedor = candidato.slice(0, 60);
+        break;
+      }
+    }
+  }
+
+  return { valor, data, fornecedor };
+}
+
+// POST /api/fin-despesas/parse-comprovante — PDF (pdf-parse) ou imagem (Google Vision OCR)
 app.post('/api/fin-despesas/parse-comprovante', requireFirebaseAuth, uploadMemory.single('arquivo'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
-    if (req.file.mimetype !== 'application/pdf') {
-      return res.status(400).json({ error: 'Envie o comprovante em PDF.' });
-    }
 
-    const pdfParse = require('pdf-parse');
-    const { text } = await pdfParse(req.file.buffer);
+    let text = '';
+    const mime = req.file.mimetype;
 
-    // ── Valor: R$ 11.140,34 ou R$ 11140.34
-    let valor = 0;
-    const valorM = text.match(/R\$\s*([\d.]+,\d{2})/);
-    if (valorM) valor = parseFloat(valorM[1].replace(/\./g, '').replace(',', '.'));
-
-    // ── Data: "16/abril/2026", "16 de abril de 2026" ou "16/04/2026"
-    let data = '';
-    const MESES = {
-      janeiro:'01', fevereiro:'02', março:'03', marco:'03', abril:'04',
-      maio:'05', junho:'06', julho:'07', agosto:'08',
-      setembro:'09', outubro:'10', novembro:'11', dezembro:'12',
-    };
-    const dataM = text.match(/(\d{1,2})[\/\s]+([a-záêçãõ]+)[\/\s]+(\d{4})/i);
-    if (dataM) {
-      const dia = dataM[1].padStart(2, '0');
-      const mes = MESES[dataM[2].toLowerCase()] || dataM[2].padStart(2, '0');
-      data = `${dia}/${mes}/${dataM[3]}`;
+    if (mime === 'application/pdf') {
+      // PDF digital: extrai texto direto
+      const pdfParse = require('pdf-parse');
+      const result = await pdfParse(req.file.buffer);
+      text = result.text;
+    } else if (mime.startsWith('image/')) {
+      // Imagem (foto de comprovante): usa Google Vision OCR
+      const { google } = require('googleapis');
+      const vision = google.vision('v1');
+      const auth = new google.auth.JWT(
+        serviceAccount.client_email,
+        null,
+        serviceAccount.private_key,
+        ['https://www.googleapis.com/auth/cloud-vision']
+      );
+      const response = await vision.images.annotate({
+        auth,
+        requestBody: {
+          requests: [{
+            image: { content: req.file.buffer.toString('base64') },
+            features: [{ type: 'TEXT_DETECTION' }],
+            imageContext: { languageHints: ['pt-BR'] },
+          }],
+        },
+      });
+      text = response.data.responses[0]?.fullTextAnnotation?.text
+          || response.data.responses[0]?.textAnnotations?.[0]?.description
+          || '';
     } else {
-      const dataNum = text.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      if (dataNum) data = `${dataNum[1]}/${dataNum[2]}/${dataNum[3]}`;
+      return res.status(400).json({ error: 'Envie um PDF ou imagem (JPEG, PNG, etc.).' });
     }
 
-    // ── Fornecedor: linha após "Para" (beneficiário do PIX)
-    let fornecedor = '';
-    const paraM = text.match(/Para\s*\r?\n\s*([^\r\n]+)/i);
-    if (paraM) fornecedor = paraM[1].trim().slice(0, 60);
-
+    console.log('[parse-comprovante] texto extraído:\n', text.slice(0, 1000));
+    const { valor, data, fornecedor } = parsearTextoComprovante(text);
     res.json({ ok: true, valor, data, fornecedor });
   } catch (err) {
     console.error('[parse-comprovante]', err);
