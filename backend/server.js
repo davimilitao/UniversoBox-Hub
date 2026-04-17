@@ -3559,7 +3559,7 @@ function detectarMkt(nf) {
 }
 
 // ── PÁGINA ────────────────────────────────────────────────────────
-app.get('/bling', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'bling.html')));
+app.get('/bling', (req, res) => res.redirect('/spa/financeiro/painel'));
 
 // ── STATUS ────────────────────────────────────────────────────────
 app.get('/bling/status', async (req, res) => {
@@ -3578,7 +3578,7 @@ app.get('/bling/auth', (req, res) => {
 // ── CALLBACK OAUTH ────────────────────────────────────────────────
 app.get('/bling/callback', async (req, res) => {
   const { code, error } = req.query;
-  if (error || !code) return res.redirect('/bling?error=auth_denied');
+  if (error || !code) return res.redirect('/spa/financeiro/painel?bling=error&msg=auth_denied');
   try {
     const creds = Buffer.from(`${BLING_CLIENT_ID}:${BLING_CLIENT_SECRET}`).toString('base64');
     const tokenRes = await fetch(BLING_TOKEN_URL, {
@@ -3586,10 +3586,10 @@ app.get('/bling/callback', async (req, res) => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Basic ${creds}` },
       body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: BLING_REDIRECT_URI }).toString(),
     });
-    if (!tokenRes.ok) { console.error('[bling/callback]', await tokenRes.text()); return res.redirect('/bling?error=token_failed'); }
+    if (!tokenRes.ok) { console.error('[bling/callback]', await tokenRes.text()); return res.redirect('/spa/financeiro/painel?bling=error&msg=token_failed'); }
     await blingSaveToken(await tokenRes.json());
-    res.redirect('/bling?success=1');
-  } catch(e) { console.error('[bling/callback]', e); res.redirect('/bling?error=callback_error'); }
+    res.redirect('/spa/financeiro/painel?bling=ok');
+  } catch(e) { console.error('[bling/callback]', e); res.redirect('/spa/financeiro/painel?bling=error&msg=callback_error'); }
 });
 
 // ── DESCONECTAR ───────────────────────────────────────────────────
@@ -6054,7 +6054,7 @@ function detectarMkt(nf) {
 }
 
 // ── PÁGINA ────────────────────────────────────────────────────────
-app.get('/bling', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'bling.html')));
+app.get('/bling', (req, res) => res.redirect('/spa/financeiro/painel'));
 
 // ── STATUS ────────────────────────────────────────────────────────
 app.get('/bling/status', async (req, res) => {
@@ -6073,7 +6073,7 @@ app.get('/bling/auth', (req, res) => {
 // ── CALLBACK OAUTH ────────────────────────────────────────────────
 app.get('/bling/callback', async (req, res) => {
   const { code, error } = req.query;
-  if (error || !code) return res.redirect('/bling?error=auth_denied');
+  if (error || !code) return res.redirect('/spa/financeiro/painel?bling=error&msg=auth_denied');
   try {
     const creds = Buffer.from(`${BLING_CLIENT_ID}:${BLING_CLIENT_SECRET}`).toString('base64');
     const tokenRes = await fetch(BLING_TOKEN_URL, {
@@ -6081,10 +6081,10 @@ app.get('/bling/callback', async (req, res) => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Basic ${creds}` },
       body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: BLING_REDIRECT_URI }).toString(),
     });
-    if (!tokenRes.ok) { console.error('[bling/callback]', await tokenRes.text()); return res.redirect('/bling?error=token_failed'); }
+    if (!tokenRes.ok) { console.error('[bling/callback]', await tokenRes.text()); return res.redirect('/spa/financeiro/painel?bling=error&msg=token_failed'); }
     await blingSaveToken(await tokenRes.json());
-    res.redirect('/bling?success=1');
-  } catch(e) { console.error('[bling/callback]', e); res.redirect('/bling?error=callback_error'); }
+    res.redirect('/spa/financeiro/painel?bling=ok');
+  } catch(e) { console.error('[bling/callback]', e); res.redirect('/spa/financeiro/painel?bling=error&msg=callback_error'); }
 });
 
 // ── DESCONECTAR ───────────────────────────────────────────────────
