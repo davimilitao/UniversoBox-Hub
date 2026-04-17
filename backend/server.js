@@ -2600,7 +2600,7 @@ app.get('/api/painel-financeiro', requireFirebaseAuth, async (req, res, next) =>
     let receitaNFe = { total: 0, porMarketplace: { MERCADO_LIVRE: 0, SHOPEE: 0, OUTROS: 0 } };
     let blingOk = false;
     try {
-      receitaNFe = await agregarReceitaBling(inicio, fimStr);
+      receitaNFe = await blingAgregaMes(mes);
       blingOk = true;
     } catch (e) {
       console.warn('[painel] NF-e indisponível:', e.message);
