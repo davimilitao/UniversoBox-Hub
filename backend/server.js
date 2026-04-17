@@ -2170,14 +2170,17 @@ app.delete('/api/fin-despesas/:id', requireFirebaseAuth, requireFirebaseRole(['a
 });
 
 // ── helper: extrai valor/data/fornecedor de texto bruto de comprovante
-function parsearTextoComprovante(text) {
+function parsearTextoComprovante(rawText) {
   const MESES = {
     janeiro:'01', fevereiro:'02', março:'03', marco:'03', abril:'04',
     maio:'05', junho:'06', julho:'07', agosto:'08',
     setembro:'09', outubro:'10', novembro:'11', dezembro:'12',
   };
 
-  // Valor: maior R$ encontrado no texto
+  // Mercado Pago quebra "R$ 11.140\n34" em duas linhas — reconstrói "R$ 11.140,34"
+  const text = rawText.replace(/R\$\s*([\d.]+)\r?\n(\d{2})\b/g, 'R$ $1,$2');
+
+  // Valor: maior R$ encontrado no texto normalizado
   let valor = 0;
   const valorMatches = [...text.matchAll(/R\$\s*([\d.]+,\d{2})/g)];
   if (valorMatches.length) {
