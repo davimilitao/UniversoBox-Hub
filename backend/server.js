@@ -2169,6 +2169,46 @@ app.delete('/api/fin-despesas/:id', requireFirebaseAuth, requireFirebaseRole(['a
   }
 });
 
+// POST /api/fin-despesas/parse-comprovante — lê PDF/imagem com Claude AI e extrai dados
+app.post('/api/fin-despesas/parse-comprovante', requireFirebaseAuth, uploadMemory.single('arquivo'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
+
+    const Anthropic = require('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+    const base64 = req.file.buffer.toString('base64');
+    const mime   = req.file.mimetype || 'application/pdf';
+    const isPdf  = mime === 'application/pdf';
+
+    const contentBlock = isPdf
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+      : { type: 'image',    source: { type: 'base64', media_type: mime,               data: base64 } };
+
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 256,
+      messages: [{
+        role: 'user',
+        content: [
+          contentBlock,
+          {
+            type: 'text',
+            text: 'Extraia do comprovante: 1) valor numérico em reais (ex: 11140.34 sem símbolo), 2) data no formato DD/MM/YYYY, 3) nome curto do pagador ou beneficiário (máx 40 chars). Responda APENAS em JSON válido sem markdown: {"valor":0.00,"data":"DD/MM/YYYY","fornecedor":"..."}',
+          },
+        ],
+      }],
+    });
+
+    const raw    = msg.content[0]?.text?.trim() || '{}';
+    const parsed = JSON.parse(raw);
+    res.json({ ok: true, valor: parsed.valor || 0, data: parsed.data || '', fornecedor: parsed.fornecedor || '' });
+  } catch (err) {
+    console.error('[parse-comprovante]', err);
+    next(err);
+  }
+});
+
 // POST /api/fin-despesas/importar-sheets — migra dados históricos do Google Sheets para Firestore
 app.post('/api/fin-despesas/importar-sheets', requireFirebaseAuth, requireFirebaseRole(['admin']), async (req, res, next) => {
   try {
