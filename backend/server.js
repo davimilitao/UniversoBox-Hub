@@ -5763,6 +5763,81 @@ app.get('/bling/produto-intel', async (req, res) => {
   }
 });
 
+// ── POST /api/margem-v2/importar-historico ───────────────────────────────────
+// Admin only — executa 1x para migrar dados históricos do Google Sheets
+// para Firestore (fin_margem_mensal), preservando meses já automáticos.
+app.post('/api/margem-v2/importar-historico', requireFirebaseAuth, requireFirebaseRole(['admin']), async (req, res, next) => {
+  try {
+    const tenantId = req.auth?.tenantId || null;
+    if (!SPREADSHEET_ID) return res.status(500).json({ error: 'SPREADSHEET_ID não configurado' });
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Margem!A4:AD',
+    });
+    const rows = response.data.values || [];
+    if (rows.length < 2) return res.json({ importados: 0 });
+
+    const headers = (rows[0] || []).map(h => String(h).trim());
+    const nrm = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const col = name => headers.findIndex(h => nrm(h).includes(nrm(name)));
+    const brl = str => {
+      if (!str) return 0;
+      const neg = String(str).includes('-');
+      const v = parseFloat(String(str).replace(/[R$\s\-]/g, '').replace(/\./g, '').replace(',', '.')) || 0;
+      return neg ? -v : v;
+    };
+
+    const MESES_PT = { jan:1, fev:2, mar:3, abr:4, mai:5, jun:6, jul:7, ago:8, set:9, out:10, nov:11, dez:12 };
+    const [iData, iRec, iRecLiq, iCusto, iImp, iDesp, iLB, iLL] = [
+      col('Data'), col('Receita Bruta'), col('Receita Líquida'), col('Custo Mercadoria'),
+      col('Imposto'), col('Despesas R'), col('Soma de Lucro'), col('Lucro Líquido'),
+    ];
+
+    const batch = db.batch();
+    let importados = 0;
+
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      const dataStr = String(r[iData] || '').trim();
+      if (!dataStr || dataStr.toLowerCase().includes('total')) continue;
+
+      const match = dataStr.toLowerCase().match(/([a-z]+)[.-]+(\d+)/);
+      if (!match) continue;
+      const mesNum = MESES_PT[match[1].slice(0, 3)];
+      const anoNum = 2000 + Number(match[2]);
+      if (!mesNum) continue;
+
+      const mesAno = `${anoNum}-${String(mesNum).padStart(2, '0')}`;
+      const docId  = tenantId ? `${tenantId}_${mesAno}` : mesAno;
+
+      const existing = await db.collection('fin_margem_mensal').doc(docId).get();
+      if (existing.exists && existing.data().fonte === 'automatico') continue;
+
+      batch.set(db.collection('fin_margem_mensal').doc(docId), {
+        mesAno,
+        tenantId:        tenantId || null,
+        fonte:           'historico',
+        receitaBruta:    brl(r[iRec]),
+        receitaLiquida:  brl(r[iRecLiq]),
+        custoMercadoria: brl(r[iCusto]),
+        imposto:         brl(r[iImp]),
+        totalDespesas:   brl(r[iDesp]),
+        lucroBruto:      brl(r[iLB]),
+        lucroLiquido:    brl(r[iLL]),
+        importadoEm:     new Date(),
+      }, { merge: true });
+      importados++;
+    }
+
+    await batch.commit();
+    return res.json({ ok: true, importados });
+  } catch (err) {
+    console.error('[POST /api/margem-v2/importar-historico]', err);
+    return next(err);
+  }
+});
+
 // ---------------- Errors ----------------
 app.use((err, req, res, next) => {
   const status = err.statusCode || 500;
