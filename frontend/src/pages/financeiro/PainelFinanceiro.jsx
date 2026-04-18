@@ -189,7 +189,13 @@ export function PainelFinanceiro() {
   const navDepois = () => setMes(m => mesSeguinte(m));
 
   const resultado = data?.resultado;
-  const lucro = resultado?.lucroLiquido ?? 0;
+  // Receita: usa NF-e se disponível, senão usa contas recebidas do Bling
+  const receitaNFe    = data?.receita?.bruta || 0;
+  const receitaCR     = data?.contasReceber?.recebido || 0;
+  const receitaReal   = receitaNFe > 0 ? receitaNFe : receitaCR;
+  const fonteReceita  = receitaNFe > 0 ? 'NF-e' : 'contas recebidas';
+  const totalSaidas   = resultado?.totalSaidas || 0;
+  const lucro         = receitaReal - totalSaidas;
 
   return (
     <div className="text-slate-100 px-4 py-8 max-w-7xl mx-auto flex-1 overflow-y-auto">
@@ -262,25 +268,32 @@ export function PainelFinanceiro() {
               <div>
                 <p className="text-xs text-slate-500 uppercase tracking-wider">Resultado do mês</p>
                 <p className={`text-2xl font-bold ${lucro >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtBRL(lucro)}</p>
-                <p className="text-xs text-slate-500">Margem: {fmtPct(resultado?.margemLiquida)}</p>
+                <p className="text-xs text-slate-500">
+                  Margem: {receitaReal > 0 ? fmtPct((lucro / receitaReal) * 100) : '—'}
+                  {receitaNFe === 0 && receitaCR > 0 && <span className="ml-2 text-slate-600">(via {fonteReceita})</span>}
+                </p>
               </div>
             </div>
             <div className="flex gap-6 text-center">
               <div>
                 <p className="text-xs text-slate-500">Receita</p>
-                <p className="text-sm font-semibold text-slate-200">{fmtBRL(data.receita.bruta)}</p>
+                <p className="text-sm font-semibold text-slate-200">{fmtBRL(receitaReal)}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500">Saídas</p>
-                <p className="text-sm font-semibold text-slate-200">{fmtBRL(resultado?.totalSaidas)}</p>
+                <p className="text-sm font-semibold text-slate-200">{fmtBRL(totalSaidas)}</p>
               </div>
             </div>
           </div>
 
           {/* KPIs */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard label="Receita ML"    valor={fmtBRL(data.receita.ML)}     cor="emerald" />
-            <KpiCard label="Receita Shopee" valor={fmtBRL(data.receita.Shopee)} cor="orange"  />
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            <KpiCard
+              label="Receita total"
+              valor={fmtBRL(receitaReal)}
+              sub={receitaNFe > 0 ? `NF-e emitidas` : receitaCR > 0 ? 'contas recebidas Bling' : 'sem dados Bling'}
+              cor="emerald"
+            />
             <KpiCard label="Despesas locais" valor={fmtBRL(data.despesas?.total)} cor="red" />
             <KpiCard label="Parcelas cartão" valor={fmtBRL(data.parcelas?.total)} cor="blue" />
           </div>
