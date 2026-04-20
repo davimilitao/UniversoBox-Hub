@@ -40,6 +40,7 @@ const ROTAS = [
   { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas & Contas', secao: 'Financeiro', Icon: Receipt,           react: true,  href: '/financeiro/despesas'  },
   { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/margem'    },
   { key: 'fin-dre',        moduleId: 'financas',       label: 'DRE',               secao: 'Financeiro', Icon: BarChart2,         react: true,  href: '/financeiro/dre'       },
+  { key: 'fin-posicao',   moduleId: 'financas',       label: 'Posição Financeira',secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/posicao'   },
   { key: 'fin-painel',     moduleId: 'financas',       label: 'Painel',            secao: 'Financeiro', Icon: LayoutDashboard,   react: true,  href: '/financeiro/painel'    },
   // Sistema
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },

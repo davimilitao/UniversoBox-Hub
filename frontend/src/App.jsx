@@ -16,6 +16,7 @@ import { PainelFinanceiro }   from './pages/financeiro/PainelFinanceiro';
 import { GestaoFinanceira }   from './pages/financeiro/GestaoFinanceira';
 import { GestaoMargem }       from './pages/financeiro/GestaoMargem';
 import { PainelDRE }          from './pages/financeiro/PainelDRE';
+import { PosicaoFinanceira }  from './pages/financeiro/PosicaoFinanceira';
 import { BlingPedidos }       from './pages/expedicao/BlingPedidos';
 import { AppShell }           from './components/AppShell';
 import GestaoInsumos          from './pages/expedicao/GestaoInsumos';
@@ -57,6 +58,7 @@ export default function App() {
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />
         <Route path="/financeiro/painel"   element={<PainelFinanceiro />} />
         <Route path="/financeiro/dre"      element={<PainelDRE />} />
+        <Route path="/financeiro/posicao"  element={<PosicaoFinanceira />} />
         {/* Sistema */}
         <Route path="/sistema/config"      element={<ConfiguracoesSistema />} />
       </Route>
