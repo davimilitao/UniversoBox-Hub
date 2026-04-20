@@ -6506,6 +6506,251 @@ app.post('/api/margem-v2/importar-historico', requireFirebaseAuth, requireFireba
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// DRE IMPORTAÇÃO — upload de CSV do Bling e leitura do DRE mensal
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Converte "Jan/26" → "2026-01", "Fev/26" → "2026-02", etc.
+ */
+function parseMesColuna(col) {
+  const MESES = { jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12 };
+  const m = String(col).toLowerCase().match(/([a-z]+)[\\/](\d{2,4})/);
+  if (!m) return null;
+  const num = MESES[m[1].slice(0,3)];
+  if (!num) return null;
+  const ano = Number(m[2]) < 100 ? 2000 + Number(m[2]) : Number(m[2]);
+  return `${ano}-${String(num).padStart(2,'0')}`;
+}
+
+/**
+ * Converte "104.926,67" → 104926.67
+ */
+function parseBRLNum(str) {
+  if (!str) return 0;
+  const s = String(str).trim().replace(/"/g,'').replace(/\./g,'').replace(',','.');
+  const v = parseFloat(s);
+  return isNaN(v) ? 0 : v;
+}
+
+/**
+ * Parser do DRE Bling CSV (separador ";", primeira linha = cabeçalho com meses).
+ * Retorna array de objetos { mesAno, receitaBruta, deducoes, receitaLiquida,
+ *   custoMercadoria, lucroBruto, despesasOperacionais, receitaFinanceira,
+ *   despesaFinanceira, resultadoAntesIR, irCsll, resultadoLiquido }
+ */
+function parseDREBlingCSV(csvText) {
+  const linhas = csvText.split(/\r?\n/).filter(l => l.trim());
+  if (!linhas.length) throw new Error('Arquivo vazio');
+
+  // Cabeçalho: ;"Jan/26";"Fev/26";...;"Total"
+  const cabecalho = linhas[0].split(';').map(c => c.replace(/"/g,'').trim());
+  // cabecalho[0] = '' (vazio), cabecalho[n] = 'Total' — ignoramos o Total
+  const colunasMes = [];
+  for (let i = 1; i < cabecalho.length; i++) {
+    const mesAno = parseMesColuna(cabecalho[i]);
+    if (mesAno) colunasMes.push({ idx: i, mesAno });
+  }
+  if (!colunasMes.length) throw new Error('Nenhum mês encontrado no cabeçalho');
+
+  // Mapa label → valores por coluna
+  const linhasData = {};
+  for (let i = 1; i < linhas.length; i++) {
+    const celulas = linhas[i].split(';').map(c => c.replace(/"/g,'').trim());
+    const label = celulas[0];
+    if (!label) continue;
+    linhasData[label] = celulas;
+  }
+
+  function getVal(labelParcial, idxCol) {
+    const key = Object.keys(linhasData).find(k => k.includes(labelParcial));
+    if (!key) return 0;
+    return parseBRLNum(linhasData[key][idxCol]);
+  }
+
+  return colunasMes.map(({ idx, mesAno }) => ({
+    mesAno,
+    receitaBruta:          getVal('Receita Operacional Bruta',   idx),
+    deducoes:              getVal('Deduções da Receita Bruta',   idx),
+    receitaLiquida:        getVal('Receita Operacional Líquida', idx),
+    custoMercadoria:       getVal('Custos das Mercadorias',      idx),
+    lucroBruto:            getVal('Resultado Operacional Bruto', idx),
+    despesasOperacionais:  getVal('Despesas Operacionais',       idx),
+    receitaFinanceira:     getVal('Receita Financeira',          idx),
+    despesaFinanceira:     getVal('Despesa Financeira',          idx),
+    resultadoAntesIR:      getVal('Resultado Operacional antes', idx),
+    irCsll:                getVal('IR e CSLL',                   idx),
+    resultadoLiquido:      getVal('Resultado Líquido do Exercício', idx),
+  }));
+}
+
+// ── POST /api/fin-dre/importar ────────────────────────────────────────────────
+// Recebe CSV do DRE Bling, parseia e salva cada mês no Firestore fin_dre/{mesAno}
+const uploadDRE = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+
+app.post('/api/fin-dre/importar', requireFirebaseAuth, uploadDRE.single('arquivo'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+
+    const csvText = req.file.buffer.toString('utf-8');
+    let meses;
+    try {
+      meses = parseDREBlingCSV(csvText);
+    } catch(e) {
+      return res.status(422).json({ error: `Erro ao ler CSV: ${e.message}` });
+    }
+
+    const tenantId  = req.auth?.tenantId || null;
+    const agora     = admin.firestore.Timestamp.now();
+    const nomeArq   = req.file.originalname || 'dre.csv';
+    const batch     = db.batch();
+
+    for (const item of meses) {
+      const docId = tenantId ? `${tenantId}_${item.mesAno}` : item.mesAno;
+      const ref   = db.collection('fin_dre').doc(docId);
+      batch.set(ref, {
+        ...item,
+        tenantId:    tenantId || null,
+        importadoEm: agora,
+        arquivoNome: nomeArq,
+        fonte:       'bling_dre_csv',
+      }, { merge: false });
+    }
+
+    await batch.commit();
+
+    // Salva metadado da última importação
+    const metaRef = db.collection('fin_dre_meta').doc(tenantId || 'default');
+    await metaRef.set({
+      ultimaImportacao: agora,
+      arquivoNome: nomeArq,
+      mesesImportados: meses.map(m => m.mesAno),
+      tenantId: tenantId || null,
+    });
+
+    res.json({ ok: true, mesesImportados: meses.length, meses: meses.map(m => m.mesAno), preview: meses });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/fin-dre ──────────────────────────────────────────────────────────
+// Retorna DRE mensal do Firestore + despesas detalhadas do fin_despesas + custo fin_compras
+// Query: ?de=YYYY-MM&ate=YYYY-MM  (padrão: últimos 12 meses)
+app.get('/api/fin-dre', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const tenantId = req.auth?.tenantId || null;
+    const hoje = new Date();
+    const ateDefault = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+    const d12 = new Date(hoje); d12.setMonth(d12.getMonth() - 11);
+    const deDefault = `${d12.getFullYear()}-${String(d12.getMonth()+1).padStart(2,'0')}`;
+    const de  = req.query.de  || deDefault;
+    const ate = req.query.ate || ateDefault;
+
+    // Gera lista de meses no intervalo
+    function gerarMeses(de, ate) {
+      const meses = []; let [y,m] = de.split('-').map(Number);
+      const [aY,aM] = ate.split('-').map(Number);
+      while (y < aY || (y === aY && m <= aM)) {
+        meses.push(`${y}-${String(m).padStart(2,'0')}`);
+        if (++m > 12) { m = 1; y++; }
+      }
+      return meses;
+    }
+    const meses = gerarMeses(de, ate);
+
+    // 1. Busca DRE importado do Firestore
+    const dreSnap = await db.collection('fin_dre')
+      .where('mesAno', 'in', meses.slice(0, 30)) // Firestore limita in a 30 items
+      .get();
+    const drePorMes = {};
+    dreSnap.forEach(doc => { drePorMes[doc.data().mesAno] = doc.data(); });
+
+    // 2. Busca fin_despesas para breakdown de categorias (complemento)
+    const deTs  = new Date(de  + '-01T00:00:00');
+    const ateTs = new Date(ate + '-01T00:00:00');
+    ateTs.setMonth(ateTs.getMonth() + 1);
+    let despQ = db.collection('fin_despesas').where('data','>=',deTs).where('data','<',ateTs);
+    if (tenantId) despQ = despQ.where('tenantId','==',tenantId);
+    const despSnap = await despQ.get();
+    const despCatPorMes = {};
+    despSnap.forEach(doc => {
+      const d = doc.data();
+      const dt = d.data?.toDate ? d.data.toDate() : new Date(d.data);
+      const mm = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
+      if (!despCatPorMes[mm]) despCatPorMes[mm] = {};
+      const cat = String(d.categoria || 'Outros');
+      despCatPorMes[mm][cat] = (despCatPorMes[mm][cat] || 0) + Number(d.valor || 0);
+    });
+
+    // 3. Metadado da última importação
+    const metaDoc = await db.collection('fin_dre_meta').doc(tenantId || 'default').get();
+    const meta = metaDoc.exists ? metaDoc.data() : null;
+
+    // 4. Monta resposta
+    const NOMES_MES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+    const items = meses.map(mm => {
+      const dre = drePorMes[mm] || null;
+      const cats = despCatPorMes[mm] || {};
+      const [a, m] = mm.split('-');
+      const label = `${NOMES_MES[Number(m)-1]}.-${String(a).slice(2)}`;
+
+      if (!dre) return { mesAno: mm, label, semDados: true, despesasCategorias: cats };
+
+      const receitaBruta   = dre.receitaBruta || 0;
+      const margemBruta    = receitaBruta > 0 ? (dre.lucroBruto / receitaBruta) : 0;
+      const totalDespesas  = dre.despesasOperacionais + dre.despesaFinanceira;
+      const margemLiquida  = receitaBruta > 0 ? (dre.resultadoLiquido / receitaBruta) : 0;
+
+      return {
+        mesAno:              mm,
+        label,
+        semDados:            false,
+        receitaBruta,
+        deducoes:            dre.deducoes || 0,
+        receitaLiquida:      dre.receitaLiquida || 0,
+        custoMercadoria:     dre.custoMercadoria || 0,
+        lucroBruto:          dre.lucroBruto || 0,
+        margemBruta,
+        despesasOperacionais: dre.despesasOperacionais || 0,
+        receitaFinanceira:   dre.receitaFinanceira || 0,
+        despesaFinanceira:   dre.despesaFinanceira || 0,
+        totalDespesas,
+        irCsll:              dre.irCsll || 0,
+        resultadoLiquido:    dre.resultadoLiquido || 0,
+        margemLiquida,
+        despesasCategorias:  cats,
+        importadoEm:         dre.importadoEm?.toDate?.()?.toISOString() || null,
+        arquivoNome:         dre.arquivoNome || null,
+      };
+    });
+
+    // Totais
+    const comDados = items.filter(i => !i.semDados);
+    const totais = comDados.length ? {
+      isTotal:          true,
+      label:            'Total',
+      receitaBruta:     comDados.reduce((s,i) => s + i.receitaBruta, 0),
+      receitaLiquida:   comDados.reduce((s,i) => s + i.receitaLiquida, 0),
+      custoMercadoria:  comDados.reduce((s,i) => s + i.custoMercadoria, 0),
+      lucroBruto:       comDados.reduce((s,i) => s + i.lucroBruto, 0),
+      totalDespesas:    comDados.reduce((s,i) => s + i.totalDespesas, 0),
+      irCsll:           comDados.reduce((s,i) => s + i.irCsll, 0),
+      resultadoLiquido: comDados.reduce((s,i) => s + i.resultadoLiquido, 0),
+      margemBruta:      0,
+      margemLiquida:    0,
+    } : null;
+    if (totais) {
+      totais.margemBruta   = totais.receitaBruta > 0 ? totais.lucroBruto / totais.receitaBruta : 0;
+      totais.margemLiquida = totais.receitaBruta > 0 ? totais.resultadoLiquido / totais.receitaBruta : 0;
+    }
+
+    res.json({ items, totais, meta, de, ate });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---------------- Errors ----------------
 app.use((err, req, res, next) => {
   const status = err.statusCode || 500;
