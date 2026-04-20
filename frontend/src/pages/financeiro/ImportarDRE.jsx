@@ -5,7 +5,7 @@
  */
 import { useState, useRef, useCallback } from 'react';
 import { Upload, CheckCircle, AlertTriangle, FileText, Clock, RefreshCw } from 'lucide-react';
-import { apiFetch } from '../../utils/getAuthToken';
+import { getAuthToken } from '../../utils/getAuthToken';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const PERC = v => `${(v * 100).toFixed(1)}%`;
@@ -46,9 +46,12 @@ export function ImportarDRE({ onImportado }) {
     form.append('arquivo', file);
 
     try {
-      const res = await apiFetch('/api/fin-dre/importar', {
+      // Não usar apiFetch aqui — ele força Content-Type: application/json
+      // quebrando o multipart/form-data. Fazemos fetch manual com só o Authorization.
+      const token = await getAuthToken();
+      const res = await fetch('/api/fin-dre/importar', {
         method: 'POST',
-        headers: {},       // apiFetch adiciona Authorization; sem Content-Type p/ multipart
+        headers: { Authorization: `Bearer ${token}` },
         body: form,
       });
       const json = await res.json();
