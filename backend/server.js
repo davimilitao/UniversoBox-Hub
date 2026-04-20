@@ -6751,6 +6751,158 @@ app.get('/api/fin-dre', requireFirebaseAuth, async (req, res, next) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ESTOQUE — upload CSV "Visão Financeira do Estoque" e leitura do saldo
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Parser do CSV "Visão Financeira do Estoque" do Bling.
+ * Formato: "Código";"Produto";"Un";"Quantidade";"Valor unitário";"Valor total"
+ * Última linha: "Totais (N Itens)";;;"qty_total";;"valor_total"
+ *
+ * Retorna { totalEstoque, totalItens, totalQuantidade, produtos[] }
+ */
+function parseEstoqueBlingCSV(csvText) {
+  const linhas = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (linhas.length < 2) throw new Error('Arquivo vazio ou sem dados');
+
+  // Detecta o cabeçalho: deve conter "Produto" ou "Código"
+  const cabecalho = linhas[0].split(';').map(c => c.replace(/"/g,'').trim().toLowerCase());
+  const hasProduto = cabecalho.some(c => c.includes('produto') || c.includes('código'));
+  if (!hasProduto) throw new Error('Cabeçalho não reconhecido. Exporte o relatório "Visão Financeira do Estoque" do Bling.');
+
+  const idxCodigo    = cabecalho.findIndex(c => c.includes('código') || c === 'codigo');
+  const idxProduto   = cabecalho.findIndex(c => c.includes('produto'));
+  const idxUn        = cabecalho.findIndex(c => c === 'un' || c.includes('unid'));
+  const idxQtd       = cabecalho.findIndex(c => c.includes('quantidade') || c === 'qtd');
+  const idxVlrUnit   = cabecalho.findIndex(c => c.includes('unitário') || c.includes('unitario'));
+  const idxVlrTotal  = cabecalho.findIndex(c => c.includes('valor total') || c === 'valor total');
+
+  // Índice de fallback: 0=Código,1=Produto,2=Un,3=Quantidade,4=ValorUnit,5=ValorTotal
+  const iCod  = idxCodigo   >= 0 ? idxCodigo   : 0;
+  const iProd = idxProduto  >= 0 ? idxProduto  : 1;
+  const iUn   = idxUn       >= 0 ? idxUn       : 2;
+  const iQtd  = idxQtd      >= 0 ? idxQtd      : 3;
+  const iUnit = idxVlrUnit  >= 0 ? idxVlrUnit  : 4;
+  const iVlr  = idxVlrTotal >= 0 ? idxVlrTotal : 5;
+
+  let totalEstoque    = 0;
+  let totalQuantidade = 0;
+  let totalItens      = 0;
+  const produtos      = [];
+
+  for (let i = 1; i < linhas.length; i++) {
+    const cel = linhas[i].split(';').map(c => c.replace(/"/g,'').trim());
+    const label = cel[0] || '';
+
+    // Linha de totais: "Totais (187 Itens)" ou "Totais"
+    const matchTotais = label.match(/^Totais\s*\((\d+)\s*Iten?s\)?/i);
+    if (matchTotais) {
+      totalItens      = parseInt(matchTotais[1], 10);
+      totalQuantidade = parseBRLNum(cel[iQtd]);
+      totalEstoque    = parseBRLNum(cel[iVlr]);
+      continue;
+    }
+
+    // Linha de produto
+    const produto   = cel[iProd] || '';
+    const codigo    = cel[iCod]  || '';
+    const un        = cel[iUn]   || '';
+    const quantidade = parseBRLNum(cel[iQtd]);
+    const valorUnit  = parseBRLNum(cel[iUnit]);
+    const valorTotal = parseBRLNum(cel[iVlr]);
+
+    // Ignora linhas sem produto ou com quantidade 0/negativa
+    if (!produto || quantidade <= 0) continue;
+
+    produtos.push({ codigo, produto, un, quantidade, valorUnit, valorTotal });
+  }
+
+  // Fallback: se a linha "Totais" não apareceu, soma manualmente
+  if (totalEstoque === 0 && produtos.length > 0) {
+    totalEstoque    = produtos.reduce((s, p) => s + p.valorTotal, 0);
+    totalQuantidade = produtos.reduce((s, p) => s + p.quantidade, 0);
+    totalItens      = produtos.length;
+  }
+
+  if (totalEstoque === 0) throw new Error('Nenhum dado de estoque encontrado no arquivo.');
+
+  return { totalEstoque, totalItens, totalQuantidade, produtos };
+}
+
+// ── POST /api/fin-estoque/importar ────────────────────────────────────────────
+// Recebe CSV do estoque Bling, parseia e salva no Firestore fin_estoque
+const uploadEstoque = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+app.post('/api/fin-estoque/importar', requireFirebaseAuth, uploadEstoque.single('arquivo'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+
+    const csvText = req.file.buffer.toString('utf-8');
+    let dados;
+    try {
+      dados = parseEstoqueBlingCSV(csvText);
+    } catch(e) {
+      return res.status(422).json({ error: `Erro ao ler CSV: ${e.message}` });
+    }
+
+    const tenantId  = req.auth?.tenantId || null;
+    const agora     = admin.firestore.Timestamp.now();
+    const nomeArq   = req.file.originalname || 'estoque.csv';
+
+    // Salva snapshot do estoque (um doc por importação, keyed by data)
+    const docId = tenantId ? `${tenantId}_latest` : 'latest';
+    await db.collection('fin_estoque').doc(docId).set({
+      totalEstoque:    dados.totalEstoque,
+      totalItens:      dados.totalItens,
+      totalQuantidade: dados.totalQuantidade,
+      tenantId:        tenantId || null,
+      importadoEm:     agora,
+      arquivoNome:     nomeArq,
+      fonte:           'bling_estoque_csv',
+      // Salva os top 100 produtos por valor (evita doc grande demais)
+      produtos: dados.produtos
+        .sort((a, b) => b.valorTotal - a.valorTotal)
+        .slice(0, 100),
+    });
+
+    res.json({
+      ok: true,
+      totalEstoque:    dados.totalEstoque,
+      totalItens:      dados.totalItens,
+      totalQuantidade: dados.totalQuantidade,
+      produtosCarregados: dados.produtos.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/fin-estoque ──────────────────────────────────────────────────────
+// Retorna o último snapshot de estoque importado
+app.get('/api/fin-estoque', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const tenantId = req.auth?.tenantId || null;
+    const docId    = tenantId ? `${tenantId}_latest` : 'latest';
+    const snap     = await db.collection('fin_estoque').doc(docId).get();
+    if (!snap.exists) return res.json({ dados: null });
+
+    const d = snap.data();
+    res.json({
+      dados: {
+        totalEstoque:    d.totalEstoque    || 0,
+        totalItens:      d.totalItens      || 0,
+        totalQuantidade: d.totalQuantidade || 0,
+        importadoEm:     d.importadoEm?.toDate?.()?.toISOString() || null,
+        arquivoNome:     d.arquivoNome     || null,
+        produtos:        d.produtos        || [],
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---------------- Errors ----------------
 app.use((err, req, res, next) => {
   const status = err.statusCode || 500;
