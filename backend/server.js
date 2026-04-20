@@ -2532,21 +2532,26 @@ async function blingAgregaMes(mesAno) {
   const dataInicio = `${mesAno}-01`;
   const ultimoDia  = new Date(ano, mes, 0).getDate();
   const dataFim    = `${mesAno}-${String(ultimoDia).padStart(2, '0')}`;
-  // V3 retorna situacao como objeto {id,valor} OU número; excluímos apenas canceladas(9) e inutilizadas(4)
-  const SITUACOES_EXCLUIR = new Set([3, 4, 9]); // cancelada, inutilizada, cancelada V3
+  // V3 retorna situacao como objeto {id,valor} OU número; excluímos apenas canceladas e inutilizadas
+  const SITUACOES_EXCLUIR = new Set([3, 4, 9]);
 
   let pagina = 1;
   const nfsComValor = [];
   const nfsSemValor = [];
 
   while (true) {
-    const resp  = await blingFetch(`/nfe?pagina=${pagina}&limite=100`);
+    // Filtra por data diretamente na API para evitar varrer NFs fora do período
+    const params = new URLSearchParams({
+      pagina,
+      limite: 100,
+      dataEmissaoInicial: dataInicio,
+      dataEmissaoFinal:   dataFim,
+    });
+    const resp  = await blingFetch(`/nfe?${params}`);
     const notas = resp.data || [];
     if (!notas.length) break;
 
     for (const n of notas) {
-      const dataEmissao = (n.dataEmissao || n.data || '').split(' ')[0];
-      if (dataEmissao < dataInicio || dataEmissao > dataFim) continue;
       // situacao pode ser objeto {id,valor} (Bling V3) ou número (V2)
       const sitId = Number(n.situacao?.id ?? n.situacao);
       if (SITUACOES_EXCLUIR.has(sitId)) continue;
@@ -2559,7 +2564,7 @@ async function blingAgregaMes(mesAno) {
     }
 
     if (notas.length < 100) break;
-    if (++pagina > 20) break; // safety: máx 2.000 NFs
+    if (++pagina > 20) break; // safety: máx 2.000 NFs/mês
   }
 
   // NFs sem valorTotal no listing → busca detalhes individuais (máx 30)
@@ -2805,13 +2810,17 @@ app.get('/api/margem-v2', requireFirebaseAuth, async (req, res, next) => {
       if (snap.exists) manualPorMes[mm] = snap.data();
     }
 
-    // ── 4. Bling NF-e → receita bruta ────────────────────────────────────────
+    // ── 4. Bling NF-e → receita bruta (paralelo por mês) ────────────────────
     let blingOk = true;
     const receitaPorMes = {};
     try {
       await blingEnsureToken();
-      for (const mm of meses) {
-        receitaPorMes[mm] = await blingAgregaMes(mm);
+      // Paraleliza todos os meses — cada um já filtra por data na API (rápido)
+      const resultados = await Promise.all(
+        meses.map(mm => blingAgregaMes(mm).then(r => ({ mm, r })).catch(() => ({ mm, r: null })))
+      );
+      for (const { mm, r } of resultados) {
+        if (r) receitaPorMes[mm] = r;
       }
     } catch (err) {
       blingOk = false;
