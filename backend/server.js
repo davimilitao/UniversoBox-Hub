@@ -2209,25 +2209,28 @@ app.get('/api/fin-recebiveis', requireFirebaseAuth, async (req, res, next) => {
   try {
     const { tenantId } = req.auth;
     const { status, ateDias } = req.query;
-    let query = admin.firestore().collection('fin_recebiveis')
-      .where('tenantId', '==', tenantId)
-      .orderBy('dataPrevista', 'asc');
-    if (status) query = query.where('status', '==', status);
-    if (ateDias) {
-      const limite = new Date();
-      limite.setDate(limite.getDate() + parseInt(ateDias, 10));
-      query = query.where('dataPrevista', '<=', admin.firestore.Timestamp.fromDate(limite));
-    }
-    const snap = await query.limit(500).get();
-    const items = snap.docs.map(doc => {
-      const d = doc.data();
-      return {
-        id: doc.id,
+    // Sem índice composto: ordena por dataPrevista; filtra tenant/status em memória.
+    const snap = await admin.firestore().collection('fin_recebiveis')
+      .orderBy('dataPrevista', 'asc')
+      .limit(1000)
+      .get();
+    const limiteMs = ateDias
+      ? Date.now() + parseInt(ateDias, 10) * 86400000
+      : null;
+    const items = snap.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter(d => d.tenantId === tenantId)
+      .filter(d => !status || d.status === status)
+      .filter(d => {
+        if (!limiteMs) return true;
+        const ts = d.dataPrevista?.toDate ? d.dataPrevista.toDate().getTime() : 0;
+        return ts <= limiteMs;
+      })
+      .map(d => ({
         ...d,
         dataPrevista: d.dataPrevista?.toDate ? d.dataPrevista.toDate().toISOString() : null,
         createdAt: d.createdAt?.toDate ? d.createdAt.toDate().toISOString() : null,
-      };
-    });
+      }));
     return res.json({ items });
   } catch (err) {
     console.error('[GET /api/fin-recebiveis]', err);
