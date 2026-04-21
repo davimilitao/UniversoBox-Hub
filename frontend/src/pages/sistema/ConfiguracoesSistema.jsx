@@ -13,7 +13,7 @@ import {
   SlidersHorizontal, Users, Monitor, Save, Trash2, Plus, Loader2,
   CheckCircle2, X, Shield, User, Info, Settings2,
   Package, Zap, BarChart2, ClipboardList, Box, PlusCircle,
-  FileCode, Receipt, ShoppingBag, FileUp,
+  FileCode, Receipt, ShoppingBag, FileUp, Truck,
   Home, LayoutGrid, FlaskConical,
   Globe, Database, Key, ChevronRight, Copy, Check,
   RefreshCw, AlertTriangle,
@@ -30,6 +30,7 @@ const MODULOS_UI = [
   { id: 'bling',          label: 'Expedir Bling',      secao: 'Expedição',  Icon: Zap },
   { id: 'ml-dashboard',   label: 'Dashboard Meli',     secao: 'Expedição',  Icon: BarChart2 },
   { id: 'insumos',        label: 'Gestão Insumos',     secao: 'Expedição',  Icon: FlaskConical },
+  { id: 'coletas',        label: 'Gestão de Coletas',  secao: 'Expedição',  Icon: Truck },
   // Catálogo
   { id: 'catalogo',       label: 'Catálogo Pro',       secao: 'Catálogo',   Icon: LayoutGrid },
   { id: 'admin',          label: 'Admin Produtos',     secao: 'Catálogo',   Icon: Settings2 },
