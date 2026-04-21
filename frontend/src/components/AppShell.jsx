@@ -20,7 +20,7 @@ import {
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Boxes,
   FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
-  Heart, PackageCheck,
+  Heart, PackageCheck, Banknote,
 } from 'lucide-react';
 
 // ─── Mapa de módulos ──────────────────────────────────────────────────────────
@@ -40,6 +40,7 @@ const ROTAS = [
   { key: 'image-studio',   moduleId: 'catalogo',       label: 'Image Studio',      secao: 'Catálogo',   Icon: Camera,            react: true,  href: '/catalogo/fotos'       },
   // Financeiro
   { key: 'fin-saude',      moduleId: 'financas',       label: 'Saúde Financeira',  secao: 'Financeiro', Icon: Heart,             react: true,  href: '/financeiro/saude'     },
+  { key: 'fin-recebiveis', moduleId: 'financas',       label: 'Recebíveis',        secao: 'Financeiro', Icon: Banknote,          react: true,  href: '/financeiro/recebiveis'},
   { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas & Contas', secao: 'Financeiro', Icon: Receipt,           react: true,  href: '/financeiro/despesas'  },
   { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/margem'    },
   { key: 'fin-dre',        moduleId: 'financas',       label: 'DRE',               secao: 'Financeiro', Icon: BarChart2,         react: true,  href: '/financeiro/dre'       },

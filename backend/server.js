@@ -2169,6 +2169,113 @@ app.delete('/api/fin-despesas/:id', requireFirebaseAuth, requireFirebaseRole(['a
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// fin_recebiveis — valores a receber (vendas liberadas, pix pendente, etc.)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// POST /api/fin-recebiveis — cria recebível
+app.post('/api/fin-recebiveis', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { uid, tenantId } = req.auth;
+    const { dataPrevista, valor, origem, descricao, status } = req.body;
+    if (!dataPrevista || !valor) {
+      return res.status(400).json({ error: 'Campos obrigatórios: dataPrevista, valor' });
+    }
+    const [d, m, y] = String(dataPrevista).split('/').length === 3
+      ? String(dataPrevista).split('/')
+      : [null, null, null];
+    const ts = d
+      ? admin.firestore.Timestamp.fromDate(new Date(`${y}-${m}-${d}T12:00:00`))
+      : admin.firestore.Timestamp.fromDate(new Date(dataPrevista));
+    const doc = {
+      dataPrevista: ts,
+      valor: parseFloat(valor),
+      origem: origem || 'Manual',
+      descricao: descricao || '',
+      status: status || 'previsto',
+      tenantId, uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    const ref = await admin.firestore().collection('fin_recebiveis').add(doc);
+    return res.json({ ok: true, id: ref.id });
+  } catch (err) {
+    console.error('[POST /api/fin-recebiveis]', err);
+    return next(err);
+  }
+});
+
+// GET /api/fin-recebiveis — lista recebíveis (com filtros ?status=&ateDias=)
+app.get('/api/fin-recebiveis', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const { status, ateDias } = req.query;
+    let query = admin.firestore().collection('fin_recebiveis')
+      .where('tenantId', '==', tenantId)
+      .orderBy('dataPrevista', 'asc');
+    if (status) query = query.where('status', '==', status);
+    if (ateDias) {
+      const limite = new Date();
+      limite.setDate(limite.getDate() + parseInt(ateDias, 10));
+      query = query.where('dataPrevista', '<=', admin.firestore.Timestamp.fromDate(limite));
+    }
+    const snap = await query.limit(500).get();
+    const items = snap.docs.map(doc => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        ...d,
+        dataPrevista: d.dataPrevista?.toDate ? d.dataPrevista.toDate().toISOString() : null,
+        createdAt: d.createdAt?.toDate ? d.createdAt.toDate().toISOString() : null,
+      };
+    });
+    return res.json({ items });
+  } catch (err) {
+    console.error('[GET /api/fin-recebiveis]', err);
+    return next(err);
+  }
+});
+
+// PATCH /api/fin-recebiveis/:id — atualiza status ou valor/data
+app.patch('/api/fin-recebiveis/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status, valor, dataPrevista, descricao, origem } = req.body;
+    const update = {};
+    if (status) {
+      if (!['previsto', 'recebido', 'cancelado'].includes(status)) {
+        return res.status(400).json({ error: 'status inválido' });
+      }
+      update.status = status;
+    }
+    if (valor != null) update.valor = parseFloat(valor);
+    if (descricao != null) update.descricao = descricao;
+    if (origem != null) update.origem = origem;
+    if (dataPrevista) {
+      const parts = String(dataPrevista).split('/');
+      update.dataPrevista = parts.length === 3
+        ? admin.firestore.Timestamp.fromDate(new Date(`${parts[2]}-${parts[1]}-${parts[0]}T12:00:00`))
+        : admin.firestore.Timestamp.fromDate(new Date(dataPrevista));
+    }
+    await admin.firestore().collection('fin_recebiveis').doc(id).update(update);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[PATCH /api/fin-recebiveis/:id]', err);
+    return next(err);
+  }
+});
+
+// DELETE /api/fin-recebiveis/:id
+app.delete('/api/fin-recebiveis/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    await admin.firestore().collection('fin_recebiveis').doc(id).delete();
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/fin-recebiveis/:id]', err);
+    return next(err);
+  }
+});
+
 // ── helper: extrai valor/data/fornecedor de texto bruto de comprovante
 function parsearTextoComprovante(rawText) {
   const MESES = {
