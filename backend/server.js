@@ -4655,8 +4655,8 @@ app.post('/bling/clonar', async (req, res, next) => {
 
 // Perfis padrão caso o Firestore não tenha
 const PERFIS_DEFAULT = {
-  admin:      { nome: 'Super Admin', avatar: 'DA', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','importar','index','config'] },
-  operacao:   { nome: 'Operação',    avatar: 'SU', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','embalagens','index'] },
+  admin:      { nome: 'Super Admin', avatar: 'DA', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','importar','index','config'] },
+  operacao:   { nome: 'Operação',    avatar: 'SU', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','embalagens','coletas','index'] },
   financeiro: { nome: 'Financeiro',  avatar: 'JE', tema: 'dark',  modulos: ['financas','compras','index'] },
   catalogo:   { nome: 'Catálogo',    avatar: 'DN', tema: 'dark',  modulos: ['admin','catalogo','embalagens','cadastrar','enriquecer-xml','compras','importar','index'] },
   vendas:     { nome: 'Vendas',      avatar: 'VE', tema: 'light', modulos: ['catalogo','index'] },
@@ -4717,7 +4717,7 @@ app.put('/api/perfis/:id', async (req, res, next) => {
     }
 
     // Validar módulos
-    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','importar','index','config'];
+    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','importar','index','config'];
     if (clean.modulos) {
       clean.modulos = clean.modulos.filter(m => modulosValidos.includes(m));
     }
@@ -4738,7 +4738,7 @@ app.post('/api/perfis', async (req, res, next) => {
     if (!id || !nome) return res.status(400).json({ error: 'id e nome obrigatórios' });
 
     const temasValidos   = ['dark','light','hc','ml'];
-    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','importar','index','config'];
+    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','importar','index','config'];
 
     const data = {
       nome,
