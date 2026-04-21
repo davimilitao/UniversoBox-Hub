@@ -8,8 +8,8 @@
  * @date 2026-04-10
  */
 
-import { useState, useEffect }           from 'react';
-import { Link, useLocation, Outlet }     from 'react-router-dom';
+import { useState, useEffect }                    from 'react';
+import { Link, NavLink, useLocation, Outlet }     from 'react-router-dom';
 import { signOut }                       from 'firebase/auth';
 import { auth }                          from '../firebase';
 import { usePerfil }                     from '../hooks/usePerfil';
@@ -20,6 +20,7 @@ import {
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Boxes,
   FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
+  Heart, PackageCheck,
 } from 'lucide-react';
 
 // ─── Mapa de módulos ──────────────────────────────────────────────────────────
@@ -37,11 +38,11 @@ const ROTAS = [
   { key: 'importar',       moduleId: 'importar',       label: 'Importar CSV',      secao: 'Catálogo',   Icon: FileUp,            react: true,  href: '/catalogo/importar'    },
   { key: 'image-studio',   moduleId: 'catalogo',       label: 'Image Studio',      secao: 'Catálogo',   Icon: Camera,            react: true,  href: '/catalogo/fotos'       },
   // Financeiro
+  { key: 'fin-saude',      moduleId: 'financas',       label: 'Saúde Financeira',  secao: 'Financeiro', Icon: Heart,             react: true,  href: '/financeiro/saude'     },
   { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas & Contas', secao: 'Financeiro', Icon: Receipt,           react: true,  href: '/financeiro/despesas'  },
   { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/margem'    },
   { key: 'fin-dre',        moduleId: 'financas',       label: 'DRE',               secao: 'Financeiro', Icon: BarChart2,         react: true,  href: '/financeiro/dre'       },
-  { key: 'fin-posicao',   moduleId: 'financas',       label: 'Posição Financeira',secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/posicao'   },
-  { key: 'fin-painel',     moduleId: 'financas',       label: 'Painel',            secao: 'Financeiro', Icon: LayoutDashboard,   react: true,  href: '/financeiro/painel'    },
+  { key: 'fin-posicao',    moduleId: 'financas',       label: 'Posição Financeira',secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/posicao'   },
   // Sistema
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },
   { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal, react: true,  href: '/sistema/config'       },
@@ -270,7 +271,7 @@ function NavItem({ rota, ativo, collapsed, onClick }) {
   const cls = [
     'group relative flex items-center gap-2.5 rounded-md text-[13px] font-medium select-none cursor-pointer',
     'transition-colors duration-100',
-    collapsed ? 'px-2 py-2 justify-center' : 'px-2.5 py-1.5',
+    collapsed ? 'px-2 py-2 justify-center min-h-[44px]' : 'px-2.5 py-1.5 min-h-[44px]',
     ativo
       ? 'bg-white/[0.07] text-slate-100'
       : 'text-slate-500 hover:bg-white/[0.04] hover:text-slate-300',
@@ -312,6 +313,23 @@ function NavItem({ rota, ativo, collapsed, onClick }) {
     <a href={rota.href} className={cls} onClick={onClick}>
       {conteudo}
     </a>
+  );
+}
+
+// ─── BottomNavItem ────────────────────────────────────────────────────────────
+function BottomNavItem({ href, icon, label }) {
+  const { pathname } = useLocation();
+  const ativo = href === '/' ? pathname === '/' : pathname.startsWith(href);
+  return (
+    <NavLink
+      to={href}
+      className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-[10px] font-medium transition-colors min-h-[56px]
+        ${ativo ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}
+      style={ativo ? { color: 'var(--accent-text, #34d399)' } : undefined}
+    >
+      {icon}
+      <span className="leading-tight">{label}</span>
+    </NavLink>
   );
 }
 
@@ -367,7 +385,7 @@ function SidebarContent({ perfil, loading, collapsed, setCollapsed, mobile, onCl
       </div>
 
       {/* ── Navegação ── */}
-      <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 px-1.5 space-y-5">
+      <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 px-1.5 space-y-5 pb-[env(safe-area-inset-bottom,0px)]">
         {loading && (
           <div className="space-y-1 px-1">
             {[...Array(6)].map((_, i) => (
@@ -382,7 +400,7 @@ function SidebarContent({ perfil, loading, collapsed, setCollapsed, mobile, onCl
           return (
             <div key={secao}>
               {!collapsed
-                ? <p className="text-[9px] font-bold text-slate-700 uppercase tracking-[0.12em] px-2.5 mb-1">{secao}</p>
+                ? <p className={`font-bold uppercase px-2.5 mb-1 ${mobile ? 'text-[10px] tracking-wider text-slate-500 mt-2' : 'text-[9px] tracking-[0.12em] text-slate-700'}`}>{secao}</p>
                 : <div className="h-px mx-1 mb-2" style={{ background: 'var(--border, rgba(255,255,255,0.05))' }} />
               }
               <div className="space-y-px">
@@ -521,10 +539,25 @@ export function AppShell() {
           <span className="text-[13px] font-semibold text-slate-300">UniversoBox</span>
         </header>
 
-        <main className="flex-1 min-h-0 flex flex-col overflow-y-auto">
+        <main className="flex-1 min-h-0 flex flex-col overflow-y-auto pb-16 lg:pb-0">
           <Outlet />
         </main>
       </div>
+
+      {/* Bottom nav — mobile only */}
+      <nav
+        className="fixed bottom-0 inset-x-0 z-40 lg:hidden flex border-t"
+        style={{
+          background: 'var(--bg-sidebar, #020617)',
+          borderColor: 'var(--border, rgba(255,255,255,0.05))',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}
+      >
+        <BottomNavItem href="/expedicao/pedidos"   icon={<PackageCheck size={20} />} label="Pedidos"  />
+        <BottomNavItem href="/financeiro/saude"    icon={<Heart        size={20} />} label="Finanças" />
+        <BottomNavItem href="/financeiro/despesas" icon={<Receipt      size={20} />} label="Despesas" />
+        <BottomNavItem href="/catalogo/produtos"   icon={<LayoutGrid   size={20} />} label="Catálogo" />
+      </nav>
     </div>
   );
 }

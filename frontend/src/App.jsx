@@ -2,9 +2,10 @@
  * @file App.jsx
  * @description Rotas principais. Rotas dentro do AppShell têm sidebar React.
  *   A rota raiz "/" é o DashboardPage — painel operacional do dia.
- * @version 2.3.0
- * @date 2026-04-12
+ * @version 2.4.0
+ * @date 2026-04-21
  * @changelog
+ *   2.4.0 — 2026-04-21 — SaudeFinanceira como nova home do módulo financeiro.
  *   2.3.0 — 2026-04-12 — Fusão Contas + GestaoDespesas → GestaoFinanceira; /contas redireciona.
  *   2.2.0 — 2026-04-05 — Versão anterior.
  */
@@ -17,6 +18,7 @@ import { GestaoFinanceira }   from './pages/financeiro/GestaoFinanceira';
 import { GestaoMargem }       from './pages/financeiro/GestaoMargem';
 import { PainelDRE }          from './pages/financeiro/PainelDRE';
 import { PosicaoFinanceira }  from './pages/financeiro/PosicaoFinanceira';
+import { SaudeFinanceira }    from './pages/financeiro/SaudeFinanceira';
 import { BlingPedidos }       from './pages/expedicao/BlingPedidos';
 import { AppShell }           from './components/AppShell';
 import GestaoInsumos          from './pages/expedicao/GestaoInsumos';
@@ -53,6 +55,8 @@ export default function App() {
         <Route path="/catalogo/automacao"  element={<AutomacaoCadastro />} />
         <Route path="/catalogo/fotos"      element={<ImageStudio />} />
         {/* Financeiro */}
+        <Route path="/financeiro"          element={<Navigate to="/financeiro/saude" replace />} />
+        <Route path="/financeiro/saude"    element={<SaudeFinanceira />} />
         <Route path="/financeiro/despesas" element={<GestaoFinanceira />} />
         <Route path="/financeiro/contas"   element={<Navigate to="/financeiro/despesas" replace />} />
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />
