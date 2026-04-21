@@ -30,6 +30,7 @@ import ImportarCSV            from './pages/catalogo/ImportarCSV';
 import ImageStudio            from './pages/catalogo/ImageStudio';
 import ConfiguracoesSistema   from './pages/sistema/ConfiguracoesSistema';
 import Compras                from './pages/expedicao/Compras';
+import GestaoColetas          from './pages/expedicao/GestaoColetas';
 
 export default function App() {
   return (
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="/expedicao/pedidos"   element={<PedidosDoDia />} />
         <Route path="/expedicao/insumos"   element={<GestaoInsumos />} />
         <Route path="/expedicao/compras"   element={<Compras />} />
+        <Route path="/expedicao/coletas"   element={<GestaoColetas />} />
         {/* Catálogo */}
         <Route path="/catalogo/produtos"   element={<CatalogoPro />} />
         <Route path="/catalogo/admin"      element={<AdminProdutos />} />
