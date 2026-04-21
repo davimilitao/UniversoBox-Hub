@@ -16,7 +16,7 @@ import {
   ChevronRight, Wifi, WifiOff,
   XCircle, CheckCircle2, Timer, ShieldAlert, ArrowRight,
   TrendingUp, BarChart3, Info,
-  Truck, Heart, DollarSign,
+  Truck, Heart, DollarSign, PackageCheck,
 } from 'lucide-react';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -352,6 +352,129 @@ function ColetaHoje() {
   );
 }
 
+function ComprasACaminho() {
+  const [data, setData] = useState({ count: 0, valor: 0 });
+  useEffect(() => {
+    getToken().then(token =>
+      fetch('/api/purchase-orders?status=pending&limit=100', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        if (!j?.items) return;
+        const valor = j.items.reduce((s, p) => s + (p.valorTotal || 0), 0);
+        setData({ count: j.items.length, valor });
+      })
+      .catch(() => {})
+    );
+  }, []);
+
+  const BRL0 = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+  return (
+    <MiniCard
+      icon={Truck}
+      label="A caminho"
+      value={data.count === 0 ? '—' : data.count}
+      sub={data.count > 0 ? `${BRL0.format(data.valor)} em trânsito` : 'Nenhuma compra aberta'}
+      color={data.count > 0 ? 'text-blue-400' : 'text-slate-500'}
+      href="/expedicao/compras"
+    />
+  );
+}
+
+function Pill({ Icon, label, count, tone, sub, disabled }) {
+  const tones = {
+    purple: 'border-purple-500/30 bg-purple-500/10 text-purple-300',
+    blue:   'border-blue-500/30   bg-blue-500/10   text-blue-300',
+    teal:   'border-teal-500/30   bg-teal-500/10   text-teal-300',
+  };
+  return (
+    <div className={`rounded-xl border px-3 py-2.5 flex items-center gap-2.5 ${tones[tone]} ${disabled ? 'opacity-70' : ''}`}>
+      <Icon size={16} className="shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-xl font-bold tabular-nums leading-none">{count}</span>
+          <span className="text-xs font-medium opacity-90">{label}</span>
+        </div>
+        {sub && <p className="text-[10px] opacity-60 mt-0.5 truncate">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+function ExpedicaoHero({ summary, cutoffSchedule }) {
+  const pendentes = (summary.flex || 0) + (summary.agency || 0);
+  const todayKey  = DIAS_EN[new Date().getDay()];
+  const cutoff    = cutoffSchedule?.[todayKey] || cutoffSchedule?.default || null;
+  const minutes   = minutesUntilCutoff(cutoff);
+  const countdown = formatCountdown(minutes);
+  const urgente   = minutes !== null && minutes >= 0 && minutes <= 90;
+  const expirado  = minutes !== null && minutes < 0;
+
+  return (
+    <section className="rounded-3xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.08] via-slate-900/60 to-slate-900/40 p-5 sm:p-6 space-y-4">
+      {/* Label + título */}
+      <div className="flex items-center gap-2.5">
+        <div className="w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center">
+          <PackageCheck size={18} className="text-emerald-400" />
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.15em] text-emerald-400/80 font-bold">Expedição do dia</p>
+          <h2 className="text-slate-100 font-bold text-base leading-tight">O que precisa sair hoje</h2>
+        </div>
+      </div>
+
+      {/* Contador grande */}
+      <div className="flex items-end gap-3 flex-wrap">
+        <p className="text-6xl sm:text-7xl font-black text-emerald-300 tabular-nums leading-none">
+          {pendentes}
+        </p>
+        <p className="text-slate-400 text-sm pb-2">
+          pedidos para expedir
+          {summary.semEtiqueta > 0 && <span className="block text-amber-400/80 text-xs">{summary.semEtiqueta} sem etiqueta</span>}
+        </p>
+      </div>
+
+      {/* Cutoff inline */}
+      {cutoff && (
+        <div className={`rounded-xl border px-3 py-2 flex items-center gap-2 text-xs ${
+          urgente  ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+                   : expirado ? 'border-slate-700 bg-slate-900/40 text-slate-500'
+                              : 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'
+        }`}>
+          <Timer size={12} className="shrink-0" />
+          <span className="font-medium">
+            {expirado ? `Corte encerrado às ${cutoff}` : `Corte às ${cutoff} — ${countdown} restantes`}
+          </span>
+        </div>
+      )}
+
+      {/* Pills por modalidade */}
+      <div className="grid grid-cols-3 gap-2">
+        <Pill Icon={Zap}       label="Flex"    count={summary.flex || 0}        tone="purple" />
+        <Pill Icon={Building2} label="Agência" count={summary.agency || 0}      tone="blue"   />
+        <Pill Icon={Boxes}     label="Full"    count={summary.fulfillment || 0} tone="teal"   sub="ML despacha" disabled />
+      </div>
+
+      {/* CTA principal */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Link
+          to="/expedicao/bling"
+          className="flex-1 flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-sm py-3 rounded-xl transition-colors"
+        >
+          Ir para Expedição <ArrowRight size={15} />
+        </Link>
+        <Link
+          to="/expedicao/pedidos"
+          className="flex-1 flex items-center justify-center gap-2 border border-emerald-500/30 text-emerald-300 font-medium text-sm py-3 rounded-xl hover:bg-emerald-500/5 transition-colors"
+        >
+          Fila de Separação <ChevronRight size={14} />
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 function FinanceiroSnapshot() {
   const d = new Date();
   const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -439,27 +562,6 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Panorama rápido ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <MiniCard
-            icon={Package}
-            label="Pedidos ML hoje"
-            value={(summary.flex || 0) + (summary.agency || 0) + (summary.fulfillment || 0)}
-            sub={`${summary.flex||0} Flex · ${summary.agency||0} Agência · ${summary.fulfillment||0} Full`}
-            color="text-slate-200"
-            href="/expedicao/bling"
-          />
-          <MiniCard
-            icon={XCircle}
-            label="Cancelados"
-            value={summary.cancelados || 0}
-            sub={(summary.cancelados || 0) > 0 ? 'Não enviar' : 'Nenhum hoje'}
-            color={(summary.cancelados || 0) > 0 ? 'text-rose-400' : 'text-slate-500'}
-          />
-          <FinanceiroSnapshot />
-          <ColetaHoje />
-        </div>
-
         {/* Loading */}
         {loading && !data && (
           <div className="py-16 flex justify-center"><Spinner /></div>
@@ -478,60 +580,53 @@ export function DashboardPage() {
         {/* Painel principal — só quando ML conectado */}
         {data?.mlConnected && (
           <>
-            {/* 1 — Banner urgente: horário de corte */}
-            <CutoffBanner cutoffSchedule={data.cutoffSchedule} summary={summary} />
+            {/* 1 — HERO: Expedição do dia (destaque máximo) */}
+            <ExpedicaoHero summary={summary} cutoffSchedule={data.cutoffSchedule} />
 
-            {/* 2 — Código de autorização */}
-            <AuthCodeCard authCode={data.authCode} />
-
-            {/* 3 — Cards de modalidade */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <ModalidadeCard
-                icon={Zap} label="Flex" count={summary.flex || 0}
-                sub={(summary.flex || 0) > 0 ? 'Etiquetas para imprimir' : 'Nenhum pendente'}
-                href="/expedicao/bling" disabled={!summary.flex}
-                colors={{ border:'border-purple-500/20', bg:'bg-purple-500/5', iconBg:'bg-purple-500/15',
-                          icon:'text-purple-400', count:'text-purple-300', action:'text-purple-400' }}
-              />
-              <ModalidadeCard
-                icon={Building2} label="Agência ML" count={summary.agency || 0}
-                sub={(summary.agency || 0) > 0 ? 'Etiquetas para imprimir' : 'Nenhum pendente'}
-                href="/expedicao/bling" disabled={!summary.agency}
-                colors={{ border:'border-blue-500/20', bg:'bg-blue-500/5', iconBg:'bg-blue-500/15',
-                          icon:'text-blue-400', count:'text-blue-300', action:'text-blue-400' }}
-              />
-              <ModalidadeCard
-                icon={Boxes} label="Full" count={summary.fulfillment || 0}
-                sub="No centro de distribuição" disabled
-                colors={{ border:'border-teal-500/20', bg:'bg-teal-500/5', iconBg:'bg-teal-500/15',
-                          icon:'text-teal-400', count:'text-teal-300', action:'text-teal-400' }}
-              />
-              <ModalidadeCard
-                icon={XCircle} label="Cancelados" count={summary.cancelados || 0}
-                sub={(summary.cancelados || 0) > 0 ? 'Não enviar' : 'Nenhum cancelado'}
-                disabled
-                colors={{ border:'border-red-500/20', bg:'bg-red-500/5', iconBg:'bg-red-500/15',
-                          icon:'text-red-400', count:'text-red-300', action:'text-red-400', sub:'text-red-400/60' }}
-              />
+            {/* 2 — Panorama dos outros ciclos */}
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.15em] text-slate-500 font-bold px-1 mb-2">Visão geral</p>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <ComprasACaminho />
+                <FinanceiroSnapshot />
+                <ColetaHoje />
+                <MiniCard
+                  icon={ShieldAlert}
+                  label="Reclamações"
+                  value={(data.claims || []).length || '—'}
+                  sub={(data.claims || []).length > 0 ? 'Requer atenção' : 'Nenhuma aberta'}
+                  color={(data.claims || []).length > 0 ? 'text-rose-400' : 'text-emerald-400'}
+                />
+              </div>
             </div>
 
-            {/* 4 — Tabela semanal + Reclamações + Atalhos */}
+            {/* 3 — Código de autorização ML */}
+            <AuthCodeCard authCode={data.authCode} />
+
+            {/* 4 — Tabela semanal + atalhos */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <CutoffWeek cutoffSchedule={data.cutoffSchedule} />
-              <div className="space-y-3">
-                <ClaimsCard claims={data.claims || []} />
-                <div className="grid grid-cols-2 gap-2">
-                  <Link to="/expedicao/insumos"
-                    className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-3 hover:bg-slate-800/40 transition-colors flex items-center gap-2.5">
-                    <BarChart3 size={15} className="text-slate-400 shrink-0" />
-                    <span className="text-slate-400 text-xs font-medium">Insumos</span>
-                  </Link>
-                  <Link to="/financeiro/painel"
-                    className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-3 hover:bg-slate-800/40 transition-colors flex items-center gap-2.5">
-                    <TrendingUp size={15} className="text-slate-400 shrink-0" />
-                    <span className="text-slate-400 text-xs font-medium">Financeiro</span>
-                  </Link>
-                </div>
+              <div className="grid grid-cols-2 gap-2 content-start">
+                <Link to="/expedicao/insumos"
+                  className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-3 hover:bg-slate-800/40 transition-colors flex items-center gap-2.5">
+                  <BarChart3 size={15} className="text-slate-400 shrink-0" />
+                  <span className="text-slate-400 text-xs font-medium">Insumos</span>
+                </Link>
+                <Link to="/financeiro/saude"
+                  className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-3 hover:bg-slate-800/40 transition-colors flex items-center gap-2.5">
+                  <TrendingUp size={15} className="text-slate-400 shrink-0" />
+                  <span className="text-slate-400 text-xs font-medium">Financeiro</span>
+                </Link>
+                <Link to="/expedicao/coletas"
+                  className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-3 hover:bg-slate-800/40 transition-colors flex items-center gap-2.5">
+                  <Truck size={15} className="text-slate-400 shrink-0" />
+                  <span className="text-slate-400 text-xs font-medium">Coletas</span>
+                </Link>
+                <Link to="/catalogo/produtos"
+                  className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-3 hover:bg-slate-800/40 transition-colors flex items-center gap-2.5">
+                  <Package size={15} className="text-slate-400 shrink-0" />
+                  <span className="text-slate-400 text-xs font-medium">Catálogo</span>
+                </Link>
               </div>
             </div>
 
