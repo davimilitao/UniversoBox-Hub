@@ -31,6 +31,7 @@ const ROTAS = [
   { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,               react: true,  href: '/expedicao/bling'      },
   { key: 'exp-insumos',    moduleId: 'insumos',        label: 'Gestão Insumos',    secao: 'Expedição',  Icon: FlaskConical,      react: true,  href: '/expedicao/insumos'    },
   { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Expedição',  Icon: ShoppingBag,       react: true,  href: '/expedicao/compras'    },
+  { key: 'coletas',        moduleId: 'coletas',        label: 'Gestão de Coletas', secao: 'Expedição',  Icon: Truck,             react: true,  href: '/expedicao/coletas'    },
   // Catálogo
   { key: 'catalogo-pro',   moduleId: 'catalogo',       label: 'Catálogo Pro',      secao: 'Catálogo',   Icon: LayoutGrid,        react: true,  href: '/catalogo/produtos'    },
   { key: 'busca-produto',  moduleId: 'catalogo',       label: 'Busca SKU / EAN',   secao: 'Catálogo',   Icon: Search,            react: true,  href: '/catalogo/automacao'   },

@@ -16,6 +16,7 @@ import {
   ChevronRight, Wifi, WifiOff,
   XCircle, CheckCircle2, Timer, ShieldAlert, ArrowRight,
   TrendingUp, BarChart3, Info,
+  Truck, Heart, DollarSign,
 } from 'lucide-react';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -301,6 +302,80 @@ function PedidosRecentes({ orders }) {
   );
 }
 
+// ─── Panorama home ────────────────────────────────────────────────────────────
+
+function MiniCard({ icon: Icon, label, value, sub, color, href }) {
+  const inner = (
+    <div className={`rounded-2xl border p-4 flex flex-col gap-2 transition-all ${href ? 'hover:brightness-110 cursor-pointer' : ''} border-slate-800/60 bg-slate-900/40`}>
+      <div className="flex items-center justify-between">
+        <Icon size={14} className={color} />
+        {href && <ChevronRight size={12} className="text-slate-600" />}
+      </div>
+      <div>
+        <p className={`text-2xl font-bold tabular-nums leading-none ${color}`}>{value}</p>
+        <p className="text-slate-500 text-xs mt-1 font-medium">{label}</p>
+        {sub && <p className="text-slate-600 text-[10px] mt-0.5">{sub}</p>}
+      </div>
+    </div>
+  );
+  return href ? <Link to={href} className="contents">{inner}</Link> : inner;
+}
+
+function ColetaHoje() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    getToken().then(token =>
+      fetch(`/api/coletas/resumo-dia?data=${today}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => j?.data && setData(j.data))
+      .catch(() => {})
+    );
+  }, []);
+
+  const n = data?.coletas?.length ?? 0;
+  const sub = n > 0
+    ? data.coletas.map(c => c.veiculo_placa).join(', ')
+    : 'Nenhum agendado';
+
+  return (
+    <MiniCard
+      icon={Truck}
+      label="Coleta hoje"
+      value={n === 0 ? '—' : `${n} veículo${n !== 1 ? 's' : ''}`}
+      sub={sub}
+      color={n > 0 ? 'text-emerald-400' : 'text-slate-500'}
+      href="/expedicao/coletas"
+    />
+  );
+}
+
+function FinanceiroSnapshot() {
+  const d = new Date();
+  const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const mp     = parseFloat(localStorage.getItem(`painel_saldo_${mes}_mp`)     || '0');
+  const banco  = parseFloat(localStorage.getItem(`painel_saldo_${mes}_banco`)  || '0');
+  const outros = parseFloat(localStorage.getItem(`painel_saldo_${mes}_outros`) || '0');
+  const cofre  = parseFloat(localStorage.getItem('saude_cofre')    || '0');
+  const liberar= parseFloat(localStorage.getItem('saude_saldo_liberar') || '0');
+  const total  = mp + banco + outros + cofre + liberar;
+
+  const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+
+  return (
+    <MiniCard
+      icon={Heart}
+      label="Disponível"
+      value={BRL.format(total)}
+      sub="Saldo + Cofre + A Liberar"
+      color={total >= 0 ? 'text-emerald-400' : 'text-rose-400'}
+      href="/financeiro/saude"
+    />
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
@@ -362,6 +437,27 @@ export function DashboardPage() {
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             </button>
           </div>
+        </div>
+
+        {/* ── Panorama rápido ── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <MiniCard
+            icon={Package}
+            label="Pedidos ML hoje"
+            value={(summary.flex || 0) + (summary.agency || 0) + (summary.fulfillment || 0)}
+            sub={`${summary.flex||0} Flex · ${summary.agency||0} Agência · ${summary.fulfillment||0} Full`}
+            color="text-slate-200"
+            href="/expedicao/bling"
+          />
+          <MiniCard
+            icon={XCircle}
+            label="Cancelados"
+            value={summary.cancelados || 0}
+            sub={(summary.cancelados || 0) > 0 ? 'Não enviar' : 'Nenhum hoje'}
+            color={(summary.cancelados || 0) > 0 ? 'text-rose-400' : 'text-slate-500'}
+          />
+          <FinanceiroSnapshot />
+          <ColetaHoje />
         </div>
 
         {/* Loading */}
