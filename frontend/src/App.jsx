@@ -19,6 +19,7 @@ import { GestaoMargem }       from './pages/financeiro/GestaoMargem';
 import { PainelDRE }          from './pages/financeiro/PainelDRE';
 import { PosicaoFinanceira }  from './pages/financeiro/PosicaoFinanceira';
 import { SaudeFinanceira }    from './pages/financeiro/SaudeFinanceira';
+import { Recebiveis }         from './pages/financeiro/Recebiveis';
 import { BlingPedidos }       from './pages/expedicao/BlingPedidos';
 import { AppShell }           from './components/AppShell';
 import GestaoInsumos          from './pages/expedicao/GestaoInsumos';
@@ -58,7 +59,8 @@ export default function App() {
         <Route path="/catalogo/fotos"      element={<ImageStudio />} />
         {/* Financeiro */}
         <Route path="/financeiro"          element={<Navigate to="/financeiro/saude" replace />} />
-        <Route path="/financeiro/saude"    element={<SaudeFinanceira />} />
+        <Route path="/financeiro/saude"       element={<SaudeFinanceira />} />
+        <Route path="/financeiro/recebiveis"  element={<Recebiveis />} />
         <Route path="/financeiro/despesas" element={<GestaoFinanceira />} />
         <Route path="/financeiro/contas"   element={<Navigate to="/financeiro/despesas" replace />} />
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />

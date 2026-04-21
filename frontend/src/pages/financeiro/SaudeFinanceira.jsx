@@ -12,6 +12,7 @@ import { apiFetch } from '../../utils/getAuthToken';
 import {
   RefreshCw, Heart, Package, Banknote,
   TrendingDown, ChevronRight, AlertTriangle, Clock,
+  TrendingUp,
 } from 'lucide-react';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -95,8 +96,8 @@ function Linha({ label, sub, valor, auto, onEdit }) {
 
 // ── Card de seção com borda colorida ────────────────────────────────────────
 function CardSecao({ titulo, total, corBorda, icon: Icon, children, loadingTotal }) {
-  const bordas   = { emerald: 'border-l-emerald-500', blue: 'border-l-blue-500', red: 'border-l-red-500' };
-  const corTexto = { emerald: 'text-emerald-400',     blue: 'text-blue-400',     red: 'text-red-400'     };
+  const bordas   = { emerald: 'border-l-emerald-500', blue: 'border-l-blue-500', red: 'border-l-red-500', teal: 'border-l-teal-500' };
+  const corTexto = { emerald: 'text-emerald-400',     blue: 'text-blue-400',     red: 'text-red-400',     teal: 'text-teal-400'     };
 
   return (
     <div className={`rounded-xl bg-slate-800 border border-white/5 border-l-4 ${bordas[corBorda]} overflow-hidden`}>
@@ -140,6 +141,9 @@ export function SaudeFinanceira() {
   const [estoqueEmCasa,  setEstoqueEmCasa]  = useState(0);
   const [importadoEm,    setImportadoEm]    = useState(null);
   const [contasPagar,    setContasPagar]    = useState(0);
+  const [receber7,       setReceber7]       = useState(0);
+  const [receber15,      setReceber15]      = useState(0);
+  const [receber30,      setReceber30]      = useState(0);
   const [loading,        setLoading]        = useState(true);
   const [erro,           setErro]           = useState(null);
   const [atualizadoAs,   setAtualizadoAs]   = useState(horaAtual);
@@ -159,9 +163,10 @@ export function SaudeFinanceira() {
     setLoading(true);
     setErro(null);
     try {
-      const [resEstoque, resDespesas] = await Promise.all([
+      const [resEstoque, resDespesas, resReceber] = await Promise.all([
         apiFetch('/api/fin-estoque'),
         apiFetch('/api/fin-despesas'),
+        apiFetch('/api/fin-recebiveis?status=previsto'),
       ]);
 
       if (resEstoque.ok) {
@@ -179,6 +184,21 @@ export function SaudeFinanceira() {
           .reduce((acc, d) => acc + (parseFloat(d.valor) || 0), 0);
         setContasPagar(total);
       }
+
+      if (resReceber.ok) {
+        const j = await resReceber.json();
+        const lista = j.items || [];
+        const agora = Date.now();
+        const somaAte = (dias) => lista
+          .filter(r => {
+            const d = Math.ceil((new Date(r.dataPrevista).getTime() - agora) / 86400000);
+            return d <= dias; // inclui atrasados (d < 0) e futuros até N dias
+          })
+          .reduce((s, r) => s + (parseFloat(r.valor) || 0), 0);
+        setReceber7(somaAte(7));
+        setReceber15(somaAte(15));
+        setReceber30(somaAte(30));
+      }
     } catch (e) {
       setErro(e.message);
     } finally {
@@ -193,6 +213,8 @@ export function SaudeFinanceira() {
   const totalDisponivel = mp + banco + outros + cofre + saldoLiberar;
   const totalEstoque    = estoqueEmCasa + estoqueChegar;
   const saldoFinal      = totalDisponivel + totalEstoque - contasPagar;
+  // Projetado inclui "A Receber 30 dias" (entrada prevista no caixa)
+  const saldoProjetado  = saldoFinal + receber30;
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -243,6 +265,33 @@ export function SaudeFinanceira() {
             sub="Vendas pendentes, Pix a confirmar" />
         </CardSecao>
 
+        {/* ── A RECEBER ── */}
+        <CardSecao titulo="A Receber (30 dias)" total={receber30} corBorda="teal" icon={TrendingUp} loadingTotal={loading}>
+          <div className="flex items-center justify-between min-h-[52px]">
+            <div className="flex-1 grid grid-cols-3 gap-2 mr-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">7 dias</p>
+                <p className="text-sm font-semibold tabular-nums text-teal-300">{BRL.format(receber7)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">15 dias</p>
+                <p className="text-sm font-semibold tabular-nums text-teal-300">{BRL.format(receber15)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">30 dias</p>
+                <p className="text-sm font-semibold tabular-nums text-teal-300">{BRL.format(receber30)}</p>
+              </div>
+            </div>
+            <Link
+              to="/financeiro/recebiveis"
+              className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors min-h-[44px] justify-end shrink-0"
+            >
+              Gerenciar
+              <ChevronRight size={13} />
+            </Link>
+          </div>
+        </CardSecao>
+
         {/* ── ESTOQUE ── */}
         <CardSecao titulo="Estoque" total={totalEstoque} corBorda="blue" icon={Package} loadingTotal={loading}>
           <Linha
@@ -291,6 +340,19 @@ export function SaudeFinanceira() {
             {BRL.format(saldoFinal)}
           </p>
           <p className="text-[10px] text-slate-600 mt-2">Disponível + Estoque − Obrigações</p>
+
+          {/* Projetado (inclui A Receber 30d) */}
+          {receber30 > 0 && (
+            <div className="mt-3 pt-3 border-t border-white/5 flex items-baseline justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">Projetado em 30 dias</p>
+                <p className="text-[10px] text-slate-600">+ A Receber {BRL.format(receber30)}</p>
+              </div>
+              <p className={`text-xl font-bold tabular-nums ${saldoProjetado >= 0 ? 'text-teal-300' : 'text-red-400'}`}>
+                {BRL.format(saldoProjetado)}
+              </p>
+            </div>
+          )}
 
           {/* Mini resumo */}
           <div className="flex gap-0 mt-4 pt-4 border-t border-white/5 -mx-0">
