@@ -5884,22 +5884,33 @@ app.get('/api/ml/dashboard', requireFirebaseAuth, async (req, res, next) => {
 
     // ── Status local em paralelo ──────────────────────────────────────────
     const statusList = await Promise.all(rawOrders.map(o => resolveLocalStatus(o.id)));
-    orders = rawOrders.map((o, i) => ({
-      id:           o.id,
-      logistica:    detectLogistica(o),
-      _localStatus: statusList[i],
-      _createdTime: formatTimeBR(o.date_created),
-      buyer:        o.buyer?.nickname || null,
-      total:        o.total_amount   || 0,
-      items:        (o.order_items   || []).map(it => ({
-        sku:   it.item?.seller_sku || null,
-        name:  it.item?.title     || null,
-        qty:   it.quantity        || 1,
-      })),
-      tracking:     o.shipping?.tracking_number || null,
-      needsLabel:   !o.shipping?.tracking_number,
-      orderId:      o.id,
-    }));
+    // Início do dia local (America/Sao_Paulo ~= UTC-3) em ms — pedido criado antes disso
+    // e ainda não expedido é considerado atrasado.
+    const inicioHojeMs = new Date(`${today}T00:00:00.000-03:00`).getTime();
+    orders = rawOrders.map((o, i) => {
+      const createdAtMs = o.date_created ? new Date(o.date_created).getTime() : 0;
+      const local = statusList[i];
+      const isDelayed = local !== 'enviado' && local !== 'cancelado'
+        && createdAtMs > 0 && createdAtMs < inicioHojeMs;
+      return {
+        id:           o.id,
+        logistica:    detectLogistica(o),
+        _localStatus: local,
+        _createdTime: formatTimeBR(o.date_created),
+        createdAtMs,
+        isDelayed,
+        buyer:        o.buyer?.nickname || null,
+        total:        o.total_amount   || 0,
+        items:        (o.order_items   || []).map(it => ({
+          sku:   it.item?.seller_sku || null,
+          name:  it.item?.title     || null,
+          qty:   it.quantity        || 1,
+        })),
+        tracking:     o.shipping?.tracking_number || null,
+        needsLabel:   !o.shipping?.tracking_number,
+        orderId:      o.id,
+      };
+    });
 
     // Ordena: imprimir → expedir → enviado → cancelado, depois hora desc
     const statusOrder = { imprimir: 0, expedir: 1, enviado: 2, cancelado: 3 };
@@ -5907,14 +5918,21 @@ app.get('/api/ml/dashboard', requireFirebaseAuth, async (req, res, next) => {
       (statusOrder[a._localStatus] ?? 9) - (statusOrder[b._localStatus] ?? 9)
     );
 
-    // ── Summary por modalidade ────────────────────────────────────────────
-    const summary = { flex: 0, agency: 0, fulfillment: 0, cancelados: 0, total: orders.length, semEtiqueta: 0 };
+    // ── Summary por modalidade + recorte atrasados vs hoje ───────────────
+    const summary = {
+      flex: 0, agency: 0, fulfillment: 0,
+      cancelados: 0, total: orders.length, semEtiqueta: 0,
+      hoje: 0, atrasados: 0,
+    };
     for (const o of orders) {
       if (o._localStatus === 'cancelado') { summary.cancelados++; continue; }
-      if (o.logistica === 'flex')        summary.flex++;
+      if (o.logistica === 'flex')             summary.flex++;
       else if (o.logistica === 'fulfillment') summary.fulfillment++;
-      else summary.agency++;
+      else                                     summary.agency++;
       if (o.needsLabel && o._localStatus !== 'enviado') summary.semEtiqueta++;
+      if (o._localStatus === 'enviado') continue;
+      if (o.isDelayed) summary.atrasados++;
+      else             summary.hoje++;
     }
 
     // ── Claims ────────────────────────────────────────────────────────────
