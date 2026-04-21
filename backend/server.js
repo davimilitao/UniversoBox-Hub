@@ -2279,6 +2279,191 @@ app.delete('/api/fin-recebiveis/:id', requireFirebaseAuth, async (req, res, next
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Coletas — veículos cadastrados + agenda semanal de coletas (Flex/Agência)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /api/coletas/veiculos — lista veículos do tenant
+app.get('/api/coletas/veiculos', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const snap = await admin.firestore().collection('coletas_veiculos').limit(500).get();
+    const data = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(v => v.tenantId === tenantId)
+      .sort((a, b) => (a.placa || '').localeCompare(b.placa || ''));
+    return res.json({ data });
+  } catch (err) {
+    console.error('[GET /api/coletas/veiculos]', err);
+    return next(err);
+  }
+});
+
+// POST /api/coletas/veiculos — cria veículo
+app.post('/api/coletas/veiculos', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { uid, tenantId } = req.auth;
+    const { placa, modelo, marca, cor, valor_frete } = req.body;
+    if (!placa || !modelo || !marca) {
+      return res.status(400).json({ error: 'placa, modelo e marca são obrigatórios' });
+    }
+    const doc = {
+      placa: String(placa).trim().toUpperCase(),
+      modelo: String(modelo).trim(),
+      marca: String(marca).trim(),
+      cor: String(cor || '').trim(),
+      valor_frete: parseFloat(valor_frete) || 0,
+      ativo: true,
+      tenantId, uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    const ref = await admin.firestore().collection('coletas_veiculos').add(doc);
+    return res.json({ ok: true, id: ref.id });
+  } catch (err) {
+    console.error('[POST /api/coletas/veiculos]', err);
+    return next(err);
+  }
+});
+
+// PATCH /api/coletas/veiculos/:id — atualiza veículo
+app.patch('/api/coletas/veiculos/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const { id } = req.params;
+    const ref = admin.firestore().collection('coletas_veiculos').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().tenantId !== tenantId) {
+      return res.status(404).json({ error: 'veículo não encontrado' });
+    }
+    const { placa, modelo, marca, cor, valor_frete, ativo } = req.body;
+    const update = {};
+    if (placa != null) update.placa = String(placa).trim().toUpperCase();
+    if (modelo != null) update.modelo = String(modelo).trim();
+    if (marca != null) update.marca = String(marca).trim();
+    if (cor != null) update.cor = String(cor).trim();
+    if (valor_frete != null) update.valor_frete = parseFloat(valor_frete) || 0;
+    if (ativo != null) update.ativo = !!ativo;
+    await ref.update(update);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[PATCH /api/coletas/veiculos/:id]', err);
+    return next(err);
+  }
+});
+
+// DELETE /api/coletas/veiculos/:id
+app.delete('/api/coletas/veiculos/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const { id } = req.params;
+    const ref = admin.firestore().collection('coletas_veiculos').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().tenantId !== tenantId) {
+      return res.status(404).json({ error: 'veículo não encontrado' });
+    }
+    await ref.delete();
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/coletas/veiculos/:id]', err);
+    return next(err);
+  }
+});
+
+// GET /api/coletas/agenda?semana=YYYY-MM-DD — lista agendamentos da semana (6 dias)
+app.get('/api/coletas/agenda', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const { semana } = req.query;
+    if (!semana) return res.status(400).json({ error: 'parâmetro semana=YYYY-MM-DD obrigatório' });
+    const inicio = new Date(`${semana}T00:00:00`);
+    const fim = new Date(inicio);
+    fim.setDate(fim.getDate() + 6);
+    const inicioStr = semana;
+    const fimStr = fim.toISOString().split('T')[0];
+    const snap = await admin.firestore().collection('coletas_agenda').limit(500).get();
+    const data = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(a => a.tenantId === tenantId)
+      .filter(a => a.data >= inicioStr && a.data < fimStr)
+      .sort((a, b) => (a.data || '').localeCompare(b.data || ''));
+    return res.json({ data });
+  } catch (err) {
+    console.error('[GET /api/coletas/agenda]', err);
+    return next(err);
+  }
+});
+
+// POST /api/coletas/agenda — cria agendamento
+app.post('/api/coletas/agenda', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { uid, tenantId } = req.auth;
+    const { data, veiculo_placa, modalidade, observacoes } = req.body;
+    if (!data || !veiculo_placa || !modalidade) {
+      return res.status(400).json({ error: 'data, veiculo_placa e modalidade são obrigatórios' });
+    }
+    if (!['flex', 'agencia'].includes(modalidade)) {
+      return res.status(400).json({ error: 'modalidade inválida' });
+    }
+    const doc = {
+      data: String(data),
+      veiculo_placa: String(veiculo_placa).trim().toUpperCase(),
+      modalidade,
+      observacoes: String(observacoes || ''),
+      tenantId, uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    const ref = await admin.firestore().collection('coletas_agenda').add(doc);
+    return res.json({ ok: true, id: ref.id });
+  } catch (err) {
+    console.error('[POST /api/coletas/agenda]', err);
+    return next(err);
+  }
+});
+
+// DELETE /api/coletas/agenda/:id
+app.delete('/api/coletas/agenda/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const { id } = req.params;
+    const ref = admin.firestore().collection('coletas_agenda').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().tenantId !== tenantId) {
+      return res.status(404).json({ error: 'agendamento não encontrado' });
+    }
+    await ref.delete();
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/coletas/agenda/:id]', err);
+    return next(err);
+  }
+});
+
+// GET /api/coletas/resumo-dia?data=YYYY-MM-DD — conta orders do dia por modalidade
+app.get('/api/coletas/resumo-dia', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { data } = req.query;
+    if (!data) return res.status(400).json({ error: 'parâmetro data=YYYY-MM-DD obrigatório' });
+    const inicio = new Date(`${data}T00:00:00-03:00`).getTime();
+    const fim = inicio + 86400000;
+    const snap = await admin.firestore().collection('orders')
+      .where('createdAtMs', '>=', inicio)
+      .where('createdAtMs', '<', fim)
+      .limit(500)
+      .get();
+    let flex_count = 0, agencia_count = 0;
+    snap.docs.forEach(d => {
+      const o = d.data();
+      if (o.logistica === 'flex') flex_count++;
+      else if (o.logistica === 'fulfillment') return;
+      else agencia_count++;
+    });
+    return res.json({ data: { flex_count, agencia_count } });
+  } catch (err) {
+    console.error('[GET /api/coletas/resumo-dia]', err);
+    return next(err);
+  }
+});
+
 // ── helper: extrai valor/data/fornecedor de texto bruto de comprovante
 function parsearTextoComprovante(rawText) {
   const MESES = {
