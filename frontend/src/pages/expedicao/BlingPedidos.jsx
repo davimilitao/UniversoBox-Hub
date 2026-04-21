@@ -14,7 +14,7 @@ import {
   ChevronDown, ChevronUp, PackagePlus, CheckCircle2,
   AlertTriangle, Clock, XCircle, Loader2, Inbox,
   Tag, Hash, ChevronLeft, ChevronRight, Flame, ExternalLink,
-  Package, ShoppingBag,
+  Package, ShoppingBag, CheckSquare, Square, Truck, Warehouse,
 } from 'lucide-react';
 
 // ─── helpers de data ──────────────────────────────────────────────────────────
@@ -76,6 +76,29 @@ const CANAIS = [
   { id: 'magalu', label: 'Magalu',  cor: 'purple' },
   { id: 'tiktok', label: 'TikTok',  cor: 'pink'   },
 ];
+
+// ─── Badge de modalidade ML (Flex / Full / Agência) ───────────────────────────
+function ModalidadeBadge({ tipo }) {
+  if (tipo === 'flex') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-amber-400/15 text-amber-400 border border-amber-400/30 leading-none">
+        <Flame size={10}/> FLEX
+      </span>
+    );
+  }
+  if (tipo === 'fulfillment') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 leading-none">
+        <Warehouse size={10}/> FULL
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-blue-500/15 text-blue-300 border border-blue-500/30 leading-none">
+      <Truck size={10}/> AGÊNCIA
+    </span>
+  );
+}
 
 function matchCanal(canalId, mkt) {
   const m = (mkt || '').toLowerCase();
@@ -385,15 +408,38 @@ function ItemRow({ it }) {
 }
 
 // ─── Row de NF ────────────────────────────────────────────────────────────────
-function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandindo, isFlex, onFlexToggle, clonando }) {
+function NFRow({
+  nf, clonados, onClonar, onExpand, expandido, detalhe, expandindo,
+  isFlex, onFlexToggle, clonando,
+  mlLogistica, // 'flex' | 'fulfillment' | 'agency' | null (resolvido após expand)
+  isSelected, onToggleSelect, selectionMode,
+}) {
   const jaCriado = clonados.has(String(nf.id));
   const eClonar  = clonando === nf.id;
+  const isFull   = mlLogistica === 'fulfillment';
 
   return (
-    <div className={`rounded-xl border transition-all ${expandido ? 'bg-slate-800 border-white/10 shadow-lg' : 'bg-slate-800/50 border-white/5 hover:border-white/10'}`}>
+    <div className={`rounded-xl border transition-all ${
+      expandido ? 'bg-slate-800 border-white/10 shadow-lg'
+      : isSelected ? 'bg-emerald-950/20 border-emerald-500/30'
+      : 'bg-slate-800/50 border-white/5 hover:border-white/10'
+    } ${isFull && !expandido ? 'opacity-60' : ''}`}>
 
       {/* ── Linha principal ── */}
-      <button className="w-full flex items-center gap-3 px-4 py-3.5 text-left" onClick={() => onExpand(nf.id)}>
+      <div className="w-full flex items-center gap-3 px-4 py-3.5">
+        {/* Checkbox seleção em lote */}
+        {!jaCriado && !isFull && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleSelect(nf.id); }}
+            className="shrink-0 p-1 -ml-1 text-slate-500 hover:text-emerald-400"
+            title={isSelected ? 'Desmarcar' : 'Selecionar para lote'}
+          >
+            {isSelected ? <CheckSquare size={16} className="text-emerald-400"/> : <Square size={16}/>}
+          </button>
+        )}
+        {(jaCriado || isFull) && <span className="w-5 shrink-0"/>}
+
+        <button className="flex-1 flex items-center gap-3 text-left min-w-0" onClick={() => onExpand(nf.id)}>
         {/* Número */}
         <span className="text-xs font-mono text-slate-500 w-16 shrink-0">#{nf.numero}</span>
 
@@ -416,6 +462,9 @@ function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandind
         {/* Status */}
         <div className="shrink-0"><SituacaoBadge sit={nf.situacao} /></div>
 
+        {/* Modalidade ML (só quando resolvida via expand) */}
+        {mlLogistica && <div className="shrink-0"><ModalidadeBadge tipo={mlLogistica}/></div>}
+
         {/* Já importado */}
         {jaCriado && (
           <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -427,20 +476,29 @@ function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandind
         <div className="shrink-0 text-slate-600 ml-1">
           {expandindo ? <Loader2 size={15} className="animate-spin"/> : expandido ? <ChevronUp size={15}/> : <ChevronDown size={15}/>}
         </div>
-      </button>
+        </button>
+      </div>
 
       {/* ── Painel expandido ── */}
       {expandido && detalhe && (
         <div className="border-t border-white/5 px-4 py-4 space-y-4">
 
-          {/* Número do pedido na loja */}
-          {detalhe.numeroPedido && (
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <Hash size={11} className="shrink-0"/>
-              Pedido na loja:
-              <span className="font-mono text-slate-300">{detalhe.numeroPedido}</span>
-            </div>
-          )}
+          {/* Número do pedido na loja + modalidade */}
+          <div className="flex items-center gap-3 flex-wrap">
+            {detalhe.numeroPedido && (
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <Hash size={11} className="shrink-0"/>
+                Pedido na loja:
+                <span className="font-mono text-slate-300">{detalhe.numeroPedido}</span>
+              </div>
+            )}
+            {mlLogistica && <ModalidadeBadge tipo={mlLogistica}/>}
+            {isFull && (
+              <span className="text-[11px] text-indigo-300/80">
+                Mercado Livre envia pelo Full — não precisa criar pedido interno.
+              </span>
+            )}
+          </div>
 
           {/* ── Itens ── */}
           {detalhe.itens?.length > 0 ? (
@@ -483,7 +541,11 @@ function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandind
             </div>
 
             {/* Ação principal */}
-            {jaCriado ? (
+            {isFull ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                <Warehouse size={14}/> Envio pelo Full — sem ação necessária
+              </span>
+            ) : jaCriado ? (
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   <CheckCircle2 size={14}/> Pedido criado
@@ -531,6 +593,13 @@ export function BlingPedidos() {
   const [clonando,    setClonando]    = useState(null);
   const [flexFlags,   setFlexFlags]   = useState({});
   const [toast,       setToast]       = useState(null);
+  // Mapa { mlOrderId -> 'flex'|'fulfillment'|'agency' } alimentado por /api/ml/dashboard
+  const [mlByOrderId, setMlByOrderId] = useState({});
+  // Modalidade resolvida por NF (após expand cruzar com mlByOrderId)
+  const [nfLogistica, setNfLogistica] = useState({});
+  // Seleção em lote — Set de blingNfId
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [lotePronto,  setLotePronto]  = useState(null); // { fila: [ids], concluidos, erros }
   const pollingRef = useRef(null);
   const pickerRef  = useRef(null);
 
@@ -546,6 +615,30 @@ export function BlingPedidos() {
   // Status polling
   const fetchStatus = useCallback(async () => {
     try { const r = await fetch('/bling/status'); setStatus(await r.json()); } catch {}
+  }, []);
+
+  // Carrega mapa de modalidade ML (uma vez ao abrir a tela)
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        // apiFetch não está importado aqui — usa fetch direto, endpoint já aceita cookie/firebase
+        const { getAuthToken } = await import('../../utils/getAuthToken');
+        const token = await getAuthToken();
+        const res = await fetch('/api/ml/dashboard', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) return;
+        const j = await res.json();
+        if (cancel || !j.orders) return;
+        const map = {};
+        for (const o of j.orders) {
+          if (o.id && o.logistica) map[String(o.id)] = o.logistica;
+        }
+        setMlByOrderId(map);
+      } catch {}
+    })();
+    return () => { cancel = true; };
   }, []);
 
   useEffect(() => {
@@ -586,8 +679,63 @@ export function BlingPedidos() {
       const res  = await fetch(`/bling/pedidos/${id}`);
       const data = await res.json();
       setExpandidos(p => ({ ...p, [id]: data.item }));
+      // Resolve modalidade via cruzamento com ML (mlOrderId === ML order.id)
+      const mlId = data.item?.mlOrderId ? String(data.item.mlOrderId) : null;
+      if (mlId && mlByOrderId[mlId]) {
+        const tipo = mlByOrderId[mlId];
+        setNfLogistica(prev => ({ ...prev, [id]: tipo }));
+        // Auto-detecção de Flex: marca a flag sem sobrescrever escolha manual
+        if (tipo === 'flex') setFlexFlags(prev => ({ ...prev, [id]: true }));
+      }
     } catch (e) { showToast(`Erro ao carregar itens: ${e.message}`, 'err'); }
     finally { setExpandindo(null); }
+  }
+
+  function handleToggleSelect(nfId) {
+    setSelectedIds(prev => {
+      const n = new Set(prev);
+      if (n.has(nfId)) n.delete(nfId); else n.add(nfId);
+      return n;
+    });
+  }
+
+  function clearSelection() { setSelectedIds(new Set()); }
+
+  // Criar em lote — expande cada NF se necessário, depois chama handleClonar em série
+  async function handleClonarLote() {
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+    setLotePronto({ total: ids.length, concluidos: 0, erros: 0 });
+    for (const id of ids) {
+      const nf = nfs.find(n => n.id === id);
+      if (!nf) continue;
+      // Garante detalhe carregado
+      let detalhe = expandidos[id];
+      if (!detalhe) {
+        try {
+          const res = await fetch(`/bling/pedidos/${id}`);
+          const data = await res.json();
+          detalhe = data.item;
+          setExpandidos(p => ({ ...p, [id]: detalhe }));
+        } catch {
+          setLotePronto(p => ({ ...p, erros: p.erros + 1, concluidos: p.concluidos + 1 }));
+          continue;
+        }
+      }
+      // Pula Full (não clona)
+      const mlId = detalhe?.mlOrderId ? String(detalhe.mlOrderId) : null;
+      if (mlId && mlByOrderId[mlId] === 'fulfillment') {
+        setLotePronto(p => ({ ...p, concluidos: p.concluidos + 1 }));
+        continue;
+      }
+      try {
+        await handleClonar(nf, detalhe);
+        setLotePronto(p => ({ ...p, concluidos: p.concluidos + 1 }));
+      } catch {
+        setLotePronto(p => ({ ...p, erros: p.erros + 1, concluidos: p.concluidos + 1 }));
+      }
+    }
+    setTimeout(() => { setLotePronto(null); clearSelection(); }, 2500);
   }
 
   function handleFlexToggle(nfId) {
@@ -808,7 +956,11 @@ export function BlingPedidos() {
                 expandido={!!expandidos[nf.id]} detalhe={expandidos[nf.id] || null}
                 expandindo={expandindo === nf.id}
                 isFlex={!!flexFlags[nf.id]} onFlexToggle={handleFlexToggle}
-                clonando={clonando}/>
+                clonando={clonando}
+                mlLogistica={nfLogistica[nf.id] || null}
+                isSelected={selectedIds.has(nf.id)}
+                onToggleSelect={handleToggleSelect}
+              />
             ))}
 
             <p className="text-xs text-slate-700 text-center pt-2">
@@ -818,6 +970,84 @@ export function BlingPedidos() {
           </div>
         )
       )}
+
+      {/* ── Sticky bottom bar — seleção em lote ── */}
+      {selectedIds.size > 0 && (
+        <SelectionBar
+          selected={selectedIds}
+          nfs={nfs}
+          flexFlags={flexFlags}
+          nfLogistica={nfLogistica}
+          onClear={clearSelection}
+          onRun={handleClonarLote}
+          running={!!lotePronto}
+          progresso={lotePronto}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Barra inferior de seleção em lote ────────────────────────────────────────
+function SelectionBar({ selected, nfs, flexFlags, nfLogistica, onClear, onRun, running, progresso }) {
+  const ids = [...selected];
+  const items = ids.map(id => nfs.find(n => n.id === id)).filter(Boolean);
+  // Contagem por canal (marketplace)
+  const porCanal = {};
+  let flexCount = 0, fullCount = 0;
+  for (const nf of items) {
+    const mkt = (nf.marketplace || '?').toLowerCase();
+    porCanal[mkt] = (porCanal[mkt] || 0) + 1;
+    if (nfLogistica[nf.id] === 'fulfillment') fullCount++;
+    if (nfLogistica[nf.id] === 'flex' || flexFlags[nf.id]) flexCount++;
+  }
+  const chips = Object.entries(porCanal).map(([k, v]) => ({ k, v }));
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur border-t border-white/10 shadow-2xl">
+      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+          <span className="text-sm font-bold text-emerald-400">
+            {selected.size} selecionado{selected.size !== 1 ? 's' : ''}
+          </span>
+          {chips.map(({ k, v }) => (
+            <span key={k} className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 border border-white/10 text-slate-300 uppercase tracking-wider">
+              {v} {k}
+            </span>
+          ))}
+          {flexCount > 0 && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/30 text-amber-400">
+              ⚡ {flexCount} flex
+            </span>
+          )}
+          {fullCount > 0 && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300">
+              🏬 {fullCount} full (ignorados)
+            </span>
+          )}
+        </div>
+        {progresso && (
+          <span className="text-xs text-slate-400 tabular-nums">
+            {progresso.concluidos}/{progresso.total}{progresso.erros > 0 ? ` · ${progresso.erros} erro(s)` : ''}
+          </span>
+        )}
+        <div className="flex gap-2 shrink-0">
+          <button
+            onClick={onClear}
+            disabled={running}
+            className="px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-sm text-slate-300 hover:text-white disabled:opacity-50"
+          >
+            Limpar
+          </button>
+          <button
+            onClick={onRun}
+            disabled={running}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-bold text-white disabled:opacity-60"
+          >
+            {running ? <><Loader2 size={14} className="animate-spin"/> Criando…</> : <><PackagePlus size={14}/> Criar {selected.size} pedido{selected.size !== 1 ? 's' : ''}</>}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -338,6 +338,10 @@ function FlexBadge() {
   return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-amber-400 text-black leading-none animate-pulse">⚡ FLEX</span>;
 }
 
+function AtrasadoBadge() {
+  return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-red-500 text-white leading-none animate-pulse">⏰ ATRASADO</span>;
+}
+
 // ─── Toast ────────────────────────────────────────────────────────────────────
 function Toast({ items }) {
   if (!items.length) return null;
@@ -467,19 +471,27 @@ function OrderCard({ o, tab, active, onClick }) {
   const total   = its.reduce((a, it) => a + Number(it.qty || 0), 0);
   const checked = its.reduce((a, it) => a + Number(it.checkedQty || 0), 0);
   const pct     = total > 0 ? Math.round((checked / total) * 100) : 0;
-  const isFlex  = o.logistica === 'flex' || !!o.isPriority;
-  const etiq    = getEtiquetaInfo(o);
-  const thumbs  = its.slice(0, 3);
+  const isFlex     = o.logistica === 'flex' || !!o.isPriority;
+  const isDelayed  = !!o.isDelayed;
+  const etiq       = getEtiquetaInfo(o);
+  const thumbs     = its.slice(0, 3);
 
   return (
     <button onClick={onClick}
       className={`w-full text-left rounded-2xl border transition-all mb-2 overflow-hidden
         ${active
           ? 'border-blue-500/50 bg-blue-500/8 ring-1 ring-blue-500/20 shadow-lg shadow-blue-900/20'
+          : isDelayed
+          ? 'border-l-[3px] border-l-red-500 border-t-white/5 border-r-white/5 border-b-white/5 bg-red-950/20 hover:bg-red-950/30'
           : isFlex
           ? 'border-l-[3px] border-l-amber-400 border-t-white/5 border-r-white/5 border-b-white/5 bg-slate-800/70 hover:bg-slate-800'
           : 'border-white/6 bg-slate-800/50 hover:bg-slate-800 hover:border-white/12'}`}>
-      {isFlex && (
+      {isDelayed && (
+        <div className="bg-red-500/10 border-b border-red-500/20 px-3 py-1">
+          <span className="text-[9px] font-black text-red-400 uppercase tracking-wider">⏰ Atrasado — despachar com prioridade</span>
+        </div>
+      )}
+      {!isDelayed && isFlex && (
         <div className="bg-amber-400/10 border-b border-amber-400/20 px-3 py-1">
           <span className="text-[9px] font-black text-amber-400 uppercase tracking-wider">⚡ Prioridade Flex</span>
         </div>
@@ -1060,9 +1072,16 @@ export default function PedidosDoDia() {
         api('/orders/list?status=packed&limit=200'),
       ]);
       if (!p || !pi || !pk) return;
+      // Pedido atrasado: criado antes de hoje 00:00 e ainda não finalizado.
+      const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0);
+      const inicioHojeMs = inicioHoje.getTime();
+      const marcarAtraso = (list) => list.map(o => ({
+        ...o,
+        isDelayed: !!o.createdAtMs && Number(o.createdAtMs) < inicioHojeMs,
+      }));
       const novo = {
-        pending: sortOrders(p.items  || []),
-        picked:  sortOrders(pi.items || []),
+        pending: sortOrders(marcarAtraso(p.items  || [])),
+        picked:  sortOrders(marcarAtraso(pi.items || [])),
         packed:  sortOrders((pk.items||[]).filter(o => isToday(o.updatedAtMs || o.createdAtMs))),
       };
       setOrders(novo);
