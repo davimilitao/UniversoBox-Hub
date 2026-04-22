@@ -4205,12 +4205,13 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
 
         console.log(`[danfe/${nfId}] detalhe sit=${nf?.situacao} campos=[${Object.keys(nf).join(',')}]`);
 
-        // Prioridade: linkPDF (PDF direto) > linkDanfe (HTML viewer) > linkDanfeFull
+        // Prioridade: respeita o tipo solicitado
+        // linkDanfeSimplificado → etiqueta 10x15 (térmicas)
+        // linkDanfeFull / linkPDF → DANFE completa A4
         // ATENÇÃO: linkDanfe = viewer HTML/SVG — NÃO é PDF binário!
-        //          linkPDF   = download direto do PDF = o que precisamos
-        const linkPdf =
-          nf?.linkPDF || nf?.linkPdf ||
-          nf?.linkDanfeFull || nf?.linkDanfeSimplificado;
+        const linkPdf = tipoParam === 'simplificado'
+          ? (nf?.linkDanfeSimplificado || nf?.linkPDF || nf?.linkPdf || nf?.linkDanfeFull)
+          : (nf?.linkPDF || nf?.linkPdf || nf?.linkDanfeFull || nf?.linkDanfeSimplificado);
 
         const linkViewer =
           nf?.linkDanfe || nf?.danfe?.link || nf?.urls?.danfe || nf?.url;
@@ -4316,9 +4317,15 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
     console.error(`[danfe/${nfId}] /danfe error ${dSt}: ${errRaw.slice(0, 400)}`);
 
     // ══════════════════════════════════════════════════════════════════════
-    // PASSO 3 — Fallback: URL Bling simplificada pelo número da NF
+    // PASSO 3 — Fallback: abre danfe.simplificado.php no browser do usuário
+    // O Bling não expôs PDF via API mas o viewer web funciona (requer sessão)
     // ══════════════════════════════════════════════════════════════════════
-    // (Tenta buscar número da NF do detalhe para montar URL alternativa)
+    if (tipoParam === 'simplificado') {
+      const simplUrl = `https://www.bling.com.br/relatorios/danfe.simplificado.php?idNota1=${nfId}`;
+      console.log(`[danfe/${nfId}] fallback danfe.simplificado.php → ${simplUrl}`);
+      return res.json({ ok: true, pdfUrl: simplUrl, nfId, tipo: 'simplificado', via: 'danfe_simplificado_browser' });
+    }
+
     return res.status(404).json({
       error:   'danfe_nao_disponivel',
       message: 'DANFE indisponível via API. Verifique se a NF está autorizada no Bling.',
