@@ -195,6 +195,72 @@ async function printDanfe(blingNfId, onStatus) {
 }
 
 /**
+ * Imprime etiqueta de transporte via Bling API v3 → QZ Tray.
+ * Backend devolve ZPL (preferido), PDF base64, ou pdfUrl (fallback browser).
+ * Mesmo contrato que `printShippingLabel` do ML.
+ * @param {string} blingNfId — ID da NF no Bling
+ * @param {Function} onStatus
+ */
+async function printTransportLabelBling(blingNfId, onStatus) {
+  onStatus?.('Buscando etiqueta no Bling…');
+  const token = localStorage.getItem('expedicao_token') || '';
+  const res = await fetch(`/bling/etiqueta-transporte/${encodeURIComponent(blingNfId)}`, {
+    headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta`);
+  }
+
+  let b64pdf = null, zplStr = null, pdfUrl = null;
+  if (data.format === 'zpl' && data.zpl) zplStr = data.zpl;
+  else if (data.format === 'pdf' && data.pdf) b64pdf = data.pdf;
+  else if (data.format === 'pdf_url' && data.pdfUrl) pdfUrl = data.pdfUrl;
+  else throw new Error('Bling não retornou ZPL/PDF da etiqueta.');
+
+  onStatus?.('Conectando à impressora…');
+  let qzOk = false;
+  try {
+    const qz = await qzConnect();
+    const printer = await qz.printers.getDefault();
+    if (zplStr) {
+      const config = qz.configs.create(printer, { language: { type: 'ZPL' } });
+      await qz.print(config, [{ type: 'raw', format: 'plain', data: zplStr }]);
+      qzOk = true;
+    } else if (b64pdf) {
+      const config = qz.configs.create(printer, {
+        scaleContent: false, colorType: 'blackwhite', rotation: 0,
+        margins: { top: 0, right: 0, bottom: 0, left: 0 },
+      });
+      await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64pdf }]);
+      qzOk = true;
+    }
+  } catch (qzErr) {
+    console.warn('[printTransportLabelBling] QZ indisponível:', qzErr.message);
+  }
+  if (qzOk) return;
+
+  onStatus?.('Abrindo no navegador…');
+  if (b64pdf) {
+    const blob = new Blob([Uint8Array.from(atob(b64pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
+    const url  = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    return;
+  }
+  if (pdfUrl) { window.open(pdfUrl, '_blank'); return; }
+  if (zplStr) {
+    const blob = new Blob([zplStr], { type: 'text/plain' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = `etiqueta-${blingNfId}.zpl`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return;
+  }
+  throw new Error('Etiqueta não disponível.');
+}
+
+/**
  * Imprime etiqueta de transporte do Mercado Livre via QZ Tray.
  * Suporta ZPL (impressoras térmicas) e PDF (impressoras comuns).
  * @param {string} mlOrderId  — número do pedido ML (numeroPedido / mlOrderId do order)
@@ -744,25 +810,29 @@ function DanfeButton({ blingNfId }) {
 }
 
 // ─── Botão Etiqueta de Transporte (ZPL/PDF via ML) ───────────────────────────
-function ShippingLabelButton({ mlOrderId, numeroPedido, marketplace }) {
+function ShippingLabelButton({ mlOrderId, numeroPedido, marketplace, blingNfId }) {
   const [st,  setSt]  = useState(null);
   const [msg, setMsg] = useState('');
 
-  // Usa mlOrderId se disponível, fallback para numeroPedido (formato ML: 18 dígitos)
-  const orderId = mlOrderId || (
+  // Prioridade: Bling (funciona para qualquer marketplace com NF emitida).
+  // Fallback ML: usa API do ML quando não há blingNfId mas temos mlOrderId.
+  const mlFallbackId = mlOrderId || (
     marketplace === 'MERCADO_LIVRE' && /^\d{10,20}$/.test(String(numeroPedido || ''))
       ? String(numeroPedido)
       : null
   );
 
-  // Só ML com ID identificável
-  if (!orderId || marketplace !== 'MERCADO_LIVRE') return null;
+  if (!blingNfId && !mlFallbackId) return null;
 
   async function handle() {
-    setSt('loading'); setMsg('Conectando…');
+    setSt('loading'); setMsg('Abrindo…');
     try {
-      await printShippingLabel(orderId, m => setMsg(m));
-      setSt('ok'); setMsg('Impresso ✓');
+      if (blingNfId) {
+        await printTransportLabelBling(blingNfId, m => setMsg(m));
+      } else {
+        await printShippingLabel(mlFallbackId, m => setMsg(m));
+      }
+      setSt('ok'); setMsg('Aberto ✓');
       setTimeout(() => { setSt(null); setMsg(''); }, 4000);
     } catch(e) {
       setSt('err'); setMsg(e.message);
@@ -843,7 +913,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
           )}
         </div>
         <div className="px-4 pb-1 space-y-2">
-          <ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} />
+          <ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} blingNfId={order.blingNfId} />
           <DanfeButton blingNfId={order.blingNfId} />
         </div>
         <div className="flex gap-2 p-4 border-t border-white/5">
@@ -906,7 +976,7 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
           </div>
         )}
         <div className="px-4 pb-1 space-y-2">
-          <ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} />
+          <ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} blingNfId={order.blingNfId} />
           <DanfeButton blingNfId={order.blingNfId} />
         </div>
         <div className="flex gap-2 p-4 border-t border-white/5">
