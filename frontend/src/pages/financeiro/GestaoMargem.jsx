@@ -23,15 +23,13 @@ import {
   PieChart,  Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
+import { Skeleton } from '../../components/ui';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const BRL  = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const PERC = (v) => `${(v * 100).toFixed(1)}%`;
 
-function Skeleton({ h = 'h-32', className = '' }) {
-  return <div className={`rounded-xl bg-slate-800 border border-white/5 animate-pulse ${h} ${className}`} />;
-}
 
 function Card({ icon: Icon, label, value, sub, cor = 'emerald' }) {
   const cores = {
