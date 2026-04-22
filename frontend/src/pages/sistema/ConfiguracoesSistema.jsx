@@ -13,7 +13,7 @@ import {
   SlidersHorizontal, Users, Monitor, Save, Trash2, Plus, Loader2,
   CheckCircle2, X, Shield, User, Info, Settings2,
   Package, Zap, BarChart2, ClipboardList, Box, PlusCircle,
-  FileCode, Receipt, ShoppingBag, FileUp, Truck,
+  FileCode, Receipt, ShoppingBag, FileUp, Truck, KanbanSquare,
   Home, LayoutGrid, FlaskConical,
   Globe, Database, Key, ChevronRight, Copy, Check,
   RefreshCw, AlertTriangle,
@@ -43,6 +43,7 @@ const MODULOS_UI = [
   { id: 'compras',        label: 'Compras',            secao: 'Financeiro', Icon: ShoppingBag },
   // Sistema
   { id: 'index',          label: 'Painel Principal',   secao: 'Sistema',    Icon: Home },
+  { id: 'tarefas',        label: 'Tarefas (Kanban)',   secao: 'Sistema',    Icon: KanbanSquare },
   { id: 'config',         label: 'Configurações',      secao: 'Sistema',    Icon: SlidersHorizontal },
 ];
 
