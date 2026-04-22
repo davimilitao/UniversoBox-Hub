@@ -30,6 +30,7 @@ import AdminProdutos          from './pages/catalogo/AdminProdutos';
 import ImportarCSV            from './pages/catalogo/ImportarCSV';
 import ImageStudio            from './pages/catalogo/ImageStudio';
 import ConfiguracoesSistema   from './pages/sistema/ConfiguracoesSistema';
+import TaskBoard              from './pages/sistema/TaskBoard';
 import Compras                from './pages/expedicao/Compras';
 import GestaoColetas          from './pages/expedicao/GestaoColetas';
 
@@ -69,6 +70,8 @@ export default function App() {
         <Route path="/financeiro/posicao"  element={<PosicaoFinanceira />} />
         {/* Sistema */}
         <Route path="/sistema/config"      element={<ConfiguracoesSistema />} />
+        <Route path="/admin/tarefas"       element={<TaskBoard />} />
+        <Route path="/sistema/tarefas"     element={<Navigate to="/admin/tarefas" replace />} />
       </Route>
 
       {/* Qualquer rota desconhecida → painel principal */}

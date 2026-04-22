@@ -2464,6 +2464,120 @@ app.get('/api/coletas/resumo-dia', requireFirebaseAuth, async (req, res, next) =
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Tarefas — Kanban board (colunas: novo / ativo / revisao / concluido)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TAREFA_STATUS = ['novo', 'ativo', 'revisao', 'concluido'];
+const TAREFA_PRIORIDADE = ['baixa', 'media', 'alta'];
+
+// GET /api/tarefas — lista todas as tarefas do tenant
+app.get('/api/tarefas', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const snap = await admin.firestore().collection('tarefas').limit(1000).get();
+    const data = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(t => t.tenantId === tenantId)
+      .map(t => ({
+        ...t,
+        dueDate: t.dueDate?.toDate ? t.dueDate.toDate().toISOString() : t.dueDate || null,
+        createdAt: t.createdAt?.toDate ? t.createdAt.toDate().toISOString() : null,
+        updatedAt: t.updatedAt?.toDate ? t.updatedAt.toDate().toISOString() : null,
+      }))
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    return res.json({ data });
+  } catch (err) {
+    console.error('[GET /api/tarefas]', err);
+    return next(err);
+  }
+});
+
+// POST /api/tarefas — cria tarefa
+app.post('/api/tarefas', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { uid, tenantId } = req.auth;
+    const { titulo, descricao, status, prioridade, dueDate, responsavel, parentId } = req.body;
+    if (!titulo || !String(titulo).trim()) {
+      return res.status(400).json({ error: 'titulo é obrigatório' });
+    }
+    const doc = {
+      titulo: String(titulo).trim(),
+      descricao: String(descricao || '').trim(),
+      status: TAREFA_STATUS.includes(status) ? status : 'novo',
+      prioridade: TAREFA_PRIORIDADE.includes(prioridade) ? prioridade : 'media',
+      dueDate: dueDate
+        ? admin.firestore.Timestamp.fromDate(new Date(`${dueDate}T12:00:00`))
+        : null,
+      responsavel: String(responsavel || '').trim(),
+      parentId: parentId || null,
+      tenantId, uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    const ref = await admin.firestore().collection('tarefas').add(doc);
+    return res.json({ ok: true, id: ref.id });
+  } catch (err) {
+    console.error('[POST /api/tarefas]', err);
+    return next(err);
+  }
+});
+
+// PATCH /api/tarefas/:id — atualiza tarefa
+app.patch('/api/tarefas/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const { id } = req.params;
+    const ref = admin.firestore().collection('tarefas').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().tenantId !== tenantId) {
+      return res.status(404).json({ error: 'tarefa não encontrada' });
+    }
+    const { titulo, descricao, status, prioridade, dueDate, responsavel, parentId } = req.body;
+    const update = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (titulo != null) update.titulo = String(titulo).trim();
+    if (descricao != null) update.descricao = String(descricao).trim();
+    if (status != null) {
+      if (!TAREFA_STATUS.includes(status)) return res.status(400).json({ error: 'status inválido' });
+      update.status = status;
+    }
+    if (prioridade != null) {
+      if (!TAREFA_PRIORIDADE.includes(prioridade)) return res.status(400).json({ error: 'prioridade inválida' });
+      update.prioridade = prioridade;
+    }
+    if (dueDate !== undefined) {
+      update.dueDate = dueDate
+        ? admin.firestore.Timestamp.fromDate(new Date(`${dueDate}T12:00:00`))
+        : null;
+    }
+    if (responsavel != null) update.responsavel = String(responsavel).trim();
+    if (parentId !== undefined) update.parentId = parentId || null;
+    await ref.update(update);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[PATCH /api/tarefas/:id]', err);
+    return next(err);
+  }
+});
+
+// DELETE /api/tarefas/:id
+app.delete('/api/tarefas/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const { id } = req.params;
+    const ref = admin.firestore().collection('tarefas').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().tenantId !== tenantId) {
+      return res.status(404).json({ error: 'tarefa não encontrada' });
+    }
+    await ref.delete();
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/tarefas/:id]', err);
+    return next(err);
+  }
+});
+
 // ── helper: extrai valor/data/fornecedor de texto bruto de comprovante
 function parsearTextoComprovante(rawText) {
   const MESES = {
@@ -4655,7 +4769,7 @@ app.post('/bling/clonar', async (req, res, next) => {
 
 // Perfis padrão caso o Firestore não tenha
 const PERFIS_DEFAULT = {
-  admin:      { nome: 'Super Admin', avatar: 'DA', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','importar','index','config'] },
+  admin:      { nome: 'Super Admin', avatar: 'DA', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','tarefas','importar','index','config'] },
   operacao:   { nome: 'Operação',    avatar: 'SU', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','embalagens','coletas','index'] },
   financeiro: { nome: 'Financeiro',  avatar: 'JE', tema: 'dark',  modulos: ['financas','compras','index'] },
   catalogo:   { nome: 'Catálogo',    avatar: 'DN', tema: 'dark',  modulos: ['admin','catalogo','embalagens','cadastrar','enriquecer-xml','compras','importar','index'] },
@@ -4717,7 +4831,7 @@ app.put('/api/perfis/:id', async (req, res, next) => {
     }
 
     // Validar módulos
-    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','importar','index','config'];
+    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','tarefas','importar','index','config'];
     if (clean.modulos) {
       clean.modulos = clean.modulos.filter(m => modulosValidos.includes(m));
     }
@@ -4738,7 +4852,7 @@ app.post('/api/perfis', async (req, res, next) => {
     if (!id || !nome) return res.status(400).json({ error: 'id e nome obrigatórios' });
 
     const temasValidos   = ['dark','light','hc','ml'];
-    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','importar','index','config'];
+    const modulosValidos = ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','tarefas','importar','index','config'];
 
     const data = {
       nome,

@@ -20,7 +20,7 @@ import {
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Boxes,
   FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
-  Heart, PackageCheck, Banknote,
+  Heart, PackageCheck, Banknote, KanbanSquare,
 } from 'lucide-react';
 
 // ─── Mapa de módulos ──────────────────────────────────────────────────────────
@@ -47,6 +47,7 @@ const ROTAS = [
   { key: 'fin-posicao',    moduleId: 'financas',       label: 'Posição Financeira',secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/posicao'   },
   // Sistema
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },
+  { key: 'tarefas',        moduleId: 'tarefas',        label: 'Tarefas',           secao: 'Sistema',    Icon: KanbanSquare,      react: true,  href: '/admin/tarefas'        },
   { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal, react: true,  href: '/sistema/config'       },
 ];
 
