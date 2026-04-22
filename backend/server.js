@@ -4340,6 +4340,164 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
   }
 });
 
+// ── Etiqueta de Transporte via Bling API v3 → ZPL para QZ Tray ───────
+// GET /bling/etiqueta-transporte/:nfId
+//   → { ok, format: 'zpl', zpl } (preferido)
+//   → { ok, format: 'pdf', pdf } (base64)
+//   → { ok, format: 'pdf_url', pdfUrl } (fallback browser)
+//
+// O Bling web chama `gerarEtiquetasTransporte` (AJAX interno) que retorna
+// ZPL e dispara QZ Tray. Para nós, replicamos via API v3 tentando múltiplos
+// caminhos em sequência. Use /bling/debug/etiqueta/:nfId para inspecionar
+// a resposta crua quando algo não funcionar.
+app.get('/bling/etiqueta-transporte/:nfId', async (req, res, next) => {
+  const nfId = String(req.params.nfId).replace(/\D/g, '');
+  if (!nfId) return res.status(400).json({ error: 'id_invalido', message: 'ID da NF deve ser numérico.' });
+
+  try {
+    const token = await blingEnsureToken();
+    const headers = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+
+    // Helper: tenta um endpoint, classifica o retorno (zpl/pdf/url/json)
+    async function tryEndpoint(url, via) {
+      try {
+        const r = await fetch(url, { headers });
+        const ct = r.headers.get('content-type') || '';
+        const st = r.status;
+        console.log(`[etiq-transp/${nfId}] (${via}) ${st} ct=${ct}`);
+        if (!r.ok) return null;
+
+        // PDF / octet
+        if (ct.includes('pdf') || ct.includes('octet')) {
+          const buf = await r.arrayBuffer();
+          const sig = Buffer.from(buf.slice(0, 4)).toString('ascii');
+          if (sig === '%PDF') return { format: 'pdf', pdf: Buffer.from(buf).toString('base64'), via };
+          const txt = Buffer.from(buf).toString('utf8');
+          if (txt.includes('^XA')) return { format: 'zpl', zpl: txt, via };
+        }
+
+        const raw = await r.text();
+        // ZPL direto
+        if (raw.trimStart().startsWith('^XA')) return { format: 'zpl', zpl: raw, via };
+
+        // JSON — pode trazer ZPL inline ou URL
+        let data = {};
+        try { data = JSON.parse(raw); } catch {}
+        const root = data?.data || data;
+        const arr  = Array.isArray(root) ? root : [root];
+
+        for (const it of arr) {
+          const zpl = it?.zpl || it?.content || it?.conteudo || it?.label;
+          if (typeof zpl === 'string' && zpl.includes('^XA')) return { format: 'zpl', zpl, via };
+          const u = it?.url || it?.link || it?.linkEtiqueta || it?.urlEtiqueta || it?.pdfUrl;
+          if (typeof u === 'string' && /^https?:\/\//.test(u)) {
+            // Tenta baixar o PDF
+            try {
+              const rr = await fetch(u);
+              const cc = rr.headers.get('content-type') || '';
+              if (rr.ok && (cc.includes('pdf') || cc.includes('octet'))) {
+                const bb = await rr.arrayBuffer();
+                const ss = Buffer.from(bb.slice(0, 4)).toString('ascii');
+                if (ss === '%PDF') return { format: 'pdf', pdf: Buffer.from(bb).toString('base64'), via: `${via}+url` };
+                const tt = Buffer.from(bb).toString('utf8');
+                if (tt.includes('^XA')) return { format: 'zpl', zpl: tt, via: `${via}+url` };
+              }
+            } catch {}
+            return { format: 'pdf_url', pdfUrl: u, via };
+          }
+        }
+      } catch (e) {
+        console.warn(`[etiq-transp/${nfId}] (${via}) erro: ${e.message}`);
+      }
+      return null;
+    }
+
+    // Caminho A — Logísticas / Etiquetas (API v3)
+    const pathsLogistica = [
+      `${BLING_API_BASE}/logisticas/etiquetas?idsNotas[]=${nfId}`,
+      `${BLING_API_BASE}/logisticas/etiquetas?idNota=${nfId}`,
+      `${BLING_API_BASE}/logisticas/objetos?idsNotas[]=${nfId}`,
+    ];
+    for (const url of pathsLogistica) {
+      const hit = await tryEndpoint(url, `logisticas:${url.split('?')[0].split('/').pop()}`);
+      if (hit) return res.json({ ok: true, nfId, tipo: 'transporte', ...hit });
+    }
+
+    // Caminho B — campos no detalhe da NF (linkEtiqueta/urlEtiqueta/transporte)
+    try {
+      const detResp = await fetch(`${BLING_API_BASE}/nfe/${nfId}`, { headers });
+      if (detResp.ok) {
+        const det = await detResp.json().catch(() => ({}));
+        const nf  = det?.data || det;
+        const cand =
+          nf?.linkEtiqueta || nf?.urlEtiqueta ||
+          nf?.transporte?.linkEtiqueta || nf?.transporte?.urlEtiqueta ||
+          nf?.volumes?.[0]?.linkEtiqueta || nf?.volumes?.[0]?.url || null;
+        if (cand) {
+          const hit = await tryEndpoint(cand, 'nfe.linkEtiqueta');
+          if (hit) return res.json({ ok: true, nfId, tipo: 'transporte', ...hit });
+          return res.json({ ok: true, nfId, tipo: 'transporte', format: 'pdf_url', pdfUrl: cand, via: 'nfe.linkEtiqueta_raw' });
+        }
+      }
+    } catch (e) {
+      console.warn(`[etiq-transp/${nfId}] detalhe NF erro: ${e.message}`);
+    }
+
+    return res.status(404).json({
+      error: 'etiqueta_nao_disponivel',
+      message: 'Etiqueta de transporte não disponível via API Bling. Inspecione /bling/debug/etiqueta/' + nfId,
+      nfId,
+    });
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    console.error(`[GET /bling/etiqueta-transporte/${nfId}]`, err.message);
+    next(err);
+  }
+});
+
+// ── DEBUG: dumpa resposta crua dos endpoints candidatos a etiqueta ──
+// GET /bling/debug/etiqueta/:nfId
+app.get('/bling/debug/etiqueta/:nfId', async (req, res, next) => {
+  const nfId = String(req.params.nfId).replace(/\D/g, '');
+  try {
+    const token = await blingEnsureToken();
+    const headers = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+    const out = {};
+
+    async function probe(url) {
+      try {
+        const r = await fetch(url, { headers });
+        const ct = r.headers.get('content-type') || '';
+        const st = r.status;
+        const txt = await r.text();
+        return { url, status: st, contentType: ct, body: txt.slice(0, 1200) };
+      } catch (e) { return { url, error: e.message }; }
+    }
+
+    out.logisticas_idsNotas  = await probe(`${BLING_API_BASE}/logisticas/etiquetas?idsNotas[]=${nfId}`);
+    out.logisticas_idNota    = await probe(`${BLING_API_BASE}/logisticas/etiquetas?idNota=${nfId}`);
+    out.logisticas_objetos   = await probe(`${BLING_API_BASE}/logisticas/objetos?idsNotas[]=${nfId}`);
+    out.nfe_detalhe          = await probe(`${BLING_API_BASE}/nfe/${nfId}`);
+
+    // Lista apenas campos candidatos do detalhe
+    try {
+      const nfe = JSON.parse(out.nfe_detalhe.body || '{}')?.data || {};
+      out.nfe_campos_relevantes = {
+        keys: Object.keys(nfe),
+        linkEtiqueta: nfe.linkEtiqueta || null,
+        urlEtiqueta:  nfe.urlEtiqueta || null,
+        transporte:   nfe.transporte || null,
+        volumes:      nfe.volumes || null,
+      };
+    } catch {}
+
+    res.json({ nfId, ...out });
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    next(err);
+  }
+});
+
 // ── DEBUG: testa o endpoint de DANFE para um ID específico ───────
 // GET /bling/debug/danfe/:id  — retorna raw response do Bling
 // Query params:
