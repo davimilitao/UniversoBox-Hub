@@ -127,9 +127,15 @@ async function printDanfe(blingNfId, onStatus) {
 
   // ── 2. Se veio pdfUrl (viewer HTML ou URL direta) ────────────────────
   if (!b64pdf && data.pdfUrl) {
-    // Se for URL do viewer Bling (doc.view.php) → abre no browser diretamente
-    if (data.pdfUrl.includes('doc.view.php') || data.via === 'linkDanfe_browser') {
-      onStatus?.('Abrindo DANFE no navegador…');
+    // Viewer Bling (doc.view.php / danfe.simplificado.php) → abre no browser
+    // Usuário já está logado no Bling — browser renderiza e imprime direto (10x15)
+    const isBrowserUrl =
+      data.pdfUrl.includes('doc.view.php') ||
+      data.pdfUrl.includes('danfe.simplificado.php') ||
+      data.via === 'linkDanfe_browser' ||
+      data.via === 'danfe_simplificado_browser';
+    if (isBrowserUrl) {
+      onStatus?.('Abrindo DANFE Simplificada no Bling…');
       window.open(data.pdfUrl, '_blank');
       return;
     }
