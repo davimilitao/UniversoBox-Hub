@@ -13,6 +13,7 @@
 
 import { useState } from 'react';
 import { Package, Truck, BarChart2, Plus, FileCheck, Clock } from 'lucide-react';
+import { Toast } from '../../components/ui';
 import AbaPedidosAbertos  from './compras/AbaPedidosAbertos.jsx';
 import AbaPedidosFechados from './compras/AbaPedidosFechados.jsx';
 import AbaACaminho        from './compras/AbaACaminho.jsx';
@@ -27,20 +28,6 @@ const ABAS = [
   { id: 'bi',       label: 'Inteligência',       Icon: BarChart2  },
 ];
 
-function Toast({ msg, tipo }) {
-  if (!msg) return null;
-  return (
-    <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl text-sm font-medium border max-w-sm
-      ${tipo === 'ok'
-        ? 'bg-emerald-900/90 border-emerald-600 text-emerald-300'
-        : tipo === 'err'
-        ? 'bg-red-900/90 border-red-600 text-red-300'
-        : 'bg-slate-800/95 border-white/10 text-slate-200'
-      }`}>
-      {msg}
-    </div>
-  );
-}
 
 export default function Compras() {
   const [aba,   setAba]   = useState('abertos');

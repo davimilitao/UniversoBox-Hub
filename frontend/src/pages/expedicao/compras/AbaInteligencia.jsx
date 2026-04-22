@@ -9,8 +9,9 @@
  */
 
 import { useState, useEffect } from 'react';
-import { AlertTriangle, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { AlertTriangle, TrendingUp, TrendingDown, Loader2, Truck } from 'lucide-react';
 import { nomeMes } from './helpers.js';
+import { StatCard } from '../../../components/ui';
 
 function ProductImg({ src, size = 40 }) {
   const [err, setErr] = useState(false);
@@ -51,29 +52,40 @@ export default function AbaInteligencia() {
   const varPedidos  = mesAtual && mesAnterior && mesAnterior.pedidos > 0
     ? Math.round(((mesAtual.pedidos - mesAnterior.pedidos) / mesAnterior.pedidos) * 100) : null;
 
+  const leadTimeMediaGeral = (data.leadTime || []).length
+    ? Math.round((data.leadTime).reduce((s, l) => s + l.media, 0) / data.leadTime.length)
+    : null;
+
   const max = Math.max(...(data.byMonth || []).map(m => m.pedidos), 1);
 
   return (
     <div className="flex flex-col gap-6">
       {/* KPIs */}
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: 'Pedidos (6m)',   value: data.totalPedidos,
-            extra: varPedidos !== null
-              ? <span className={`flex items-center gap-0.5 text-xs font-bold mt-1 ${varPedidos >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {varPedidos >= 0 ? <TrendingUp size={11}/> : <TrendingDown size={11}/>}
-                  {varPedidos >= 0 ? '+' : ''}{varPedidos}% vs mês ant.
-                </span> : null },
-          { label: 'Unidades (6m)', value: (data.totalUnidades || 0).toLocaleString('pt-BR') },
-          { label: 'Em Trânsito',   value: data.emTransito,
-            color: data.emTransito > 0 ? 'text-blue-400' : 'text-slate-200' },
-        ].map(({ label, value, extra, color }) => (
-          <div key={label} className="rounded-xl bg-slate-800 border border-white/5 p-4">
-            <p className="text-xs text-slate-500 uppercase tracking-wide font-bold">{label}</p>
-            <p className={`text-3xl font-black mt-1 ${color || 'text-slate-100'}`}>{value}</p>
-            {extra}
-          </div>
-        ))}
+      <div className={`grid gap-4 ${leadTimeMediaGeral !== null ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-3'}`}>
+        <StatCard
+          titulo="Pedidos (6m)"
+          valor={String(data.totalPedidos ?? 0)}
+          variante={varPedidos !== null ? (varPedidos >= 0 ? 'success' : 'danger') : 'default'}
+          trend={varPedidos !== null ? `${varPedidos >= 0 ? '+' : ''}${varPedidos}% vs mês ant.` : undefined}
+        />
+        <StatCard
+          titulo="Unidades (6m)"
+          valor={(data.totalUnidades || 0).toLocaleString('pt-BR')}
+          variante="default"
+        />
+        <StatCard
+          titulo="Em Trânsito"
+          valor={String(data.emTransito ?? 0)}
+          variante={data.emTransito > 0 ? 'accent' : 'default'}
+          icon={Truck}
+        />
+        {leadTimeMediaGeral !== null && (
+          <StatCard
+            titulo="Lead time médio"
+            valor={`~${leadTimeMediaGeral}d`}
+            variante={leadTimeMediaGeral >= 7 ? 'danger' : leadTimeMediaGeral <= 3 ? 'success' : 'default'}
+          />
+        )}
       </div>
 
       {/* Tabs BI */}

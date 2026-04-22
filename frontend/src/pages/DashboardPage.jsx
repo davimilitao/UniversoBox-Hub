@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import AcaminhoWidget from './expedicao/compras/AcaminhoWidget.jsx';
 import { auth } from '../firebase';
 import {
   Package, Zap, Building2, Boxes,
@@ -600,10 +601,13 @@ export function DashboardPage() {
               </div>
             </div>
 
-            {/* 3 — Código de autorização ML */}
+            {/* 3 — A Caminho: itens em trânsito (só aparece se houver itens) */}
+            <AcaminhoWidget />
+
+            {/* 4 — Código de autorização ML */}
             <AuthCodeCard authCode={data.authCode} />
 
-            {/* 4 — Tabela semanal + atalhos */}
+            {/* 5 — Tabela semanal + atalhos */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <CutoffWeek cutoffSchedule={data.cutoffSchedule} />
               <div className="grid grid-cols-2 gap-2 content-start">
@@ -630,7 +634,7 @@ export function DashboardPage() {
               </div>
             </div>
 
-            {/* 5 — Lista de pedidos do dia */}
+            {/* 6 — Lista de pedidos do dia */}
             <PedidosRecentes orders={data.orders || []} />
 
             <p className="text-center text-slate-700 text-xs pb-2">
