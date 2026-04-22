@@ -20,7 +20,7 @@ import {
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Boxes,
   FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
-  Heart, PackageCheck, Banknote, KanbanSquare,
+  Heart, PackageCheck, Banknote, KanbanSquare, Palette,
 } from 'lucide-react';
 
 // ─── Mapa de módulos ──────────────────────────────────────────────────────────
@@ -49,6 +49,7 @@ const ROTAS = [
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },
   { key: 'tarefas',        moduleId: 'tarefas',        label: 'Tarefas',           secao: 'Sistema',    Icon: KanbanSquare,      react: true,  href: '/admin/tarefas'        },
   { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal, react: true,  href: '/sistema/config'       },
+  { key: 'design-system',  moduleId: 'design-system',  label: 'Design System',     secao: 'Sistema',    Icon: Palette,           react: true,  href: '/admin/design-system'  },
 ];
 
 const SECOES = ['Expedição', 'Catálogo', 'Financeiro', 'Sistema'];

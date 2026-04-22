@@ -14,6 +14,7 @@ import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
+import { Skeleton } from '../../components/ui';
 
 const BRL  = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const PERC = v => `${((v || 0) * 100).toFixed(1)}%`;
@@ -27,9 +28,6 @@ function diasAtras(iso) {
   return `${d} dias atrás`;
 }
 
-function Skeleton({ h = 'h-20' }) {
-  return <div className={`rounded-xl bg-slate-800 animate-pulse ${h}`} />;
-}
 
 function KpiCard({ label, valor, sub, cor = 'slate', icon: Icon }) {
   const cores = { emerald:'text-emerald-400', red:'text-red-400', blue:'text-blue-400', orange:'text-orange-400', slate:'text-slate-200', yellow:'text-yellow-400' };

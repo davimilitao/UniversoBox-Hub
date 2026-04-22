@@ -13,6 +13,7 @@ import {
   RefreshCw, AlertTriangle, Clock, LayoutDashboard, Upload,
   ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp,
 } from 'lucide-react';
+import { Skeleton } from '../../components/ui';
 
 const BRL  = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const NUM  = new Intl.NumberFormat('pt-BR');
@@ -27,9 +28,6 @@ function diasAtras(iso) {
   return `há ${d} dias`;
 }
 
-function Skeleton({ h = 'h-20' }) {
-  return <div className={`rounded-xl bg-slate-800 animate-pulse ${h}`} />;
-}
 
 // Lê saldo do caixa do localStorage (mesmo padrão do PainelFinanceiro)
 function lerSaldoCaixa(mes) {

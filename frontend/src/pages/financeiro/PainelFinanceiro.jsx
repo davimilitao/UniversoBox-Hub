@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../../utils/getAuthToken';
 import { Wifi, WifiOff, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, RefreshCw, Wallet, AlertTriangle } from 'lucide-react';
+import { Skeleton } from '../../components/ui';
 
 const MES_NOMES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
@@ -29,9 +30,6 @@ function fmtPct(v) {
   return `${(v || 0).toFixed(1)}%`;
 }
 
-function Skeleton({ h = 'h-20' }) {
-  return <div className={`rounded-xl bg-slate-800 animate-pulse ${h}`} />;
-}
 
 function KpiCard({ label, valor, sub, cor = 'slate' }) {
   const cores = {

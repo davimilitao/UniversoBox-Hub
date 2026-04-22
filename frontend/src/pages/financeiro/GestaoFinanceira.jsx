@@ -40,25 +40,7 @@ import { ContasDespesas }    from './components/ContasDespesas';
 import { FormNovaCompra }    from './components/FormNovaCompra';
 import MeiosPagamento        from './components/MeiosPagamento';
 import { HelpBanner }        from './components/HelpBanner';
-
-// ─── Helpers locais ───────────────────────────────────────────────────────────
-
-function Skeleton({ h = 'h-32' }) {
-  return <div className={`rounded-xl bg-slate-800 border border-white/5 animate-pulse ${h}`} />;
-}
-
-function Toast({ msg, tipo }) {
-  if (!msg) return null;
-  return (
-    <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl text-sm font-medium border
-      ${tipo === 'ok'
-        ? 'bg-emerald-900/90 border-emerald-600 text-emerald-300'
-        : 'bg-red-900/90 border-red-600 text-red-300'
-      }`}>
-      {msg}
-    </div>
-  );
-}
+import { Skeleton, Toast }  from '../../components/ui';
 
 function TabBtn({ id, label, badge, ativo, onClick }) {
   const isAtivo = ativo === id;

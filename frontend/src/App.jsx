@@ -33,6 +33,7 @@ import ConfiguracoesSistema   from './pages/sistema/ConfiguracoesSistema';
 import TaskBoard              from './pages/sistema/TaskBoard';
 import Compras                from './pages/expedicao/Compras';
 import GestaoColetas          from './pages/expedicao/GestaoColetas';
+import DesignSystem           from './pages/admin/DesignSystem';
 
 export default function App() {
   return (
@@ -72,6 +73,7 @@ export default function App() {
         <Route path="/sistema/config"      element={<ConfiguracoesSistema />} />
         <Route path="/admin/tarefas"       element={<TaskBoard />} />
         <Route path="/sistema/tarefas"     element={<Navigate to="/admin/tarefas" replace />} />
+        <Route path="/admin/design-system" element={<DesignSystem />} />
       </Route>
 
       {/* Qualquer rota desconhecida → painel principal */}

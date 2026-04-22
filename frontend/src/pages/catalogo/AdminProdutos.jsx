@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { getAuthToken } from '../../utils/getAuthToken';
 import { ImageEditor } from '../../components/ImageEditor';
+import { Toast } from '../../components/ui';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
@@ -305,20 +306,6 @@ function SaveBtn({ saving, saved, onClick, label = 'Salvar', size = 'sm' }) {
   );
 }
 
-// ── Toast (interno) ───────────────────────────────────────────────────────────
-function Toast({ msg, type }) {
-  if (!msg) return null;
-  const colors = {
-    ok:  'bg-emerald-500/15 border-emerald-500/30 text-emerald-300',
-    err: 'bg-red-500/15 border-red-500/30 text-red-300',
-    info:'bg-blue-500/15 border-blue-500/30 text-blue-300',
-  };
-  return (
-    <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl border text-sm font-medium shadow-2xl animate-slide-in-up ${colors[type] || colors.info}`}>
-      {msg}
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
@@ -720,7 +707,7 @@ export default function AdminProdutos() {
     <div className="flex h-full min-h-0 overflow-hidden bg-slate-950 animate-fade-in">
 
       {/* Toast */}
-      {toast && <Toast msg={toast.msg} type={toast.type} />}
+      {toast && <Toast msg={toast.msg} type={toast.type} position="center" />}
 
       {/* ══ ESQUERDA ══════════════════════════════════════════════════════════ */}
       <aside className="flex flex-col w-[260px] shrink-0 border-r border-white/[0.06] overflow-hidden bg-slate-950">

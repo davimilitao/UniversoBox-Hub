@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { auth } from '../../firebase';
 import { getAuthToken } from '../../utils/getAuthToken';
+import { Toast } from '../../components/ui';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -92,19 +93,6 @@ async function apiFetch(path, opts = {}) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function Toast({ msg, type }) {
-  if (!msg) return null;
-  const cls = {
-    ok:   'bg-emerald-500/15 border-emerald-500/30 text-emerald-300',
-    err:  'bg-red-500/15 border-red-500/30 text-red-300',
-    info: 'bg-blue-500/15 border-blue-500/30 text-blue-300',
-  };
-  return (
-    <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl border text-sm font-medium shadow-2xl animate-fade-in ${cls[type] || cls.info}`}>
-      {msg}
-    </div>
-  );
-}
 
 function SectionCard({ icon: Icon, title, children, right }) {
   return (
@@ -163,7 +151,7 @@ export default function ConfiguracoesSistema() {
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-slate-950 animate-fade-in">
-      {toast && <Toast msg={toast.msg} type={toast.type} />}
+      {toast && <Toast msg={toast.msg} type={toast.type} position="center" />}
 
       {/* ── Page header + tabs ─────────────────────────────────────────────── */}
       <div className="shrink-0 border-b border-white/[0.05] px-5 pt-4 pb-0">

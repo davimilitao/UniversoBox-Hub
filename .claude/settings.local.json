@@ -4,7 +4,10 @@
       "mcp__Claude_Preview__preview_start",
       "Bash(npm install:*)",
       "Bash(Get-ChildItem \"C:\\\\Projetos\\\\UniversoBox-Hub\\\\backend\\\\\" -Force -Name | Select-String \"env)",
-      "Bash(\\\\.env\")"
+      "Bash(\\\\.env\")",
+      "Bash(xargs grep *)",
+      "Bash(find /c/Projetos/UniversoBox-Hub/frontend -maxdepth 2 -name \"package.json\" -exec cat {} \\\\;)",
+      "Bash(npx vite *)"
     ]
   }
 }
