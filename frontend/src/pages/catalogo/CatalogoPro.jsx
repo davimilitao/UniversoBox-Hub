@@ -66,6 +66,74 @@ function fmtDims(p) {
   return `${p.width}×${p.height}×${p.depth} cm`;
 }
 
+// ─── Cálculo de Margem por Marketplace ───────────────────────────────────────
+
+function _freteML(kg) {
+  if (kg <= 0.3) return 6.55;
+  if (kg <= 0.5) return 9.00;
+  if (kg <= 1)   return 13.00;
+  if (kg <= 2)   return 17.50;
+  if (kg <= 3)   return 21.00;
+  if (kg <= 5)   return 26.50;
+  if (kg <= 7)   return 33.00;
+  if (kg <= 10)  return 41.00;
+  return 41 + Math.ceil((kg - 10) / 5) * 10;
+}
+
+function _freteShopee(kg) {
+  if (kg <= 0.3) return 5.00;
+  if (kg <= 0.5) return 7.00;
+  if (kg <= 1)   return 10.50;
+  if (kg <= 2)   return 15.00;
+  if (kg <= 5)   return 23.00;
+  return 23 + Math.ceil((kg - 5) / 5) * 8;
+}
+
+function _pesoEfetivo(p) {
+  const fisico  = parseFloat(p.weight) || 0;
+  const cubado  = ((parseFloat(p.height) || 0) * (parseFloat(p.width) || 0) * (parseFloat(p.depth) || 0)) / 6000;
+  return cubado > 0 ? Math.max(fisico, cubado) : fisico;
+}
+
+function calcMargem(produto, taxaPct, calcFrete) {
+  const preco = parseFloat(produto.preco) || 0;
+  const custo = parseFloat(produto.precoCusto) || 0;
+  if (!preco || !custo) return null;
+  const peso    = _pesoEfetivo(produto) || 0.5;
+  const taxa    = preco * (taxaPct / 100);
+  const imposto = preco * 0.075;
+  const frete   = calcFrete(peso);
+  const total   = custo + 0.50 + taxa + frete + imposto;
+  const lucro   = preco - total;
+  return { margem: (lucro / preco) * 100, lucro, frete, custo: total };
+}
+
+const calcMargemML     = p => calcMargem(p, 11,   _freteML);
+const calcMargemShopee = p => calcMargem(p, 12,   _freteShopee);
+
+// ─── Margem Badge ────────────────────────────────────────────────────────────
+function MargemBadge({ margem, label, compact = false }) {
+  if (!margem) return <span className="text-[10px] text-slate-600">—</span>;
+  const pct = margem.margem;
+  const cor = pct < 10
+    ? 'text-red-400 bg-red-500/10 border-red-500/20'
+    : pct < 20
+    ? 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20'
+    : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+  if (compact) return (
+    <div className={`flex flex-col items-center px-1.5 py-0.5 rounded border ${cor}`} title={`${label}: ${pct.toFixed(1)}%`}>
+      <span className="text-[8px] opacity-60 leading-tight">{label}</span>
+      <span className="text-[10px] font-bold tabular-nums leading-tight">{pct.toFixed(1)}%</span>
+    </div>
+  );
+  return (
+    <div className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs ${cor}`}>
+      <span className="opacity-70">{label}</span>
+      <span className="font-bold tabular-nums">{pct.toFixed(1)}%</span>
+    </div>
+  );
+}
+
 // ─── Score Badge ──────────────────────────────────────────────────────────────
 function ScoreBadge({ score, size = 'sm' }) {
   const color = score >= 80 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
@@ -155,15 +223,22 @@ function ProductCard({ produto, selected, onClick }) {
       <div className="flex flex-col flex-1 p-3 gap-1.5">
         <p className="text-[10px] font-mono text-slate-500 uppercase tracking-wider leading-none">{produto.sku}</p>
         <p className="text-xs font-medium text-slate-200 leading-snug line-clamp-2">{produto.name}</p>
-        <div className="flex items-center justify-between mt-auto pt-1.5">
+        <div className="flex items-center justify-between mt-auto pt-1">
           <span className="text-[10px] text-slate-500">
-            {produto.stock != null ? `Estoque: ${produto.stock}` : 'Sem estoque'}
+            {produto.stock != null ? `Est: ${produto.stock}` : 'S/estoque'}
           </span>
           {produto.preco
             ? <span className="text-[10px] font-semibold text-emerald-400">{fmtBrl(produto.preco)}</span>
             : <span className="text-[10px] text-slate-600 italic">sem preço</span>
           }
         </div>
+        {/* Margem por marketplace */}
+        {(() => { const ml = calcMargemML(produto); const sh = calcMargemShopee(produto); return (ml || sh) ? (
+          <div className="flex gap-1 pt-0.5">
+            <MargemBadge margem={ml} label="ML" compact />
+            <MargemBadge margem={sh} label="Shopee" compact />
+          </div>
+        ) : null; })()}
       </div>
     </button>
   );
@@ -213,6 +288,16 @@ function ProductRow({ produto, selected, onClick }) {
       <span className="hidden md:block text-xs text-emerald-400 w-20 text-right shrink-0 tabular-nums">
         {fmtBrl(produto.preco)}
       </span>
+
+      {/* Margem ML */}
+      <div className="hidden lg:flex shrink-0">
+        <MargemBadge margem={calcMargemML(produto)} label="ML" compact />
+      </div>
+
+      {/* Margem Shopee */}
+      <div className="hidden xl:flex shrink-0">
+        <MargemBadge margem={calcMargemShopee(produto)} label="Shopee" compact />
+      </div>
 
       {/* Score */}
       <div className="shrink-0">
@@ -404,6 +489,38 @@ function StudioPanel({ produto, onClose }) {
               </section>
             )}
 
+            {/* Margem Estimada */}
+            {(() => {
+              const ml = calcMargemML(produto);
+              const sh = calcMargemShopee(produto);
+              if (!ml && !sh) return null;
+              return (
+                <section className="space-y-2">
+                  <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest">Margem Estimada</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <MargemBadge margem={ml} label="ML Clássico (11%)" />
+                    <MargemBadge margem={sh} label="Shopee (12%)" />
+                  </div>
+                  {ml && (
+                    <div className="bg-slate-800/50 rounded-lg p-2.5 space-y-1 border border-white/[0.05]">
+                      <div className="flex justify-between text-[10px] text-slate-500">
+                        <span>Custo total est.</span>
+                        <span>{fmtBrl(ml.custo)}</span>
+                      </div>
+                      <div className="flex justify-between text-[10px] text-slate-500">
+                        <span>Frete est. (ML)</span>
+                        <span>{fmtBrl(ml.frete)}</span>
+                      </div>
+                      <div className={`flex justify-between text-[10px] font-semibold border-t border-white/[0.05] pt-1 ${ml.lucro >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        <span>Lucro est.</span>
+                        <span>{fmtBrl(ml.lucro)}</span>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              );
+            })()}
+
             {/* Ações */}
             <section className="space-y-2 pt-2">
               <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest">Ações</p>
@@ -559,6 +676,7 @@ export default function CatalogoPro() {
   const [filtros, setFiltros] = useState({
     semFoto: false, semEan: false, semDims: false, semPreco: false, estoqueZero: false,
     marca: null, modalidade: null, grupo: null,
+    margInviavelML: false, margInviavelShopee: false,
   });
 
   // Opções dinâmicas
@@ -627,6 +745,10 @@ export default function CatalogoPro() {
     if (filtros.modalidade)   arr = arr.filter(p => p._mods.has(filtros.modalidade));
     if (filtros.grupo)        arr = arr.filter(p => p._grupos.has(filtros.grupo));
 
+    // Filtros de margem
+    if (filtros.margInviavelML)     arr = arr.filter(p => { const m = calcMargemML(p);     return m && m.margem < 10; });
+    if (filtros.margInviavelShopee) arr = arr.filter(p => { const m = calcMargemShopee(p); return m && m.margem < 10; });
+
     return arr;
   }, [produtos, busca, filtros]);
 
@@ -638,6 +760,8 @@ export default function CatalogoPro() {
     semPreco:   produtos.filter(p => !p.preco).length,
     estoqueZero: produtos.filter(p => p.stock === 0).length,
     avgScore:   produtos.length ? Math.round(produtos.reduce((a, p) => a + calcScore(p), 0) / produtos.length) : 0,
+    margInviavelML:     produtos.filter(p => { const m = calcMargemML(p);     return m && m.margem < 10; }).length,
+    margInviavelShopee: produtos.filter(p => { const m = calcMargemShopee(p); return m && m.margem < 10; }).length,
   }), [produtos]);
 
   function toggleFiltro(key) {
@@ -647,7 +771,7 @@ export default function CatalogoPro() {
     setFiltros(f => ({ ...f, [key]: f[key] === value ? null : value }));
   }
   function limparFiltros() {
-    setFiltros({ semFoto: false, semEan: false, semDims: false, semPreco: false, estoqueZero: false, marca: null, modalidade: null, grupo: null });
+    setFiltros({ semFoto: false, semEan: false, semDims: false, semPreco: false, estoqueZero: false, marca: null, modalidade: null, grupo: null, margInviavelML: false, margInviavelShopee: false });
     setBusca('');
   }
 
@@ -698,10 +822,12 @@ export default function CatalogoPro() {
 
         {/* Stats rápidas */}
         <div className="shrink-0 flex items-center gap-2 px-4 py-2 border-b border-white/[0.04] bg-slate-900/50 overflow-x-auto">
-          <StatPill label="Sem foto"    value={stats.semFoto}     active={filtros.semFoto}    onClick={() => toggleFiltro('semFoto')}    color="red" />
-          <StatPill label="Sem EAN"     value={stats.semEan}      active={filtros.semEan}     onClick={() => toggleFiltro('semEan')}     color="amber" />
-          <StatPill label="Sem preço"   value={stats.semPreco}    active={filtros.semPreco}   onClick={() => toggleFiltro('semPreco')}   color="amber" />
-          <StatPill label="Estoque zero" value={stats.estoqueZero} active={filtros.estoqueZero} onClick={() => toggleFiltro('estoqueZero')} color="red" />
+          <StatPill label="Sem foto"       value={stats.semFoto}             active={filtros.semFoto}            onClick={() => toggleFiltro('semFoto')}            color="red" />
+          <StatPill label="Sem EAN"        value={stats.semEan}              active={filtros.semEan}             onClick={() => toggleFiltro('semEan')}             color="amber" />
+          <StatPill label="Sem preço"      value={stats.semPreco}            active={filtros.semPreco}           onClick={() => toggleFiltro('semPreco')}           color="amber" />
+          <StatPill label="Estoque zero"   value={stats.estoqueZero}         active={filtros.estoqueZero}        onClick={() => toggleFiltro('estoqueZero')}        color="red" />
+          <StatPill label="Inviável ML"    value={stats.margInviavelML}      active={filtros.margInviavelML}     onClick={() => toggleFiltro('margInviavelML')}     color="red" />
+          <StatPill label="Inviável Shopee" value={stats.margInviavelShopee} active={filtros.margInviavelShopee} onClick={() => toggleFiltro('margInviavelShopee')} color="amber" />
         </div>
 
         {/* Barra de busca + filtros */}
@@ -761,6 +887,15 @@ export default function CatalogoPro() {
                 <Chip label="Sem dimensões"  active={filtros.semDims}     onClick={() => toggleFiltro('semDims')}     color="amber" />
                 <Chip label="Sem preço"      active={filtros.semPreco}    onClick={() => toggleFiltro('semPreco')}    color="amber" />
                 <Chip label="Estoque zero"   active={filtros.estoqueZero} onClick={() => toggleFiltro('estoqueZero')} color="red" />
+              </div>
+            </div>
+
+            {/* Margem */}
+            <div>
+              <p className="text-[10px] text-slate-600 uppercase tracking-widest mb-2 font-semibold">Viabilidade de Margem</p>
+              <div className="flex flex-wrap gap-1.5">
+                <Chip label="Inviável ML (&lt;10%)"    active={filtros.margInviavelML}     onClick={() => toggleFiltro('margInviavelML')}     color="red" />
+                <Chip label="Inviável Shopee (&lt;10%)" active={filtros.margInviavelShopee} onClick={() => toggleFiltro('margInviavelShopee')} color="amber" />
               </div>
             </div>
 
@@ -852,6 +987,8 @@ export default function CatalogoPro() {
                     <span className="hidden md:block w-16 shrink-0">Marca</span>
                     <span className="hidden sm:block w-16 text-right shrink-0">Estoque</span>
                     <span className="hidden md:block w-20 text-right shrink-0">Preço</span>
+                    <span className="hidden lg:block w-12 text-center shrink-0">ML</span>
+                    <span className="hidden xl:block w-16 text-center shrink-0">Shopee</span>
                     <span className="w-10 shrink-0">Score</span>
                     <div className="w-4 shrink-0" />
                   </div>
