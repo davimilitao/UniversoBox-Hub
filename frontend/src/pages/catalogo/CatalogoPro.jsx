@@ -414,6 +414,13 @@ function StudioPanel({ produto, onClose }) {
                 <ExternalLink size={13} />
                 Editar no Studio
               </Link>
+              <Link
+                to={`/financeiro/calculadora?sku=${encodeURIComponent(produto.sku)}`}
+                className="flex items-center gap-2 w-full px-3 py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium transition-colors border border-emerald-500/20"
+              >
+                <TrendingUp size={13} />
+                Analisar preço
+              </Link>
             </section>
           </div>
         )}
