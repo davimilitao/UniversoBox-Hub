@@ -4192,9 +4192,22 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
     const token = await blingEnsureToken();
 
     // ══════════════════════════════════════════════════════════════════════
-    // PASSO 1 — Detalhe da NF: o Bling retorna linkDanfe / linkDanfeFull
-    // diretamente no campo data da resposta. É a forma mais confiável.
+    // SIMPLIFICADA (10x15 térmica) — curto-circuito ANTES de qualquer
+    // fallback para linkPDF/linkPdf/linkDanfeFull (esses são DANFE A4 com
+    // canhoto "RECEBEMOS DE..." e NÃO podem ser usados como simplificada).
+    // O relatório interno /relatorios/danfe.simplificado.php?idNota1=X é o
+    // único caminho confiável — requer sessão web do Bling (cookie), mas
+    // o browser do usuário já está logado.
     // ══════════════════════════════════════════════════════════════════════
+    if (tipoParam === 'simplificado') {
+      const simplUrl = `https://www.bling.com.br/relatorios/danfe.simplificado.php?idNota1=${nfId}`;
+      console.log(`[danfe/${nfId}] SIMPLIFICADA → ${simplUrl}`);
+      return res.json({
+        ok: true, nfId, tipo: 'simplificado',
+        pdfUrl: simplUrl, via: 'danfe_simplificado_browser',
+      });
+    }
+
     try {
       const detResp = await fetch(`${BLING_API_BASE}/nfe/${nfId}`, {
         headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
@@ -4205,13 +4218,10 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
 
         console.log(`[danfe/${nfId}] detalhe sit=${nf?.situacao} campos=[${Object.keys(nf).join(',')}]`);
 
-        // Prioridade: respeita o tipo solicitado
-        // linkDanfeSimplificado → etiqueta 10x15 (térmicas)
-        // linkDanfeFull / linkPDF → DANFE completa A4
+        // COMPLETA (A4): linkPDF > linkPdf > linkDanfeFull
+        // (simplificado já saiu acima, aqui só cai tipo 'completa')
         // ATENÇÃO: linkDanfe = viewer HTML/SVG — NÃO é PDF binário!
-        const linkPdf = tipoParam === 'simplificado'
-          ? (nf?.linkDanfeSimplificado || nf?.linkPDF || nf?.linkPdf || nf?.linkDanfeFull)
-          : (nf?.linkPDF || nf?.linkPdf || nf?.linkDanfeFull || nf?.linkDanfeSimplificado);
+        const linkPdf = nf?.linkPDF || nf?.linkPdf || nf?.linkDanfeFull;
 
         const linkViewer =
           nf?.linkDanfe || nf?.danfe?.link || nf?.urls?.danfe || nf?.url;
