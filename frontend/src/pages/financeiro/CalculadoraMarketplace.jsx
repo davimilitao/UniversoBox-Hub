@@ -12,7 +12,8 @@
  *   1.0.0 — 2026-04-24 — Criação inicial.
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Calculator, RefreshCw, AlertTriangle, TrendingUp,
   DollarSign, Package, Percent, Zap, ArrowUpRight,
@@ -158,6 +159,7 @@ export default function CalculadoraMarketplace() {
   const [skuInput, setSkuInput]       = useState('');
   const [skuStatus, setSkuStatus]     = useState(null); // null | 'loading' | { nome, sku } | 'error'
   const skuRef = useRef(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const set = key => val => setCampos(prev => ({ ...prev, [key]: val }));
 
@@ -188,8 +190,31 @@ export default function CalculadoraMarketplace() {
   const limparSKU = () => {
     setSkuInput('');
     setSkuStatus(null);
+    setSearchParams({}, { replace: true });
     skuRef.current?.focus();
   };
+
+  // Auto-busca quando chega via ?sku= (ex: link do Catálogo Pro)
+  useEffect(() => {
+    const sku = searchParams.get('sku');
+    if (sku) {
+      setSkuInput(sku.toUpperCase());
+      setSkuStatus('loading');
+      apiFetch(`/admin/products/${encodeURIComponent(sku)}`)
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(data => {
+          const p = data.item || data.produto || data;
+          setCampos(prev => ({
+            ...prev,
+            custoProduto: p.precoCusto != null ? String(p.precoCusto) : prev.custoProduto,
+            precoVenda:   p.preco      != null ? String(p.preco)      : prev.precoVenda,
+            peso:         p.weight     != null ? String(p.weight)     : prev.peso,
+          }));
+          setSkuStatus({ nome: p.name || p.nome || sku, sku: p.sku || sku });
+        })
+        .catch(() => setSkuStatus('error'));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const res = calcular(campos);
   const temPreco      = parseFloat(campos.precoVenda) > 0;
