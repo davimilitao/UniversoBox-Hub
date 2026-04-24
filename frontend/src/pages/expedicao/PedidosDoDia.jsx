@@ -814,25 +814,29 @@ function ShippingLabelButton({ mlOrderId, numeroPedido, marketplace, blingNfId }
   const [st,  setSt]  = useState(null);
   const [msg, setMsg] = useState('');
 
-  // Prioridade: Bling (funciona para qualquer marketplace com NF emitida).
-  // Fallback ML: usa API do ML quando não há blingNfId mas temos mlOrderId.
-  const mlFallbackId = mlOrderId || (
+  // ML: API do ML devolve ZPL direto (funciona via /api/ml/orders/:id/label)
+  // Outros marketplaces: Bling API v3 não expõe o ZPL — abrimos a NF no
+  // Bling web, onde o botão "Etiquetas de transporte" dispara via QZ Tray.
+  const mlId = mlOrderId || (
     marketplace === 'MERCADO_LIVRE' && /^\d{10,20}$/.test(String(numeroPedido || ''))
       ? String(numeroPedido)
       : null
   );
+  const isMl = marketplace === 'MERCADO_LIVRE' && !!mlId;
 
-  if (!blingNfId && !mlFallbackId) return null;
+  if (!isMl && !blingNfId) return null;
 
   async function handle() {
-    setSt('loading'); setMsg('Abrindo…');
+    setSt('loading'); setMsg(isMl ? 'Buscando etiqueta ML…' : 'Abrindo Bling…');
     try {
-      if (blingNfId) {
-        await printTransportLabelBling(blingNfId, m => setMsg(m));
+      if (isMl) {
+        await printShippingLabel(mlId, m => setMsg(m));
       } else {
-        await printShippingLabel(mlFallbackId, m => setMsg(m));
+        // Não-ML: abre página da NF no Bling pro usuário clicar em
+        // "Etiquetas de transporte" (AJAX interno → QZ Tray → impressora).
+        window.open(`https://www.bling.com.br/notas.fiscais.php#list/nota.fiscal.php?id=${blingNfId}`, '_blank');
       }
-      setSt('ok'); setMsg('Aberto ✓');
+      setSt('ok'); setMsg(isMl ? 'Impresso ✓' : 'Bling aberto ✓');
       setTimeout(() => { setSt(null); setMsg(''); }, 4000);
     } catch(e) {
       setSt('err'); setMsg(e.message);
