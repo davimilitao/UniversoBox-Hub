@@ -2,9 +2,10 @@
  * @file App.jsx
  * @description Rotas principais. Rotas dentro do AppShell têm sidebar React.
  *   A rota raiz "/" é o DashboardPage — painel operacional do dia.
- * @version 2.4.0
- * @date 2026-04-21
+ * @version 2.5.0
+ * @date 2026-04-24
  * @changelog
+ *   2.5.0 — 2026-04-24 — Adiciona CalculadoraMarketplace em /financeiro/calculadora.
  *   2.4.0 — 2026-04-21 — SaudeFinanceira como nova home do módulo financeiro.
  *   2.3.0 — 2026-04-12 — Fusão Contas + GestaoDespesas → GestaoFinanceira; /contas redireciona.
  *   2.2.0 — 2026-04-05 — Versão anterior.
@@ -34,6 +35,7 @@ import TaskBoard              from './pages/sistema/TaskBoard';
 import Compras                from './pages/expedicao/Compras';
 import GestaoColetas          from './pages/expedicao/GestaoColetas';
 import DesignSystem           from './pages/admin/DesignSystem';
+import CalculadoraMarketplace from './pages/financeiro/CalculadoraMarketplace';
 
 export default function App() {
   return (
@@ -68,7 +70,8 @@ export default function App() {
         <Route path="/financeiro/margem"   element={<GestaoMargem />} />
         <Route path="/financeiro/painel"   element={<PainelFinanceiro />} />
         <Route path="/financeiro/dre"      element={<PainelDRE />} />
-        <Route path="/financeiro/posicao"  element={<PosicaoFinanceira />} />
+        <Route path="/financeiro/posicao"      element={<PosicaoFinanceira />} />
+        <Route path="/financeiro/calculadora"  element={<CalculadoraMarketplace />} />
         {/* Sistema */}
         <Route path="/sistema/config"      element={<ConfiguracoesSistema />} />
         <Route path="/admin/tarefas"       element={<TaskBoard />} />

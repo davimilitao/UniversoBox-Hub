@@ -4,8 +4,11 @@
  *   • Todas as telas migradas para React (100% SPA)
  *   • Sistema de temas via CSS custom properties (data-theme no <html>)
  *   • ThemeBackground: animações por tema (portal Rick, sparkles Marvel, etc.)
- * @version 2.1.0
- * @date 2026-04-10
+ * @version 2.2.0
+ * @date 2026-04-24
+ * @changelog
+ *   2.2.0 — 2026-04-24 — Adiciona item Calculadora no módulo Financeiro.
+ *   2.1.0 — 2026-04-10 — Versão anterior.
  */
 
 import { useState, useEffect }                    from 'react';
@@ -20,7 +23,7 @@ import {
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Boxes,
   FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
-  Heart, PackageCheck, Banknote, KanbanSquare, Palette,
+  Heart, PackageCheck, Banknote, KanbanSquare, Palette, Calculator,
 } from 'lucide-react';
 
 // ─── Mapa de módulos ──────────────────────────────────────────────────────────
@@ -44,7 +47,8 @@ const ROTAS = [
   { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas & Contas', secao: 'Financeiro', Icon: Receipt,           react: true,  href: '/financeiro/despesas'  },
   { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/margem'    },
   { key: 'fin-dre',        moduleId: 'financas',       label: 'DRE',               secao: 'Financeiro', Icon: BarChart2,         react: true,  href: '/financeiro/dre'       },
-  { key: 'fin-posicao',    moduleId: 'financas',       label: 'Posição Financeira',secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/posicao'   },
+  { key: 'fin-posicao',      moduleId: 'financas',       label: 'Posição Financeira', secao: 'Financeiro', Icon: Wallet,      react: true,  href: '/financeiro/posicao'      },
+  { key: 'fin-calculadora', moduleId: 'financas',       label: 'Calculadora',        secao: 'Financeiro', Icon: Calculator,  react: true,  href: '/financeiro/calculadora'  },
   // Sistema
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },
   { key: 'tarefas',        moduleId: 'tarefas',        label: 'Tarefas',           secao: 'Sistema',    Icon: KanbanSquare,      react: true,  href: '/admin/tarefas'        },
