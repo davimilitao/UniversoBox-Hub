@@ -31,6 +31,20 @@ const TIPOS = [
 
 const PARCELAS_OPTS = [2,3,4,5,6,7,8,9,10,12,18,24];
 
+// Campo definido fora do componente principal para evitar recriação a cada render
+// (recriação causa perda de focus a cada keystroke)
+function Campo({ label, icon: Icon, children }) {
+  return (
+    <div>
+      <label className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
+        <Icon size={12} className="text-slate-600" />
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
 export function FormLancarDespesa({ categorias = [], meiosPagamento = [], onSalvar, salvando }) {
   const [form, setForm] = useState({
     data:          hojeISO(),
@@ -104,18 +118,6 @@ export function FormLancarDespesa({ categorias = [], meiosPagamento = [], onSalv
 
   const inputCls = "w-full rounded-lg bg-slate-900 border border-white/10 text-slate-200 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 placeholder-slate-600 [color-scheme:dark]";
 
-  function Campo({ label, icon: Icon, children }) {
-    return (
-      <div>
-        <label className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
-          <Icon size={12} className="text-slate-600" />
-          {label}
-        </label>
-        {children}
-      </div>
-    );
-  }
-
   return (
     <form onSubmit={handleSubmit} className="rounded-xl bg-slate-800 border border-white/5 p-5 flex flex-col gap-4">
 
@@ -158,9 +160,31 @@ export function FormLancarDespesa({ categorias = [], meiosPagamento = [], onSalv
         </div>
       </Campo>
 
-      {/* Data */}
-      <Campo label="Data" icon={CalendarDays}>
-        <input type="date" value={form.data} onChange={e => set('data', e.target.value)} className={inputCls} required />
+      {/* Valor — primeiro campo de input para agilizar o lançamento */}
+      <Campo label="Valor (R$)" icon={DollarSign}>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          placeholder="0,00"
+          value={form.valor}
+          onChange={e => set('valor', e.target.value)}
+          className={inputCls}
+          required
+          autoFocus
+        />
+      </Campo>
+
+      {/* Fornecedor */}
+      <Campo label="Fornecedor" icon={Building2}>
+        <input
+          type="text"
+          placeholder="Ex: J3 Transportadora"
+          value={form.fornecedor}
+          onChange={e => set('fornecedor', e.target.value)}
+          className={inputCls}
+          required
+        />
       </Campo>
 
       {/* Categoria */}
@@ -180,16 +204,9 @@ export function FormLancarDespesa({ categorias = [], meiosPagamento = [], onSalv
         </datalist>
       </Campo>
 
-      {/* Fornecedor */}
-      <Campo label="Fornecedor" icon={Building2}>
-        <input
-          type="text"
-          placeholder="Ex: J3 Transportadora"
-          value={form.fornecedor}
-          onChange={e => set('fornecedor', e.target.value)}
-          className={inputCls}
-          required
-        />
+      {/* Data */}
+      <Campo label="Data" icon={CalendarDays}>
+        <input type="date" value={form.data} onChange={e => set('data', e.target.value)} className={inputCls} required />
       </Campo>
 
       {/* Descrição */}
@@ -200,20 +217,6 @@ export function FormLancarDespesa({ categorias = [], meiosPagamento = [], onSalv
           value={form.descricao}
           onChange={e => set('descricao', e.target.value)}
           className={inputCls}
-        />
-      </Campo>
-
-      {/* Valor */}
-      <Campo label="Valor (R$)" icon={DollarSign}>
-        <input
-          type="number"
-          step="0.01"
-          min="0"
-          placeholder="0,00"
-          value={form.valor}
-          onChange={e => set('valor', e.target.value)}
-          className={inputCls}
-          required
         />
       </Campo>
 

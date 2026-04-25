@@ -16,7 +16,7 @@ import {
   collection, addDoc, getDocs, doc, updateDoc, query,
   orderBy, serverTimestamp, Timestamp, writeBatch,
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -117,6 +117,10 @@ export function useCompras() {
         dados.totalBruto, n, dados.taxaJuros
       );
 
+      const tokenResult = await auth.currentUser?.getIdTokenResult(false);
+      const tenantId = tokenResult?.claims?.tenantId || '';
+      const uid = auth.currentUser?.uid || '';
+
       // 1. Cabeçalho da compra
       const compraRef = await addDoc(collection(db, 'fin_compras'), {
         fornecedor:      dados.fornecedor,
@@ -132,6 +136,8 @@ export function useCompras() {
         qtd:             dados.qtd || 0,
         custoUnitario:   dados.custoUnitario || 0,
         status:          'aberta',      // aberta | quitada
+        tenantId,
+        uid,
         createdAt:       serverTimestamp(),
       });
 
@@ -157,6 +163,8 @@ export function useCompras() {
           status:         'pendente',   // pendente | pago | cancelado
           comprovante:    null,
           paidAt:         null,
+          tenantId,
+          uid,
           createdAt:      serverTimestamp(),
         });
       }
