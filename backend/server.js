@@ -23,6 +23,8 @@ const { setupTenantProvisioningRoutes } = require('./routes/tenantProvisioning')
 const catalogoRouter = require('./routes/catalogo');
 const { requireFirebaseAuth, requireFirebaseRole } = require('./middleware/requireFirebaseAuth');
 const { db, serviceAccount, admin } = require('./config/firebase');
+const { sendTelegram: _sendTg, telegramConfigurado: _tgOk, getUpdates: _tgUpdates } = require('./utils/telegram');
+const { iniciarNotificador, notificarNovoPedido } = require('./jobs/notificador');
 const fs = require('fs');
 
 const express = require('express');
@@ -454,6 +456,15 @@ app.post('/orders/manual', async (req, res, next) => {
     });
 
     res.json({ ok: true, orderId: result.orderId });
+
+    // Telegram — notifica novo pedido em background (não bloqueia resposta)
+    notificarNovoPedido({
+      clienteNome: req.body.clienteNome,
+      marketplace: req.body.marketplace,
+      qtdItens:    items.length,
+      logistica:   isPriority ? 'flex' : (safeTrim(req.body.logistica) || 'agency'),
+      isPriority,
+    }).catch(() => {});
   } catch (err) {
     console.error('[/orders/manual] error:', err);
     next(err);
@@ -4971,14 +4982,23 @@ app.post('/bling/clonar', async (req, res, next) => {
         updatedAtMs:   createdAtMs,
         lockedBy:      terminalId,
         mlOrderId:  mlOrderId  || null,
-        logistica:  logistica  || 'agency', 
-        lockedAt:      createdAtMs, 
+        logistica:  logistica  || 'agency',
+        lockedAt:      createdAtMs,
         skusFaltando:  skusFaltando.length ? skusFaltando : null,
       });
       return { orderId };
     });
 
     res.json({ ok: true, orderId: result.orderId, skusFaltando, itensSemSku: itensSemSku.map(it=>it.nome), cartCount: cart.length });
+
+    // Telegram — notifica pedido clonado do Bling em background
+    notificarNovoPedido({
+      clienteNome: safeTrim(clienteNome),
+      marketplace: marketplace || 'Bling/ML',
+      qtdItens:    cart.length,
+      logistica:   logistica || 'agency',
+      isPriority:  false,
+    }).catch(() => {});
   } catch(err) {
     console.error('[POST /bling/clonar]', err);
     next(err);
@@ -7555,6 +7575,77 @@ app.get('/api/fin-estoque', requireFirebaseAuth, async (req, res, next) => {
   }
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// TELEGRAM BOT — registro, status e teste
+// ════════════════════════════════════════════════════════════════════════════
+
+// POST /api/telegram/register — Davi registra o chatId do seu Telegram
+app.post('/api/telegram/register', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId, uid } = req.auth;
+    const chatId = String(req.body.chatId || '').trim();
+    if (!chatId) return res.status(400).json({ error: 'chatId obrigatório' });
+
+    await db.collection('telegram_config').doc(tenantId).set({
+      chatId,
+      tenantId,
+      uid,
+      ativo: true,
+      configuredAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.json({ ok: true, chatId });
+  } catch (err) { next(err); }
+});
+
+// GET /api/telegram/status — verifica se está configurado
+app.get('/api/telegram/status', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const snap = await db.collection('telegram_config').doc(tenantId).get();
+    res.json({
+      botConfigurado: _tgOk(),
+      registrado:     snap.exists && snap.data().ativo,
+      chatId:         snap.exists ? snap.data().chatId : null,
+    });
+  } catch (err) { next(err); }
+});
+
+// POST /api/telegram/test — envia mensagem de teste
+app.post('/api/telegram/test', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    if (!_tgOk()) return res.status(400).json({ error: 'TELEGRAM_BOT_TOKEN não configurado no servidor' });
+    const snap = await db.collection('telegram_config').doc(tenantId).get();
+    if (!snap.exists) return res.status(400).json({ error: 'ChatId não registrado. Registre primeiro.' });
+
+    const { chatId } = snap.data();
+    await _sendTg(chatId,
+      `✅ <b>UniversoBox Hub conectado!</b>\n\nSeu Telegram está configurado corretamente.\nVocê receberá alertas de:\n• 📦 Novos pedidos\n• ⚠️ Reclamações ML\n• 💳 Vencimentos\n• 📦 Insumos críticos\n• 🚛 Coleta não registrada`
+    );
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// GET /api/telegram/chatid-helper — retorna chatIds dos updates recentes (ajuda na configuração)
+app.get('/api/telegram/chatid-helper', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    if (!_tgOk()) return res.status(400).json({ error: 'TELEGRAM_BOT_TOKEN não configurado' });
+    const updates = await _tgUpdates();
+    const chatIds = [...new Map(
+      updates
+        .filter(u => u.message?.chat)
+        .map(u => [u.message.chat.id, {
+          chatId:    u.message.chat.id,
+          nome:      u.message.chat.first_name || u.message.chat.title || '',
+          username:  u.message.chat.username || '',
+          ultimaMsg: u.message.text || '',
+        }])
+    ).values()];
+    res.json({ chatIds });
+  } catch (err) { next(err); }
+});
+
 // ---------------- Errors ----------------
 app.use((err, req, res, next) => {
   const status = err.statusCode || 500;
@@ -7567,4 +7658,7 @@ app.listen(PORT, () => {
   console.log(`[expedicao-pro] LOCK_TTL_MS=${LOCK_TTL_MS}`);
   console.log(`[expedicao-pro] serving public from: ${PUBLIC_DIR}`);
   console.log(`[expedicao-pro] serving uploads from: ${UPLOADS_DIR}`);
+
+  // Inicia notificador Telegram após o servidor estar pronto
+  iniciarNotificador({ admin, mlEnsureToken, ML_API_BASE });
 });

@@ -16,7 +16,7 @@ import {
   FileCode, Receipt, ShoppingBag, FileUp, Truck, KanbanSquare,
   Home, LayoutGrid, FlaskConical,
   Globe, Database, Key, ChevronRight, Copy, Check,
-  RefreshCw, AlertTriangle,
+  RefreshCw, AlertTriangle, Send,
 } from 'lucide-react';
 import { auth } from '../../firebase';
 import { getAuthToken } from '../../utils/getAuthToken';
@@ -125,6 +125,186 @@ function ModuleToggle({ mod, active, onChange }) {
         active ? 'bg-emerald-400 border-emerald-300' : 'bg-transparent border-slate-700'
       }`} />
     </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TELEGRAM CONFIG
+// ─────────────────────────────────────────────────────────────────────────────
+
+function TelegramConfig() {
+  const [status,   setStatus]   = useState(null);   // { botConfigurado, registrado, chatId }
+  const [chatId,   setChatId]   = useState('');
+  const [helpers,  setHelpers]  = useState([]);      // chatIds encontrados via getUpdates
+  const [loading,  setLoading]  = useState(false);
+  const [testando, setTestando] = useState(false);
+  const [msg,      setMsg]      = useState(null);    // { tipo: 'ok'|'erro', texto }
+
+  useEffect(() => { carregarStatus(); }, []);
+
+  async function apiFetch(path, opts = {}) {
+    const token = await auth.currentUser?.getIdToken(false);
+    return fetch(path, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...opts.headers },
+    });
+  }
+
+  async function carregarStatus() {
+    try {
+      const res = await apiFetch('/api/telegram/status');
+      if (res.ok) setStatus(await res.json());
+    } catch {}
+  }
+
+  async function buscarChatId() {
+    setLoading(true); setMsg(null);
+    try {
+      const res = await apiFetch('/api/telegram/chatid-helper');
+      const data = await res.json();
+      if (data.chatIds?.length) {
+        setHelpers(data.chatIds);
+        setMsg({ tipo: 'ok', texto: `${data.chatIds.length} conversa(s) encontrada(s). Selecione abaixo.` });
+      } else {
+        setMsg({ tipo: 'erro', texto: 'Nenhuma conversa encontrada. Envie /start para o bot e tente novamente.' });
+      }
+    } catch (e) {
+      setMsg({ tipo: 'erro', texto: e.message });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function salvar() {
+    if (!chatId.trim()) return;
+    setLoading(true); setMsg(null);
+    try {
+      const res = await apiFetch('/api/telegram/register', { method: 'POST', body: JSON.stringify({ chatId }) });
+      if (res.ok) {
+        setMsg({ tipo: 'ok', texto: 'ChatId salvo!' });
+        await carregarStatus();
+      } else {
+        const d = await res.json();
+        setMsg({ tipo: 'erro', texto: d.error || 'Erro ao salvar' });
+      }
+    } catch (e) {
+      setMsg({ tipo: 'erro', texto: e.message });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function testar() {
+    setTestando(true); setMsg(null);
+    try {
+      const res = await apiFetch('/api/telegram/test', { method: 'POST' });
+      if (res.ok) {
+        setMsg({ tipo: 'ok', texto: 'Mensagem de teste enviada! Verifique o Telegram.' });
+      } else {
+        const d = await res.json();
+        setMsg({ tipo: 'erro', texto: d.error || 'Erro ao testar' });
+      }
+    } catch (e) {
+      setMsg({ tipo: 'erro', texto: e.message });
+    } finally {
+      setTestando(false);
+    }
+  }
+
+  const botOk = status?.botConfigurado;
+  const registrado = status?.registrado;
+
+  return (
+    <SectionCard icon={Send} title="Notificações — Telegram Bot">
+      {/* Status */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className={`w-2 h-2 rounded-full shrink-0 ${botOk ? (registrado ? 'bg-emerald-500' : 'bg-amber-500') : 'bg-slate-600'}`} />
+        <span className="text-xs text-slate-400">
+          {!botOk ? 'TOKEN não configurado no servidor (.env)' : registrado ? `Ativo — ChatId: ${status.chatId}` : 'TOKEN ok · ChatId não registrado'}
+        </span>
+      </div>
+
+      {botOk && (
+        <div className="space-y-3">
+          {/* Passo 1: obter chatId */}
+          <div className="rounded-lg bg-slate-900/60 border border-white/5 p-3 text-xs text-slate-500 space-y-1.5">
+            <p className="text-slate-400 font-medium">Como configurar:</p>
+            <p>1. Crie um bot em <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">@BotFather</a> e salve o TOKEN em <code className="text-slate-300 bg-slate-800 px-1 rounded">TELEGRAM_BOT_TOKEN</code> no Railway</p>
+            <p>2. Abra seu bot no Telegram e envie <code className="text-slate-300 bg-slate-800 px-1 rounded">/start</code></p>
+            <p>3. Clique em "Buscar meu ChatId" abaixo e selecione sua conversa</p>
+          </div>
+
+          {/* Buscar chatId */}
+          <button
+            onClick={buscarChatId}
+            disabled={loading}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors disabled:opacity-50"
+          >
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            Buscar meu ChatId
+          </button>
+
+          {/* Lista de chatIds encontrados */}
+          {helpers.length > 0 && (
+            <div className="space-y-1">
+              {helpers.map(h => (
+                <button
+                  key={h.chatId}
+                  onClick={() => setChatId(String(h.chatId))}
+                  className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-colors ${
+                    chatId === String(h.chatId)
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                      : 'border-white/8 bg-slate-800/40 text-slate-400 hover:border-white/15'
+                  }`}
+                >
+                  <span className="font-medium">{h.nome || h.username || 'Sem nome'}</span>
+                  <span className="text-slate-600 font-mono">{h.chatId}</span>
+                  {h.ultimaMsg && <span className="text-slate-700 truncate ml-auto">{h.ultimaMsg}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Input manual + salvar */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="ChatId (ex: 123456789)"
+              value={chatId}
+              onChange={e => setChatId(e.target.value)}
+              className="flex-1 rounded-lg bg-slate-900 border border-white/10 text-slate-200 text-xs px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 font-mono"
+            />
+            <button
+              onClick={salvar}
+              disabled={loading || !chatId.trim()}
+              className="flex items-center gap-1 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
+            >
+              {loading ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+              Salvar
+            </button>
+          </div>
+
+          {/* Testar */}
+          {registrado && (
+            <button
+              onClick={testar}
+              disabled={testando}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
+            >
+              {testando ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+              {testando ? 'Enviando…' : 'Enviar mensagem de teste'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Feedback */}
+      {msg && (
+        <div className={`mt-2 text-xs px-3 py-2 rounded-lg ${msg.tipo === 'ok' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+          {msg.texto}
+        </div>
+      )}
+    </SectionCard>
   );
 }
 
@@ -880,6 +1060,9 @@ function TabSistema({ showToast }) {
         <InfoRow label="Módulos"   value={`${MODULOS_UI.length} configurados`} />
         <InfoRow label="Perfis"    value="Gerenciados via Firestore + defaults" />
       </SectionCard>
+
+      {/* Telegram */}
+      <TelegramConfig />
 
       {/* Links */}
       <SectionCard icon={Database} title="Administração">
