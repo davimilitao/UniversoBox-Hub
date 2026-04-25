@@ -17,9 +17,9 @@ import { signOut }                       from 'firebase/auth';
 import { auth }                          from '../firebase';
 import { usePerfil }                     from '../hooks/usePerfil';
 import {
-  Package, ClipboardList, BarChart2, Zap,
+  Package, ClipboardList, Zap,
   BookOpen, Settings2, Box, PlusCircle, FileCode,
-  Receipt, TrendingUp, LayoutDashboard, ShoppingBag, Upload,
+  Receipt, LayoutDashboard, ShoppingBag, Upload,
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Boxes,
   FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
@@ -45,8 +45,6 @@ const ROTAS = [
   { key: 'fin-saude',      moduleId: 'financas',       label: 'Saúde Financeira',  secao: 'Financeiro', Icon: Heart,             react: true,  href: '/financeiro/saude'     },
   { key: 'fin-recebiveis', moduleId: 'financas',       label: 'Recebíveis',        secao: 'Financeiro', Icon: Banknote,          react: true,  href: '/financeiro/recebiveis'},
   { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas & Contas', secao: 'Financeiro', Icon: Receipt,           react: true,  href: '/financeiro/despesas'  },
-  { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/margem'    },
-  { key: 'fin-dre',        moduleId: 'financas',       label: 'DRE',               secao: 'Financeiro', Icon: BarChart2,         react: true,  href: '/financeiro/dre'       },
   { key: 'fin-posicao',      moduleId: 'financas',       label: 'Posição Financeira', secao: 'Financeiro', Icon: Wallet,      react: true,  href: '/financeiro/posicao'      },
   { key: 'fin-calculadora', moduleId: 'financas',       label: 'Calculadora',        secao: 'Financeiro', Icon: Calculator,  react: true,  href: '/financeiro/calculadora'  },
   // Sistema

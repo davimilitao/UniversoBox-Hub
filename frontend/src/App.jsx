@@ -2,9 +2,10 @@
  * @file App.jsx
  * @description Rotas principais. Rotas dentro do AppShell têm sidebar React.
  *   A rota raiz "/" é o DashboardPage — painel operacional do dia.
- * @version 2.5.0
- * @date 2026-04-24
+ * @version 2.6.0
+ * @date 2026-04-25
  * @changelog
+ *   2.6.0 — 2026-04-25 — Fase 3: GestaoMargem, PainelFinanceiro, PainelDRE → redirects.
  *   2.5.0 — 2026-04-24 — Adiciona CalculadoraMarketplace em /financeiro/calculadora.
  *   2.4.0 — 2026-04-21 — SaudeFinanceira como nova home do módulo financeiro.
  *   2.3.0 — 2026-04-12 — Fusão Contas + GestaoDespesas → GestaoFinanceira; /contas redireciona.
@@ -14,10 +15,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { LoginPage }          from './pages/LoginPage';
 import { DashboardPage }      from './pages/DashboardPage';
-import { PainelFinanceiro }   from './pages/financeiro/PainelFinanceiro';
 import { GestaoFinanceira }   from './pages/financeiro/GestaoFinanceira';
-import { GestaoMargem }       from './pages/financeiro/GestaoMargem';
-import { PainelDRE }          from './pages/financeiro/PainelDRE';
 import { PosicaoFinanceira }  from './pages/financeiro/PosicaoFinanceira';
 import { SaudeFinanceira }    from './pages/financeiro/SaudeFinanceira';
 import { Recebiveis }         from './pages/financeiro/Recebiveis';
@@ -67,9 +65,9 @@ export default function App() {
         <Route path="/financeiro/recebiveis"  element={<Recebiveis />} />
         <Route path="/financeiro/despesas" element={<GestaoFinanceira />} />
         <Route path="/financeiro/contas"   element={<Navigate to="/financeiro/despesas" replace />} />
-        <Route path="/financeiro/margem"   element={<GestaoMargem />} />
-        <Route path="/financeiro/painel"   element={<PainelFinanceiro />} />
-        <Route path="/financeiro/dre"      element={<PainelDRE />} />
+        <Route path="/financeiro/margem"   element={<Navigate to="/financeiro/calculadora" replace />} />
+        <Route path="/financeiro/painel"   element={<Navigate to="/financeiro/saude" replace />} />
+        <Route path="/financeiro/dre"      element={<Navigate to="/financeiro/saude" replace />} />
         <Route path="/financeiro/posicao"      element={<PosicaoFinanceira />} />
         <Route path="/financeiro/calculadora"  element={<CalculadoraMarketplace />} />
         {/* Sistema */}
