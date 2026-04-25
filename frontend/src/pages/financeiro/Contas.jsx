@@ -10,7 +10,7 @@ import {
   CreditCard, Plus, AlertTriangle, CheckCircle2, Clock,
   Calendar, Loader2, Wallet, X, RotateCcw, Banknote,
   BarChart2, ShieldCheck, RefreshCw, MessageCircle, Copy,
-  Check, ChevronLeft, ChevronRight,
+  Check, ChevronLeft, ChevronRight, Trash2,
 } from 'lucide-react';
 import { useCompras, calcParcelas } from '../../hooks/useCompras';
 import { useMeiosPagamento } from '../../hooks/useMeiosPagamento';
@@ -84,12 +84,27 @@ function KpiCard({ label, value, sub, color = 'emerald', Icon }) {
 }
 
 // ─── Painel Vencimentos ───────────────────────────────────────────────────────
-function PainelVencimentos({ parcelas, loading, marcarPago, desfazerPagamento, getResumo, reload, meios }) {
+function PainelVencimentos({ parcelas, loading, marcarPago, desfazerPagamento, excluirParcela, excluirCompra, getResumo, reload, meios }) {
   const [filtroStatus, setFiltroStatus] = useState('pendentes');
   const [meioFiltro,   setMeioFiltro]   = useState('todos');
   const [mesAtivo,     setMesAtivo]     = useState('');
   const [selecionados, setSelecionados] = useState(new Set());
   const [copiado,      setCopiado]      = useState(false);
+  const [excluindo,    setExcluindo]    = useState(null);
+
+  async function handleExcluirParcela(p) {
+    const msg = p.compraId && p.totalParcelas > 1
+      ? `Excluir TODA a compra "${p.fornecedor}" (${p.totalParcelas} parcelas)?\n\nEsta ação não pode ser desfeita.`
+      : `Excluir parcela de "${p.fornecedor}" (${brl(p.valor)})?\n\nEsta ação não pode ser desfeita.`;
+    if (!window.confirm(msg)) return;
+    setExcluindo(p.id);
+    const fn = p.compraId && p.totalParcelas > 1
+      ? () => excluirCompra(p.compraId)
+      : () => excluirParcela(p.id);
+    const res = await fn();
+    setExcluindo(null);
+    if (!res.ok) window.alert(`Erro: ${res.error}`);
+  }
 
   // Meses disponíveis extraídos das parcelas
   const meses = useMemo(() => {
@@ -352,7 +367,7 @@ function PainelVencimentos({ parcelas, loading, marcarPago, desfazerPagamento, g
                   <p className="text-[10px] text-slate-600">{fmtData(p.vencimento)}</p>
                 </div>
 
-                <div onClick={e => e.stopPropagation()}>
+                <div onClick={e => e.stopPropagation()} className="flex items-center gap-1">
                   {!pago ? (
                     <button onClick={() => marcarPago(p.id)}
                       className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600/10 hover:bg-emerald-600 border border-emerald-500/20 hover:border-emerald-500 text-emerald-400 hover:text-white text-[10px] font-bold transition-all">
@@ -364,6 +379,11 @@ function PainelVencimentos({ parcelas, loading, marcarPago, desfazerPagamento, g
                       <RotateCcw size={12} />
                     </button>
                   )}
+                  <button onClick={() => handleExcluirParcela(p)}
+                    disabled={excluindo === p.id}
+                    className="p-1.5 rounded-lg text-slate-700 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40">
+                    {excluindo === p.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                  </button>
                 </div>
               </div>
             );
@@ -539,7 +559,7 @@ function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Contas() {
   const [aba, setAba] = useState('vencimentos');
-  const { parcelas, loading, saving, lancarCompra, marcarPago, desfazerPagamento, getResumo, reload } = useCompras();
+  const { parcelas, loading, saving, lancarCompra, marcarPago, desfazerPagamento, excluirParcela, excluirCompra, getResumo, reload } = useCompras();
   const { meios, loading: loadingMeios } = useMeiosPagamento();
   const resumo = getResumo();
 
@@ -588,7 +608,8 @@ export default function Contas() {
 
         {aba === 'vencimentos' && (
           <PainelVencimentos parcelas={parcelas} loading={loading} marcarPago={marcarPago}
-            desfazerPagamento={desfazerPagamento} getResumo={getResumo} reload={reload} meios={meios} />
+            desfazerPagamento={desfazerPagamento} excluirParcela={excluirParcela} excluirCompra={excluirCompra}
+            getResumo={getResumo} reload={reload} meios={meios} />
         )}
         {aba === 'nova' && (
           meios.length === 0 && !loadingMeios ? (

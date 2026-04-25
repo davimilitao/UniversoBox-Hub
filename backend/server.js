@@ -2172,14 +2172,76 @@ app.patch('/api/fin-despesas/:id', requireFirebaseAuth, async (req, res, next) =
   }
 });
 
-// DELETE /api/fin-despesas/:id — remove despesa (somente admin)
-app.delete('/api/fin-despesas/:id', requireFirebaseAuth, requireFirebaseRole(['admin']), async (req, res, next) => {
+// DELETE /api/fin-despesas/:id — admin sempre; owner nas primeiras 24h
+app.delete('/api/fin-despesas/:id', requireFirebaseAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
-    await admin.firestore().collection('fin_despesas').doc(id).delete();
+    const { uid, role } = req.auth;
+    const ref = admin.firestore().collection('fin_despesas').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: 'Despesa não encontrada' });
+    const data = snap.data();
+    const isAdmin = role === 'admin';
+    const isOwner = data.uid === uid;
+    const createdMs = data.createdAt?.toMillis?.() ?? 0;
+    const dentro24h = Date.now() - createdMs < 86400000;
+    if (!isAdmin && !(isOwner && dentro24h)) {
+      return res.status(403).json({ error: 'Sem permissão para excluir este lançamento' });
+    }
+    await ref.delete();
     return res.json({ ok: true });
   } catch (err) {
     console.error('[DELETE /api/fin-despesas/:id]', err);
+    return next(err);
+  }
+});
+
+// DELETE /api/fin-parcelas/:id — admin sempre; owner nas primeiras 24h
+app.delete('/api/fin-parcelas/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { uid, role } = req.auth;
+    const ref = admin.firestore().collection('fin_parcelas').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: 'Parcela não encontrada' });
+    const data = snap.data();
+    const isAdmin = role === 'admin';
+    const isOwner = data.uid === uid;
+    const createdMs = data.createdAt?.toMillis?.() ?? 0;
+    const dentro24h = Date.now() - createdMs < 86400000;
+    if (!isAdmin && !(isOwner && dentro24h)) {
+      return res.status(403).json({ error: 'Sem permissão para excluir esta parcela' });
+    }
+    await ref.delete();
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/fin-parcelas/:id]', err);
+    return next(err);
+  }
+});
+
+// DELETE /api/fin-compras/:id — cascade: compra + todas parcelas + despesa vinculada (admin apenas)
+app.delete('/api/fin-compras/:id', requireFirebaseAuth, requireFirebaseRole(['admin']), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const db = admin.firestore();
+    const compraSnap = await db.collection('fin_compras').doc(id).get();
+    if (!compraSnap.exists) return res.status(404).json({ error: 'Compra não encontrada' });
+    const compra = compraSnap.data();
+    const batch = db.batch();
+    // Deleta todas as parcelas vinculadas
+    const parcelasSnap = await db.collection('fin_parcelas').where('compraId', '==', id).get();
+    parcelasSnap.forEach(d => batch.delete(d.ref));
+    // Deleta a despesa vinculada (se existir)
+    if (compra.despesaId) {
+      batch.delete(db.collection('fin_despesas').doc(compra.despesaId));
+    }
+    // Deleta a compra
+    batch.delete(db.collection('fin_compras').doc(id));
+    await batch.commit();
+    return res.json({ ok: true, parcelasRemovidas: parcelasSnap.size });
+  } catch (err) {
+    console.error('[DELETE /api/fin-compras/:id]', err);
     return next(err);
   }
 });
