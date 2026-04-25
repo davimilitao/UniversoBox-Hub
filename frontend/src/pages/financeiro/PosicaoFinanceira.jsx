@@ -181,7 +181,7 @@ export function PosicaoFinanceira() {
   const totalAtivos    = totalCaixa + totalEstoque;      // A Receber é informativo apenas
 
   const despOpFin      = dreData ? (dreData.despesasOperacionais + dreData.despesaFinanceira) : 0;
-  const totalPassivos  = despOpFin;
+  const totalPassivos  = despOpFin + (dreData?.irCsll || 0);
 
   const posicaoLiquida = totalAtivos - totalPassivos;
   const cobertura      = totalPassivos > 0 ? totalAtivos / totalPassivos : null;

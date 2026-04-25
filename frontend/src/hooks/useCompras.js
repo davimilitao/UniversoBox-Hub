@@ -17,6 +17,7 @@ import {
   orderBy, serverTimestamp, Timestamp, writeBatch,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { apiFetch } from '../utils/getAuthToken';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -242,6 +243,39 @@ export function useCompras() {
     };
   }
 
+  // ── Exclui uma parcela avulsa ────────────────────────────────────────────
+  async function excluirParcela(parcelaId) {
+    try {
+      const res = await apiFetch(`/api/fin-parcelas/${parcelaId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        return { ok: false, error: body.error || 'Erro ao excluir parcela' };
+      }
+      setParcelas(prev => prev.filter(p => p.id !== parcelaId));
+      return { ok: true };
+    } catch (e) {
+      console.error('[useCompras] excluirParcela', e);
+      return { ok: false, error: e.message };
+    }
+  }
+
+  // ── Exclui uma compra e todas as parcelas (cascade via backend) ───────────
+  async function excluirCompra(compraId) {
+    try {
+      const res = await apiFetch(`/api/fin-compras/${compraId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        return { ok: false, error: body.error || 'Erro ao excluir compra' };
+      }
+      setParcelas(prev => prev.filter(p => p.compraId !== compraId));
+      setCompras(prev => prev.filter(c => c.id !== compraId));
+      return { ok: true };
+    } catch (e) {
+      console.error('[useCompras] excluirCompra', e);
+      return { ok: false, error: e.message };
+    }
+  }
+
   return {
     parcelas,
     compras,
@@ -251,6 +285,8 @@ export function useCompras() {
     lancarCompra,
     marcarPago,
     desfazerPagamento,
+    excluirParcela,
+    excluirCompra,
     getResumo,
     reload: () => { loadParcelas(); loadCompras(); },
     calcParcelas,
