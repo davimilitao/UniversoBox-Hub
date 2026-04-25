@@ -3,8 +3,11 @@
  * @description Dashboard "Saúde Financeira" — visão consolidada para o gestor.
  *              Inspirado no app Banco Inter: clareza, números proeminentes, dados que falam por si.
  *              Disponível (caixa + cofre + a liberar) + Estoque − Obrigações = Saldo Final
- * @version 1.0.0
- * @date 2026-04-21
+ * @version 1.1.0
+ * @date 2026-04-25
+ * @changelog
+ *   1.1.0 (2026-04-25) — Bug fix: Obrigações agora consome /api/fin-obrigacoes (despesas + parcelas
+ *                        reais). Card expandido com breakdown Despesas Pendentes / Parcelas a Vencer.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
@@ -16,6 +19,10 @@ import {
 } from 'lucide-react';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// Mercado Pago rende ~100% CDI. CDI atual ≈ 10,5% a.a. → ~0,84% a.m.
+// Atualizar quando o CDI mudar significativamente.
+const MP_RENDIMENTO_MENSAL = 0.0084;
 
 function horaAtual() {
   return new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -141,6 +148,10 @@ export function SaudeFinanceira() {
   const [estoqueEmCasa,  setEstoqueEmCasa]  = useState(0);
   const [importadoEm,    setImportadoEm]    = useState(null);
   const [contasPagar,    setContasPagar]    = useState(0);
+  const [totalDespesas,  setTotalDespesas]  = useState(0);
+  const [totalParcelas,  setTotalParcelas]  = useState(0);
+  const [qtdDespesas,    setQtdDespesas]    = useState(0);
+  const [qtdParcelas,    setQtdParcelas]    = useState(0);
   const [receber7,       setReceber7]       = useState(0);
   const [receber15,      setReceber15]      = useState(0);
   const [receber30,      setReceber30]      = useState(0);
@@ -163,9 +174,9 @@ export function SaudeFinanceira() {
     setLoading(true);
     setErro(null);
     try {
-      const [resEstoque, resDespesas, resReceber] = await Promise.all([
+      const [resEstoque, resObrigacoes, resReceber] = await Promise.all([
         apiFetch('/api/fin-estoque'),
-        apiFetch('/api/fin-despesas'),
+        apiFetch('/api/fin-obrigacoes'),
         apiFetch('/api/fin-recebiveis?status=previsto'),
       ]);
 
@@ -175,14 +186,13 @@ export function SaudeFinanceira() {
         setImportadoEm(j.dados?.importadoEm || null);
       }
 
-      if (resDespesas.ok) {
-        const j = await resDespesas.json();
-        // Suporte a múltiplos formatos de resposta
-        const lista = j.items || j.despesas || j.data || (Array.isArray(j) ? j : []);
-        const total = lista
-          .filter(d => d.situacao !== 'pago' && d.situacao !== 'cancelado')
-          .reduce((acc, d) => acc + (parseFloat(d.valor) || 0), 0);
-        setContasPagar(total);
+      if (resObrigacoes.ok) {
+        const j = await resObrigacoes.json();
+        setContasPagar(j.totalObrigacoes || 0);
+        setTotalDespesas(j.totalDespesas || 0);
+        setTotalParcelas(j.totalParcelas || 0);
+        setQtdDespesas(j.qtdDespesas || 0);
+        setQtdParcelas(j.qtdParcelas || 0);
       }
 
       if (resReceber.ok) {
@@ -210,11 +220,12 @@ export function SaudeFinanceira() {
   useEffect(() => { carregar(); }, [carregar]);
 
   // ── Cálculos ─────────────────────────────────────────────────────────────────
-  const totalDisponivel = mp + banco + outros + cofre + saldoLiberar;
-  const totalEstoque    = estoqueEmCasa + estoqueChegar;
-  const saldoFinal      = totalDisponivel + totalEstoque - contasPagar;
+  const totalDisponivel  = mp + banco + outros + cofre + saldoLiberar;
+  const totalEstoque     = estoqueEmCasa + estoqueChegar;
+  const saldoFinal       = totalDisponivel + totalEstoque - contasPagar;
+  const rendimentoMp30d  = mp > 0 ? mp * MP_RENDIMENTO_MENSAL : 0;
   // Projetado inclui "A Receber 30 dias" (entrada prevista no caixa)
-  const saldoProjetado  = saldoFinal + receber30;
+  const saldoProjetado   = saldoFinal + receber30;
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -256,7 +267,12 @@ export function SaudeFinanceira() {
 
         {/* ── DISPONÍVEL ── */}
         <CardSecao titulo="Disponível" total={totalDisponivel} corBorda="emerald" icon={Banknote}>
-          <Linha label="Mercado Pago"    valor={mp}          onEdit={v => salvar('mp', v)} />
+          <Linha
+            label="Mercado Pago"
+            sub={mp > 0 ? `Rendimento est. 30d: +${BRL.format(rendimentoMp30d)} (~0,84% CDI)` : undefined}
+            valor={mp}
+            onEdit={v => salvar('mp', v)}
+          />
           <Linha label="Banco"           valor={banco}        onEdit={v => salvar('banco', v)} />
           <Linha label="Outros"          valor={outros}       onEdit={v => salvar('outros', v)} />
           <Linha label="Cofre"           valor={cofre}        onEdit={v => salvar('cofre', v)}
@@ -314,14 +330,22 @@ export function SaudeFinanceira() {
 
         {/* ── OBRIGAÇÕES ── */}
         <CardSecao titulo="Obrigações" total={contasPagar} corBorda="red" icon={TrendingDown} loadingTotal={loading}>
-          <div className="flex items-center justify-between min-h-[52px]">
-            <div>
-              <p className="text-sm text-slate-300">Contas a Pagar</p>
-              <p className="text-[10px] text-slate-600 mt-0.5">Despesas pendentes cadastradas</p>
-            </div>
+          <Linha
+            label={qtdDespesas > 0 ? `Despesas Pendentes (${qtdDespesas})` : 'Despesas Pendentes'}
+            sub="Fixas e operacionais"
+            valor={loading ? 0 : totalDespesas}
+            auto
+          />
+          <Linha
+            label={qtdParcelas > 0 ? `Parcelas a Vencer (${qtdParcelas})` : 'Parcelas a Vencer'}
+            sub="Compras parceladas"
+            valor={loading ? 0 : totalParcelas}
+            auto
+          />
+          <div className="flex justify-end pt-1 pb-0.5">
             <Link
               to="/financeiro/despesas"
-              className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors min-h-[44px] justify-end"
+              className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors min-h-[36px]"
             >
               Ver detalhes
               <ChevronRight size={13} />

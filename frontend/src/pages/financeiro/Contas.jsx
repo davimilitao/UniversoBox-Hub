@@ -101,6 +101,19 @@ function PainelVencimentos({ parcelas, loading, marcarPago, desfazerPagamento, g
     return Array.from(map.values()).sort((a, b) => a.ts - b.ts);
   }, [parcelas]);
 
+  // Resumo pendente por mês — usado no strip de navegação
+  const resumoPorMes = useMemo(() => {
+    const map = {};
+    parcelas.forEach(p => {
+      const k = labelMes(p.vencimento);
+      if (!k) return;
+      if (!map[k]) map[k] = { pendente: 0, pago: 0 };
+      if (p.status === 'pendente') map[k].pendente += p.valor || 0;
+      else map[k].pago += p.valor || 0;
+    });
+    return map;
+  }, [parcelas]);
+
   // Inicializa mês ativo com o mês atual ou mais próximo
   const mesEfetivo = useMemo(() => {
     if (mesAtivo) return mesAtivo;
@@ -168,6 +181,38 @@ function PainelVencimentos({ parcelas, loading, marcarPago, desfazerPagamento, g
         <KpiCard label="Próx. 7 dias" value={brl(resumo.semana.total)}   sub={`${resumo.semana.items.length} parcela(s)`}    color="blue"    Icon={Calendar} />
         <KpiCard label="Total pago"  value={brl(resumo.totalPago)}       sub="histórico"                                     color="emerald" Icon={CheckCircle2} />
       </div>
+
+      {/* ── Strip mês a mês ── */}
+      {meses.length > 1 && (
+        <div className="overflow-x-auto -mx-1 px-1 pb-1">
+          <div className="flex gap-2 w-max">
+            {meses.map(m => {
+              const dados   = resumoPorMes[m.key] || { pendente: 0, pago: 0 };
+              const ativo   = m.key === mesEfetivo;
+              const temDivida = dados.pendente > 0;
+              return (
+                <button
+                  key={m.key}
+                  onClick={() => setMesAtivo(m.key)}
+                  className={[
+                    'flex flex-col items-start px-3 py-2.5 rounded-xl border text-left transition-all shrink-0 min-w-[90px]',
+                    ativo
+                      ? 'bg-slate-700 border-white/20 text-white'
+                      : 'bg-slate-900 border-white/[0.06] text-slate-400 hover:border-white/15 hover:text-slate-200',
+                  ].join(' ')}
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">{m.label}</span>
+                  <span className={`text-sm font-black tabular-nums mt-0.5 ${
+                    !temDivida ? 'text-emerald-400' : ativo ? 'text-white' : 'text-slate-300'
+                  }`}>
+                    {temDivida ? brl(dados.pendente) : '✓ Quitado'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── Filtros por cartão ── */}
       {meios.length > 0 && (

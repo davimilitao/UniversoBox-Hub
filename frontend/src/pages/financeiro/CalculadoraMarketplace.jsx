@@ -527,30 +527,38 @@ export default function CalculadoraMarketplace() {
             <Zap size={15} className="text-emerald-400" />
             <h2 className="text-base font-semibold text-white">Simulação — Investimento em Ads</h2>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {cenarios.map(({ ads, lucro, margem }) => {
-              const borderBg   = margem < 10 ? 'border-red-500/20 bg-red-500/5' : margem < 20 ? 'border-yellow-500/20 bg-yellow-500/5' : 'border-emerald-500/20 bg-emerald-500/5';
-              const lucroColor = lucro < 0 ? 'text-red-400' : margem < 20 ? 'text-yellow-400' : 'text-emerald-400';
-              const margemColor= margem < 10 ? 'text-red-400' : margem < 20 ? 'text-yellow-400' : 'text-emerald-400';
-              const isAtual    = String(ads) === String(parseFloat(campos.marketing) || 0);
-              return (
-                <div key={ads} className={`rounded-xl border p-4 sm:p-5 relative ${borderBg} ${isAtual ? 'ring-1 ring-emerald-500/40' : ''}`}>
-                  {isAtual && <span className="absolute top-3 right-3 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">atual</span>}
-                  <p className="text-slate-400 text-xs mb-3">Ads: <span className="text-white font-bold">{ads}%</span></p>
-                  <div className="flex sm:flex-col gap-6 sm:gap-2">
-                    <div>
-                      <p className="text-slate-500 text-xs">Lucro</p>
-                      <p className={`text-xl font-bold ${lucroColor}`}>{fmt(lucro)}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500 text-xs">Margem</p>
-                      <p className={`text-lg font-bold ${margemColor}`}>{fmtPct(margem)}</p>
+          {temPreco && temCusto ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {cenarios.map(({ ads, lucro, margem }) => {
+                const borderBg   = margem < 10 ? 'border-red-500/20 bg-red-500/5' : margem < 20 ? 'border-yellow-500/20 bg-yellow-500/5' : 'border-emerald-500/20 bg-emerald-500/5';
+                const lucroColor = lucro < 0 ? 'text-red-400' : margem < 20 ? 'text-yellow-400' : 'text-emerald-400';
+                const margemColor= margem < 10 ? 'text-red-400' : margem < 20 ? 'text-yellow-400' : 'text-emerald-400';
+                const isAtual    = String(ads) === String(parseFloat(campos.marketing) || 0);
+                return (
+                  <div key={ads} className={`rounded-xl border p-4 sm:p-5 relative ${borderBg} ${isAtual ? 'ring-1 ring-emerald-500/40' : ''}`}>
+                    {isAtual && <span className="absolute top-3 right-3 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">atual</span>}
+                    <p className="text-slate-400 text-xs mb-3">Ads: <span className="text-white font-bold">{ads}%</span></p>
+                    <div className="flex sm:flex-col gap-6 sm:gap-2">
+                      <div>
+                        <p className="text-slate-500 text-xs">Lucro</p>
+                        <p className={`text-xl font-bold ${lucroColor}`}>{fmt(lucro)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 text-xs">Margem</p>
+                        <p className={`text-lg font-bold ${margemColor}`}>{fmtPct(margem)}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-white/5 bg-slate-800/50 p-6 flex items-center justify-center">
+              <p className="text-slate-500 text-sm text-center">
+                Preencha o <span className="text-slate-400 font-medium">preço de venda</span> e o <span className="text-slate-400 font-medium">custo do produto</span> para ver a simulação de Ads
+              </p>
+            </div>
+          )}
         </div>
 
       </div>

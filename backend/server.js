@@ -2169,6 +2169,52 @@ app.delete('/api/fin-despesas/:id', requireFirebaseAuth, requireFirebaseRole(['a
   }
 });
 
+// GET /api/fin-obrigacoes — agrega obrigações financeiras pendentes
+// Combina fin_despesas (exceto investimentos) + fin_parcelas pendentes
+app.get('/api/fin-obrigacoes', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+
+    const [despSnap, parcSnap] = await Promise.all([
+      admin.firestore().collection('fin_despesas')
+        .where('tenantId', '==', tenantId)
+        .where('situacao', '==', 'pendente')
+        .get(),
+      admin.firestore().collection('fin_parcelas')
+        .where('tenantId', '==', tenantId)
+        .where('status', '==', 'pendente')
+        .get(),
+    ]);
+
+    // Exclui investimentos no JS — evita índice composto com != no Firestore
+    let totalDespesas = 0;
+    let qtdDespesas = 0;
+    despSnap.forEach(doc => {
+      const d = doc.data();
+      if (d.tipo === 'investimento') return;
+      totalDespesas += Number(d.valor || 0);
+      qtdDespesas++;
+    });
+
+    let totalParcelas = 0;
+    parcSnap.forEach(doc => {
+      totalParcelas += Number(doc.data().valor || 0);
+    });
+
+    return res.json({
+      ok: true,
+      totalObrigacoes: totalDespesas + totalParcelas,
+      totalDespesas,
+      totalParcelas,
+      qtdDespesas,
+      qtdParcelas: parcSnap.size,
+    });
+  } catch (err) {
+    console.error('[GET /api/fin-obrigacoes]', err);
+    return next(err);
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // fin_recebiveis — valores a receber (vendas liberadas, pix pendente, etc.)
 // ═══════════════════════════════════════════════════════════════════════════
