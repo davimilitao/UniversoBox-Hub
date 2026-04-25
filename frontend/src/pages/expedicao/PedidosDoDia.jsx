@@ -195,60 +195,86 @@ async function printDanfe(blingNfId, onStatus) {
 }
 
 /**
- * Imprime etiqueta de transporte via Bling API v3 → QZ Tray.
- * Backend devolve ZPL (preferido), PDF base64, ou pdfUrl (fallback browser).
- * Mesmo contrato que `printShippingLabel` do ML.
+ * Imprime etiqueta de transporte via Bling (10x15 térmica).
+ * Tenta v3 primeiro (PDF base64 → QZ Tray ou blob). Fallback: endpoint
+ * principal que pode retornar ZPL, PDF ou URL do relatório legado.
  * @param {string} blingNfId — ID da NF no Bling
- * @param {Function} onStatus
+ * @param {Function} onStatus — callback de status para o UI
  */
 async function printTransportLabelBling(blingNfId, onStatus) {
-  onStatus?.('Buscando etiqueta no Bling…');
+  onStatus?.('Buscando etiqueta de transporte…');
   const token = localStorage.getItem('expedicao_token') || '';
-  const res = await fetch(`/bling/etiqueta-transporte/${encodeURIComponent(blingNfId)}`, {
-    headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta`);
+
+  // ── 1. Tenta endpoint v3 (PDF base64) ────────────────────────────────────
+  let data = null;
+  try {
+    const resV3 = await fetch(`/bling/etiqueta-v3/${encodeURIComponent(blingNfId)}`, {
+      headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
+    });
+    const dV3 = await resV3.json().catch(() => ({}));
+    if (resV3.ok && dV3.ok && dV3.pdf) {
+      data = dV3;
+    }
+  } catch (err) { console.warn('[printTransportLabelBling] etiqueta-v3 falhou:', err.message); }
+
+  // ── 2. Fallback: endpoint principal (ZPL, PDF base64, ou pdfUrl) ─────────
+  if (!data) {
+    const res = await fetch(`/bling/etiqueta-transporte/${encodeURIComponent(blingNfId)}`, {
+      headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
+    });
+    data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta`);
+    }
   }
 
-  let b64pdf = null, zplStr = null, pdfUrl = null;
-  if (data.format === 'zpl' && data.zpl) zplStr = data.zpl;
-  else if (data.format === 'pdf' && data.pdf) b64pdf = data.pdf;
-  else if (data.format === 'pdf_url' && data.pdfUrl) pdfUrl = data.pdfUrl;
-  else throw new Error('Bling não retornou ZPL/PDF da etiqueta.');
+  const b64pdf = data.pdf || null;
+  const zplStr = data.zpl || null;
+  const pdfUrl = data.pdfUrl || null;
 
-  onStatus?.('Conectando à impressora…');
-  let qzOk = false;
-  try {
-    const qz = await qzConnect();
-    const printer = await qz.printers.getDefault();
-    if (zplStr) {
+  // ── 3. ZPL via QZ Tray (preferido para impressoras térmicas) ─────────────
+  if (zplStr) {
+    onStatus?.('Conectando à impressora…');
+    try {
+      const qz = await qzConnect();
+      const printer = await qz.printers.getDefault();
       const config = qz.configs.create(printer, { language: { type: 'ZPL' } });
       await qz.print(config, [{ type: 'raw', format: 'plain', data: zplStr }]);
-      qzOk = true;
-    } else if (b64pdf) {
+      return;
+    } catch (qzErr) {
+      console.warn('[printTransportLabelBling] QZ ZPL indisponível:', qzErr.message);
+    }
+  }
+
+  // ── 4. PDF base64: QZ Tray → fallback blob no browser ────────────────────
+  if (b64pdf) {
+    onStatus?.('Conectando à impressora…');
+    let qzOk = false;
+    try {
+      const qz = await qzConnect();
+      const printer = await qz.printers.getDefault();
       const config = qz.configs.create(printer, {
-        scaleContent: false, colorType: 'blackwhite', rotation: 0,
+        scaleContent: false,
+        colorType: 'blackwhite',
+        rotation: 0,
         margins: { top: 0, right: 0, bottom: 0, left: 0 },
       });
       await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64pdf }]);
       qzOk = true;
+    } catch (qzErr) {
+      console.warn('[printTransportLabelBling] QZ indisponível:', qzErr.message);
     }
-  } catch (qzErr) {
-    console.warn('[printTransportLabelBling] QZ indisponível:', qzErr.message);
-  }
-  if (qzOk) return;
-
-  onStatus?.('Abrindo no navegador…');
-  if (b64pdf) {
+    if (qzOk) return;
     const blob = new Blob([Uint8Array.from(atob(b64pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
-    const url  = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    onStatus?.('Abrindo etiqueta no navegador…');
     window.open(url, '_blank');
     setTimeout(() => URL.revokeObjectURL(url), 30000);
     return;
   }
-  if (pdfUrl) { window.open(pdfUrl, '_blank'); return; }
+
+  // ── 5. Fallback URL (relatório legado do Bling ou ZPL download) ──────────
+  if (pdfUrl) { onStatus?.('Abrindo etiqueta no Bling…'); window.open(pdfUrl, '_blank'); return; }
   if (zplStr) {
     const blob = new Blob([zplStr], { type: 'text/plain' });
     const url  = URL.createObjectURL(blob);
@@ -257,7 +283,7 @@ async function printTransportLabelBling(blingNfId, onStatus) {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
     return;
   }
-  throw new Error('Etiqueta não disponível.');
+  throw new Error('Etiqueta não disponível — nenhum formato suportado.');
 }
 
 /**
@@ -809,34 +835,30 @@ function DanfeButton({ blingNfId }) {
   );
 }
 
-// ─── Botão Etiqueta de Transporte (ZPL/PDF via ML) ───────────────────────────
+// ─── Botão Etiqueta de Transporte (Bling relatório → fallback ML ZPL) ───────
 function ShippingLabelButton({ mlOrderId, numeroPedido, marketplace, blingNfId }) {
   const [st,  setSt]  = useState(null);
   const [msg, setMsg] = useState('');
 
-  // ML: API do ML devolve ZPL direto (funciona via /api/ml/orders/:id/label)
-  // Outros marketplaces: Bling API v3 não expõe o ZPL — abrimos a NF no
-  // Bling web, onde o botão "Etiquetas de transporte" dispara via QZ Tray.
-  const mlId = mlOrderId || (
+  // Prioridade: Bling (funciona para qualquer marketplace com NF emitida).
+  // Fallback ML: usa API do ML quando não há blingNfId mas temos mlOrderId.
+  const mlFallbackId = mlOrderId || (
     marketplace === 'MERCADO_LIVRE' && /^\d{10,20}$/.test(String(numeroPedido || ''))
       ? String(numeroPedido)
       : null
   );
-  const isMl = marketplace === 'MERCADO_LIVRE' && !!mlId;
 
-  if (!isMl && !blingNfId) return null;
+  if (!blingNfId && !mlFallbackId) return null;
 
   async function handle() {
-    setSt('loading'); setMsg(isMl ? 'Buscando etiqueta ML…' : 'Abrindo Bling…');
+    setSt('loading'); setMsg('Abrindo…');
     try {
-      if (isMl) {
-        await printShippingLabel(mlId, m => setMsg(m));
+      if (blingNfId) {
+        await printTransportLabelBling(blingNfId, m => setMsg(m));
       } else {
-        // Não-ML: abre página da NF no Bling pro usuário clicar em
-        // "Etiquetas de transporte" (AJAX interno → QZ Tray → impressora).
-        window.open(`https://www.bling.com.br/notas.fiscais.php#list/nota.fiscal.php?id=${blingNfId}`, '_blank');
+        await printShippingLabel(mlFallbackId, m => setMsg(m));
       }
-      setSt('ok'); setMsg(isMl ? 'Impresso ✓' : 'Bling aberto ✓');
+      setSt('ok'); setMsg('Aberto ✓');
       setTimeout(() => { setSt(null); setMsg(''); }, 4000);
     } catch(e) {
       setSt('err'); setMsg(e.message);
@@ -917,8 +939,15 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
           )}
         </div>
         <div className="px-4 pb-1 space-y-2">
-          <ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} blingNfId={order.blingNfId} />
-          <DanfeButton blingNfId={order.blingNfId} />
+          <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider px-1">Impressões</p>
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">1</span>
+            <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">2</span>
+            <div className="flex-1"><ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} blingNfId={order.blingNfId} /></div>
+          </div>
         </div>
         <div className="flex gap-2 p-4 border-t border-white/5">
           <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>
@@ -980,8 +1009,15 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
           </div>
         )}
         <div className="px-4 pb-1 space-y-2">
-          <ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} blingNfId={order.blingNfId} />
-          <DanfeButton blingNfId={order.blingNfId} />
+          <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider px-1">Impressões</p>
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">1</span>
+            <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">2</span>
+            <div className="flex-1"><ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} blingNfId={order.blingNfId} /></div>
+          </div>
         </div>
         <div className="flex gap-2 p-4 border-t border-white/5">
           <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>

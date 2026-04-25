@@ -4526,45 +4526,100 @@ app.get('/bling/etiqueta-transporte/:nfId', async (req, res, next) => {
   }
 });
 
-// ── DEBUG: dumpa resposta crua dos endpoints candidatos a etiqueta ──
-// GET /bling/debug/etiqueta/:nfId
-app.get('/bling/debug/etiqueta/:nfId', async (req, res, next) => {
+// ── Etiqueta de Transporte via API v3 do Bling (Bearer token OAuth2) ────
+// GET /bling/etiqueta-v3/:nfId → { ok, pdf (base64), nfId, via }
+// Tenta dois caminhos na API v3:
+//   1. GET /nfe/{nfId}/etiqueta   (endpoint direto de etiqueta da NF)
+//   2. GET /nfe/{nfId} → pedidoVenda.id → GET /pedidosVendas/{id}/etiqueta
+// Se nenhum retornar PDF → 404 com erro etiqueta_nao_disponivel_na_v3.
+// Use o endpoint legado /bling/etiqueta-transporte/:nfId como fallback browser.
+app.get('/bling/etiqueta-v3/:nfId', async (req, res, next) => {
   const nfId = String(req.params.nfId).replace(/\D/g, '');
+  if (!nfId) return res.status(400).json({ error: 'id_invalido', message: 'ID da NF deve ser numérico.' });
+
   try {
     const token = await blingEnsureToken();
-    const headers = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
-    const out = {};
 
-    async function probe(url) {
-      try {
-        const r = await fetch(url, { headers });
-        const ct = r.headers.get('content-type') || '';
-        const st = r.status;
-        const txt = await r.text();
-        return { url, status: st, contentType: ct, body: txt.slice(0, 1200) };
-      } catch (e) { return { url, error: e.message }; }
+    // ── TENTATIVA 1: GET /nfe/{nfId}/etiqueta ──────────────────────────────
+    const etiquetaUrl = `${BLING_API_BASE}/nfe/${nfId}/etiqueta`;
+    console.log(`[etiqueta-v3/${nfId}] tentativa 1 → ${etiquetaUrl}`);
+
+    const r1 = await fetch(etiquetaUrl, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/pdf',
+      },
+    });
+
+    if (r1.status === 401) return res.status(401).json({ error: 'bling_not_authorized' });
+
+    const ct1 = (r1.headers.get('content-type') || '').toLowerCase();
+    console.log(`[etiqueta-v3/${nfId}] tentativa 1 status=${r1.status} ct=${ct1}`);
+
+    if (r1.ok && (ct1.includes('pdf') || ct1.includes('octet'))) {
+      const buf = await r1.arrayBuffer();
+      const pdf = Buffer.from(buf).toString('base64');
+      console.log(`[etiqueta-v3/${nfId}] PDF obtido via nfe/etiqueta (${buf.byteLength} bytes)`);
+      return res.json({ ok: true, pdf, nfId, via: 'bling_v3_nfe_etiqueta' });
     }
 
-    out.logisticas_idsNotas  = await probe(`${BLING_API_BASE}/logisticas/etiquetas?idsNotas[]=${nfId}`);
-    out.logisticas_idNota    = await probe(`${BLING_API_BASE}/logisticas/etiquetas?idNota=${nfId}`);
-    out.logisticas_objetos   = await probe(`${BLING_API_BASE}/logisticas/objetos?idsNotas[]=${nfId}`);
-    out.nfe_detalhe          = await probe(`${BLING_API_BASE}/nfe/${nfId}`);
+    // ── TENTATIVA 2: buscar pedidoVenda.id via GET /nfe/{nfId} ─────────────
+    console.log(`[etiqueta-v3/${nfId}] tentativa 1 sem PDF — buscando pedidoVenda.id`);
 
-    // Lista apenas campos candidatos do detalhe
-    try {
-      const nfe = JSON.parse(out.nfe_detalhe.body || '{}')?.data || {};
-      out.nfe_campos_relevantes = {
-        keys: Object.keys(nfe),
-        linkEtiqueta: nfe.linkEtiqueta || null,
-        urlEtiqueta:  nfe.urlEtiqueta || null,
-        transporte:   nfe.transporte || null,
-        volumes:      nfe.volumes || null,
-      };
-    } catch {}
+    const nfeUrl = `${BLING_API_BASE}/nfe/${nfId}`;
+    const r2 = await fetch(nfeUrl, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+    });
 
-    res.json({ nfId, ...out });
+    if (r2.status === 401) return res.status(401).json({ error: 'bling_not_authorized' });
+
+    if (r2.ok) {
+      let nfeData = {};
+      try { nfeData = await r2.json(); } catch {}
+
+      const pedidoVendaId =
+        nfeData?.data?.pedidoVenda?.id ||
+        nfeData?.pedidoVenda?.id ||
+        null;
+
+      console.log(`[etiqueta-v3/${nfId}] pedidoVendaId=${pedidoVendaId}`);
+
+      if (pedidoVendaId) {
+        const pedidoEtiquetaUrl = `${BLING_API_BASE}/pedidosVendas/${pedidoVendaId}/etiqueta`;
+        console.log(`[etiqueta-v3/${nfId}] tentativa 2 → ${pedidoEtiquetaUrl}`);
+
+        const r3 = await fetch(pedidoEtiquetaUrl, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/pdf',
+          },
+        });
+
+        if (r3.status === 401) return res.status(401).json({ error: 'bling_not_authorized' });
+
+        const ct3 = (r3.headers.get('content-type') || '').toLowerCase();
+        console.log(`[etiqueta-v3/${nfId}] tentativa 2 status=${r3.status} ct=${ct3}`);
+
+        if (r3.ok && (ct3.includes('pdf') || ct3.includes('octet'))) {
+          const buf = await r3.arrayBuffer();
+          const pdf = Buffer.from(buf).toString('base64');
+          console.log(`[etiqueta-v3/${nfId}] PDF obtido via pedidosVendas/etiqueta (${buf.byteLength} bytes)`);
+          return res.json({ ok: true, pdf, nfId, via: 'bling_v3_pedido_venda' });
+        }
+      }
+    }
+
+    // ── Nenhuma tentativa retornou PDF ─────────────────────────────────────
+    console.warn(`[etiqueta-v3/${nfId}] etiqueta não disponível via API v3`);
+    return res.status(404).json({
+      ok: false,
+      error: 'etiqueta_nao_disponivel_na_v3',
+      message: 'Etiqueta não disponível via API v3 — use o fallback browser.',
+    });
+
   } catch (err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    console.error(`[etiqueta-v3/${nfId}]`, err.message);
     next(err);
   }
 });
