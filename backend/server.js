@@ -2064,6 +2064,8 @@ app.post('/api/fin-despesas', requireFirebaseAuth, async (req, res, next) => {
         custoUnitario: null,
         status: 'aberta',
         despesaId: docRef.id,
+        tenantId,
+        uid,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       compraId = compraRef.id;
@@ -2094,6 +2096,8 @@ app.post('/api/fin-despesas', requireFirebaseAuth, async (req, res, next) => {
           status: 'pendente',
           comprovante: null,
           paidAt: null,
+          tenantId,
+          uid,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       }
