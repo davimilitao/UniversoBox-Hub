@@ -3796,12 +3796,32 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
 
         console.log(`[danfe/${nfId}] detalhe sit=${nf?.situacao} campos=[${Object.keys(nf).join(',')}]`);
 
-        // Prioridade: linkPDF (PDF direto) > linkDanfe (HTML viewer) > linkDanfeFull
+        // ──────────────────────────────────────────────────────────────────
+        // SIMPLIFICADA (10x15 térmica):
+        //   Único caminho aceitável é linkDanfeSimplificado (se existir) ou
+        //   a URL de /relatorios/danfe.simplificado.php?idNota1=X.
+        //   NUNCA cair em linkPDF, linkDanfeFull ou linkDanfe —
+        //   TODOS são DANFE completa A4 com canhoto "RECEBEMOS DE ...".
+        // ──────────────────────────────────────────────────────────────────
+        if (tipoParam === 'simplificado') {
+          if (nf?.linkDanfeSimplificado) {
+            console.log(`[danfe/${nfId}] linkDanfeSimplificado=${nf.linkDanfeSimplificado}`);
+            const result = await downloadPdf(nf.linkDanfeSimplificado, 'linkDanfeSimplificado');
+            if (result) return res.json({ ok: true, ...result, nfId, tipo: 'simplificado' });
+            return res.json({ ok: true, pdfUrl: nf.linkDanfeSimplificado, nfId, tipo: 'simplificado', via: 'linkDanfeSimplificado_browser' });
+          }
+          // Bling não tem linkDanfeSimplificado → usa relatório interno do Bling
+          const simplUrl = `https://www.bling.com.br/relatorios/danfe.simplificado.php?idNota1=${nfId}`;
+          console.log(`[danfe/${nfId}] sem linkDanfeSimplificado → relatorios/danfe.simplificado.php`);
+          return res.json({ ok: true, pdfUrl: simplUrl, nfId, tipo: 'simplificado', via: 'danfe_simplificado_browser' });
+        }
+
+        // Prioridade para DANFE completa (A4):
+        //   linkPDF (PDF direto) > linkDanfe (HTML viewer) > linkDanfeFull
         // ATENÇÃO: linkDanfe = viewer HTML/SVG — NÃO é PDF binário!
-        //          linkPDF   = download direto do PDF = o que precisamos
+        //          linkPDF   = download direto do PDF
         const linkPdf =
-          nf?.linkPDF || nf?.linkPdf ||
-          nf?.linkDanfeFull || nf?.linkDanfeSimplificado;
+          nf?.linkPDF || nf?.linkPdf || nf?.linkDanfeFull || nf?.linkDanfeSimplificado;
 
         const linkViewer =
           nf?.linkDanfe || nf?.danfe?.link || nf?.urls?.danfe || nf?.url;
@@ -3909,7 +3929,11 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
     // ══════════════════════════════════════════════════════════════════════
     // PASSO 3 — Fallback: URL Bling simplificada pelo número da NF
     // ══════════════════════════════════════════════════════════════════════
-    // (Tenta buscar número da NF do detalhe para montar URL alternativa)
+    if (tipoParam === 'simplificado') {
+      const simplUrl = `https://www.bling.com.br/relatorios/danfe.simplificado.php?idNota1=${nfId}`;
+      console.log(`[danfe/${nfId}] fallback danfe.simplificado.php → ${simplUrl}`);
+      return res.json({ ok: true, pdfUrl: simplUrl, nfId, tipo: 'simplificado', via: 'danfe_simplificado_browser' });
+    }
     return res.status(404).json({
       error:   'danfe_nao_disponivel',
       message: 'DANFE indisponível via API. Verifique se a NF está autorizada no Bling.',
@@ -3920,6 +3944,129 @@ app.get('/bling/danfe/:id', async (req, res, next) => {
   } catch(err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
     console.error(`[GET /bling/danfe/${nfId}]`, err.message);
+    next(err);
+  }
+});
+
+// ── Etiqueta de Transporte via relatório Bling (10x15 térmica) ───────
+// GET /bling/etiqueta-transporte/:nfId → { ok, pdfUrl, nfId, via }
+// Espelha o caso da DANFE Simplificada: devolve a URL do relatório
+// interno do Bling (gerarEtiquetasTransporte → etiquetas.transporte.php),
+// que já imprime automaticamente no formato 10x15cm.
+// O frontend abre em nova aba e dispara window.print() (ou QZ Tray).
+app.get('/bling/etiqueta-transporte/:nfId', async (req, res) => {
+  const nfId = String(req.params.nfId).replace(/\D/g, '');
+  if (!nfId) return res.status(400).json({ error: 'id_invalido', message: 'ID da NF deve ser numérico.' });
+
+  // Prioridade: etiquetas.transporte.php (relatório nativo do Bling com
+  // auto-print). Segundo fallback: etiqueta.envio.php (formato antigo).
+  const pdfUrl = `https://www.bling.com.br/relatorios/etiquetas.transporte.php?idNota1=${nfId}`;
+  const fallbackUrl = `https://www.bling.com.br/relatorios/etiqueta.envio.php?idNota1=${nfId}`;
+  console.log(`[etiqueta-transporte/${nfId}] → ${pdfUrl}`);
+  return res.json({
+    ok: true,
+    nfId,
+    pdfUrl,
+    fallbackUrl,
+    via: 'etiquetas_transporte_browser',
+    tipo: 'transporte',
+  });
+});
+
+// ── Etiqueta de Transporte via API v3 do Bling (Bearer token OAuth2) ────
+// GET /bling/etiqueta-v3/:nfId → { ok, pdf (base64), nfId, via }
+// Tenta dois caminhos na API v3:
+//   1. GET /nfe/{nfId}/etiqueta   (endpoint direto de etiqueta da NF)
+//   2. GET /nfe/{nfId} → pedidoVenda.id → GET /pedidosVendas/{id}/etiqueta
+// Se nenhum retornar PDF → 404 com erro etiqueta_nao_disponivel_na_v3.
+// Use o endpoint legado /bling/etiqueta-transporte/:nfId como fallback browser.
+app.get('/bling/etiqueta-v3/:nfId', async (req, res, next) => {
+  const nfId = String(req.params.nfId).replace(/\D/g, '');
+  if (!nfId) return res.status(400).json({ error: 'id_invalido', message: 'ID da NF deve ser numérico.' });
+
+  try {
+    const token = await blingEnsureToken();
+
+    // ── TENTATIVA 1: GET /nfe/{nfId}/etiqueta ──────────────────────────────
+    const etiquetaUrl = `${BLING_API_BASE}/nfe/${nfId}/etiqueta`;
+    console.log(`[etiqueta-v3/${nfId}] tentativa 1 → ${etiquetaUrl}`);
+
+    const r1 = await fetch(etiquetaUrl, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/pdf',
+      },
+    });
+
+    if (r1.status === 401) return res.status(401).json({ error: 'bling_not_authorized' });
+
+    const ct1 = (r1.headers.get('content-type') || '').toLowerCase();
+    console.log(`[etiqueta-v3/${nfId}] tentativa 1 status=${r1.status} ct=${ct1}`);
+
+    if (r1.ok && (ct1.includes('pdf') || ct1.includes('octet'))) {
+      const buf = await r1.arrayBuffer();
+      const pdf = Buffer.from(buf).toString('base64');
+      console.log(`[etiqueta-v3/${nfId}] PDF obtido via nfe/etiqueta (${buf.byteLength} bytes)`);
+      return res.json({ ok: true, pdf, nfId, via: 'bling_v3_nfe_etiqueta' });
+    }
+
+    // ── TENTATIVA 2: buscar pedidoVenda.id via GET /nfe/{nfId} ─────────────
+    console.log(`[etiqueta-v3/${nfId}] tentativa 1 sem PDF — buscando pedidoVenda.id`);
+
+    const nfeUrl = `${BLING_API_BASE}/nfe/${nfId}`;
+    const r2 = await fetch(nfeUrl, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+    });
+
+    if (r2.status === 401) return res.status(401).json({ error: 'bling_not_authorized' });
+
+    if (r2.ok) {
+      let nfeData = {};
+      try { nfeData = await r2.json(); } catch {}
+
+      const pedidoVendaId =
+        nfeData?.data?.pedidoVenda?.id ||
+        nfeData?.pedidoVenda?.id ||
+        null;
+
+      console.log(`[etiqueta-v3/${nfId}] pedidoVendaId=${pedidoVendaId}`);
+
+      if (pedidoVendaId) {
+        const pedidoEtiquetaUrl = `${BLING_API_BASE}/pedidosVendas/${pedidoVendaId}/etiqueta`;
+        console.log(`[etiqueta-v3/${nfId}] tentativa 2 → ${pedidoEtiquetaUrl}`);
+
+        const r3 = await fetch(pedidoEtiquetaUrl, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/pdf',
+          },
+        });
+
+        if (r3.status === 401) return res.status(401).json({ error: 'bling_not_authorized' });
+
+        const ct3 = (r3.headers.get('content-type') || '').toLowerCase();
+        console.log(`[etiqueta-v3/${nfId}] tentativa 2 status=${r3.status} ct=${ct3}`);
+
+        if (r3.ok && (ct3.includes('pdf') || ct3.includes('octet'))) {
+          const buf = await r3.arrayBuffer();
+          const pdf = Buffer.from(buf).toString('base64');
+          console.log(`[etiqueta-v3/${nfId}] PDF obtido via pedidosVendas/etiqueta (${buf.byteLength} bytes)`);
+          return res.json({ ok: true, pdf, nfId, via: 'bling_v3_pedido_venda' });
+        }
+      }
+    }
+
+    // ── Nenhuma tentativa retornou PDF ─────────────────────────────────────
+    console.warn(`[etiqueta-v3/${nfId}] etiqueta não disponível via API v3`);
+    return res.status(404).json({
+      ok: false,
+      error: 'etiqueta_nao_disponivel_na_v3',
+      message: 'Etiqueta não disponível via API v3 — use o fallback browser.',
+    });
+
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    console.error(`[etiqueta-v3/${nfId}]`, err.message);
     next(err);
   }
 });
