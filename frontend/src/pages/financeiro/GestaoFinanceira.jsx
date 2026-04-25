@@ -36,7 +36,6 @@ import { GraficoBarras }     from './components/GraficoBarras';
 import { GraficoPizza }      from './components/GraficoPizza';
 import { FormLancarDespesa } from './components/FormLancarDespesa';
 import { TabelaDespesas }    from './components/TabelaDespesas';
-import { ContasDespesas }    from './components/ContasDespesas';
 import { FormNovaCompra }    from './components/FormNovaCompra';
 import MeiosPagamento        from './components/MeiosPagamento';
 import { HelpBanner }        from './components/HelpBanner';
@@ -145,6 +144,19 @@ function AbaParcelas({ parcelas, loading, saving, meios, lancarCompra, marcarPag
     return map;
   }, [parcelas]);
 
+  // Resumo pendente por mês — strip de navegação
+  const resumoPorMes = useMemo(() => {
+    const map = {};
+    parcelas.forEach(p => {
+      const k = labelMes(p.vencimento);
+      if (!k) return;
+      if (!map[k]) map[k] = { pendente: 0, pago: 0 };
+      if (p.status === 'pendente') map[k].pendente += p.valor || 0;
+      else map[k].pago += p.valor || 0;
+    });
+    return map;
+  }, [parcelas]);
+
   const resumo           = getResumo();
   const itensSelecionados = listaFiltrada.filter(p => selecionados.has(p.id));
   const totalSelecionado  = itensSelecionados.reduce((s, p) => s + (p.valor || 0), 0);
@@ -226,6 +238,38 @@ function AbaParcelas({ parcelas, loading, saving, meios, lancarCompra, marcarPag
         <KpiCard label="Próx. 7 dias" value={brl(resumo.semana.total)}   sub={`${resumo.semana.items.length} parcela(s)`}    color="blue"    Icon={Calendar} />
         <KpiCard label="Total pago"   value={brl(resumo.totalPago)}      sub="histórico"                                     color="emerald" Icon={CheckCircle2} />
       </div>
+
+      {/* Strip mês a mês */}
+      {meses.length > 1 && (
+        <div className="overflow-x-auto -mx-1 px-1 pb-1">
+          <div className="flex gap-2 w-max">
+            {meses.map(m => {
+              const dados     = resumoPorMes[m.key] || { pendente: 0, pago: 0 };
+              const ativo     = m.key === mesEfetivo;
+              const temDivida = dados.pendente > 0;
+              return (
+                <button
+                  key={m.key}
+                  onClick={() => setMesAtivo(m.key)}
+                  className={[
+                    'flex flex-col items-start px-3 py-2.5 rounded-xl border text-left transition-all shrink-0 min-w-[90px]',
+                    ativo
+                      ? 'bg-slate-700 border-white/20 text-white'
+                      : 'bg-slate-900 border-white/[0.06] text-slate-400 hover:border-white/15 hover:text-slate-200',
+                  ].join(' ')}
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">{m.label}</span>
+                  <span className={`text-sm font-black tabular-nums mt-0.5 ${
+                    !temDivida ? 'text-emerald-400' : ativo ? 'text-white' : 'text-slate-300'
+                  }`}>
+                    {temDivida ? brl(dados.pendente) : '✓ Quitado'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Filtros por cartão */}
       {meios.length > 0 && (
@@ -437,8 +481,10 @@ export function GestaoFinanceira() {
   const [statusAtivo,    setStatusAtivo]    = useState('all');
 
   // ── UI
-  const [salvando, setSalvando] = useState(false);
-  const [toast,    setToast]    = useState({ msg: '', tipo: 'ok' });
+  const [salvando,      setSalvando]      = useState(false);
+  const [toast,         setToast]         = useState({ msg: '', tipo: 'ok' });
+  const [formAberto,    setFormAberto]    = useState(false);
+  const [mostrarCharts, setMostrarCharts] = useState(false);
   const isAdmin = checkAdmin();
 
   // ── Despesas com statusEfetivo calculado
@@ -459,11 +505,6 @@ export function GestaoFinanceira() {
     if (!mesEfetivo) return despesasComStatus;
     return despesasComStatus.filter(d => labelMesAnoTs(d.timestamp) === mesEfetivo);
   }, [despesasComStatus, mesEfetivo]);
-  const despesasMesAtual = useMemo(
-    () => despesasComStatus.filter(d => labelMesAnoTs(d.timestamp) === mesAtualLabel),
-    [despesasComStatus, mesAtualLabel],
-  );
-
   const despesasFiltradas = useMemo(() => despesasMes.filter(d => {
     if (categoriaAtiva !== 'all' && d.categoria !== categoriaAtiva) return false;
     if (tipoAtivo !== 'all' && d.tipo !== tipoAtivo) return false;
@@ -471,11 +512,7 @@ export function GestaoFinanceira() {
     return true;
   }), [despesasMes, categoriaAtiva, tipoAtivo, statusAtivo]);
 
-  // Badges das abas
-  const nContasPagar = useMemo(
-    () => despesasMesAtual.filter(d => d.statusEfetivo !== 'pago' && d.tipo !== 'investimento').length,
-    [despesasMesAtual],
-  );
+  // Badge da aba Parcelas
   const resumoParcelas  = getResumo();
   const nParcelasVencidas = resumoParcelas.vencidas.items.length;
 
@@ -557,26 +594,50 @@ export function GestaoFinanceira() {
           <h1 className="text-base font-bold text-slate-200">Financeiro</h1>
         </div>
         <div className="flex border-b border-white/[0.08] overflow-x-auto">
-          <TabBtn id="lancamentos" label="Lançamentos"     ativo={aba} onClick={setAba} />
-          <TabBtn id="contas"      label="Contas a Pagar"  badge={nContasPagar}      ativo={aba} onClick={setAba} />
-          <TabBtn id="parcelas"    label="Parcelas"        badge={nParcelasVencidas}  ativo={aba} onClick={setAba} />
-          <TabBtn id="cartoes"     label="Cartões"         badge={meiosPagamento.length} ativo={aba} onClick={setAba} />
+          <TabBtn id="lancamentos" label="Despesas"   ativo={aba} onClick={setAba} />
+          <TabBtn id="parcelas"    label="Parcelas"   badge={nParcelasVencidas}  ativo={aba} onClick={setAba} />
+          <TabBtn id="cartoes"     label="Cartões"    badge={meiosPagamento.length} ativo={aba} onClick={setAba} />
         </div>
       </div>
 
-      {/* ── Aba Lançamentos ──────────────────────────────────────────────────── */}
+      {/* ── Aba Despesas ─────────────────────────────────────────────────────── */}
       {aba === 'lancamentos' && (
         <div className="p-6 flex flex-col gap-5">
-          <HelpBanner
-            abaId="lancamentos"
-            titulo="Lançamentos de Despesas"
-            itens={[
-              'Registre aqui todas as despesas: fixas mensais, operacionais e investimentos.',
-              'Despesas do tipo Investimento criam parcelas automaticamente na aba Parcelas.',
-              'Use /comprovante no Claude para lançar a partir de um PDF de comprovante.',
-            ]}
-            dica="Filtros de mês, tipo, categoria e status ficam ativos enquanto a aba está aberta."
-          />
+
+          {/* Barra de ação: + Lançar + toggle Análises */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setFormAberto(v => !v)}
+              className={[
+                'flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold border transition-all',
+                formAberto
+                  ? 'bg-emerald-600 border-emerald-500 text-white'
+                  : 'bg-emerald-600/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-600 hover:border-emerald-500 hover:text-white',
+              ].join(' ')}
+            >
+              <Plus size={14} /> {formAberto ? 'Cancelar' : 'Lançar Despesa'}
+            </button>
+            {despesasComStatus.length > 0 && (
+              <button
+                onClick={() => setMostrarCharts(v => !v)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-white/[0.08] text-slate-500 hover:text-slate-300 hover:border-white/20 transition-all"
+              >
+                <TrendingUp size={12} /> {mostrarCharts ? 'Ocultar análises' : 'Ver análises'}
+              </button>
+            )}
+          </div>
+
+          {/* Formulário colapsável */}
+          {formAberto && (
+            <div className="rounded-xl bg-slate-900 border border-emerald-500/20 p-5">
+              <FormLancarDespesa
+                categorias={categorias}
+                meiosPagamento={meiosPagamento}
+                onSalvar={async (payload) => { await handleSalvar(payload); setFormAberto(false); }}
+                salvando={salvando}
+              />
+            </div>
+          )}
 
           <FiltrosBar
             meses={meses}         mesAtivo={mesEfetivo}      onMes={setMesAtivo}
@@ -587,48 +648,20 @@ export function GestaoFinanceira() {
 
           <ResumoCards despesasMes={despesasMes} />
 
-          {despesasComStatus.length > 0 && (
+          {/* Análises colapsáveis */}
+          {mostrarCharts && despesasComStatus.length > 0 && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <GraficoBarras despesas={despesasComStatus} />
               <GraficoPizza  despesasMes={despesasMes} />
             </div>
           )}
 
-          <div className="flex flex-col xl:flex-row gap-5 items-start">
-            <div className="w-full xl:w-80 shrink-0">
-              <FormLancarDespesa
-                categorias={categorias}
-                meiosPagamento={meiosPagamento}
-                onSalvar={handleSalvar}
-                salvando={salvando}
-              />
-            </div>
-            <div className="flex-1 min-w-0">
-              <TabelaDespesas
-                despesas={despesasFiltradas}
-                isAdmin={isAdmin}
-                onToggleStatus={handleToggleStatus}
-                onDelete={handleDelete}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Aba Contas a Pagar ───────────────────────────────────────────────── */}
-      {aba === 'contas' && (
-        <div className="p-6 flex flex-col gap-5">
-          <HelpBanner
-            abaId="contas-pagar"
-            titulo="Contas a Pagar — Visão Unificada"
-            itens={[
-              'Mostra todas as despesas operacionais pendentes + parcelas de cartão em uma lista só.',
-              'Ordenado por urgência: Vencidas → Vence hoje → Próximos 7 dias → Pendentes.',
-              'Parcelas roxas vêm da aba Cartões/Compras. Despesas verdes vêm de Lançamentos.',
-            ]}
-            dica="Clique em Pagar para registrar o pagamento. Botão fica verde com opção de desfazer."
+          <TabelaDespesas
+            despesas={despesasFiltradas}
+            isAdmin={isAdmin}
+            onToggleStatus={handleToggleStatus}
+            onDelete={handleDelete}
           />
-          <ContasDespesas />
         </div>
       )}
 
