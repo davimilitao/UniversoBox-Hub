@@ -475,7 +475,7 @@ export function GestaoFinanceira() {
   const [aba, setAba] = useState('lancamentos');
 
   // ── Aba Contas do Mês (unificada)
-  const [mesContas,        setMesContas]        = useState(labelMesAtual());
+  const [mesContas,        setMesContas]        = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
   const [contasMes,        setContasMes]        = useState([]);
   const [totaisContasMes,  setTotaisContasMes]  = useState({ total: 0, vencida: 0, pendente: 0, pago: 0 });
   const [loadingContasMes, setLoadingContasMes] = useState(false);
@@ -707,7 +707,7 @@ export function GestaoFinanceira() {
                 <ChevronLeft size={14} />
               </button>
               <span className="text-slate-100 text-sm font-bold px-3 min-w-[120px] text-center">
-                {new Date(mesContas + '-15').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                {(() => { const [y,m] = mesContas.split('-').map(Number); return new Date(y, m-1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }); })()}
               </span>
               <button
                 onClick={() => {
