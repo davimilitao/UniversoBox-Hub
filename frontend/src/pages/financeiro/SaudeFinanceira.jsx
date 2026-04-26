@@ -1,13 +1,14 @@
 /**
  * @file SaudeFinanceira.jsx
  * @description Dashboard "Saúde Financeira" — 2 abas: Painel | A Pagar.
- *              Todos os dados carregados em paralelo no mount.
- * @version 3.0.0
+ *              Posição = Caixa + A Receber − A Pagar. Bling é informativo.
+ * @version 4.0.0
  * @date 2026-04-26
  * @changelog
- *   3.0.0 — 2026-04-26 — Remove aba Posição (redundante), carga paralela,
- *                         A Pagar com detalhe por item + collapse por mês.
- *   2.0.0 — 2026-04-25 — 3 abas Painel/A Pagar/Posição.
+ *   4.0.0 — 2026-04-26 — Fase 1: remove Bling do cálculo, adiciona A Receber manual,
+ *                         nova fórmula Posição = Caixa + A Receber − A Pagar,
+ *                         A Pagar agrupa por tipo (Operacional / Parcelas).
+ *   3.0.0 — 2026-04-26 — 2 abas, carga paralela, itens detalhados.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
@@ -15,15 +16,15 @@ import { apiFetch } from '../../utils/getAuthToken';
 import {
   RefreshCw, Heart, TrendingDown, TrendingUp, ChevronLeft,
   ChevronRight, Clock, AlertTriangle, Loader2, CheckCircle2,
-  Banknote, Package, ChevronDown, CreditCard, Receipt,
+  Banknote, Package, ChevronDown, CreditCard, Receipt, ArrowDownLeft,
 } from 'lucide-react';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const fmt  = v => BRL.format(v || 0);
+const fmt = v => BRL.format(v || 0);
 const fmtData = iso => {
   if (!iso) return '';
-  const d = new Date(iso);
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 };
 
 function mesParaLabel(yyyymm) {
@@ -41,13 +42,20 @@ function navMes(yyyymm, delta) {
 }
 
 // ── Valor editável inline ────────────────────────────────────────────────────
-function ValorEditavel({ valor, onChange }) {
+function ValorEditavel({ valor, onChange, placeholder = 'Toque p/ editar' }) {
   const [editando, setEditando] = useState(false);
   const [texto, setTexto] = useState('');
   const ref = useRef(null);
 
-  function iniciar() { setTexto(valor > 0 ? String(valor) : ''); setEditando(true); setTimeout(() => ref.current?.select(), 0); }
-  function confirmar() { onChange(parseFloat(String(texto).replace(',', '.')) || 0); setEditando(false); }
+  function iniciar() {
+    setTexto(valor > 0 ? String(valor) : '');
+    setEditando(true);
+    setTimeout(() => ref.current?.select(), 0);
+  }
+  function confirmar() {
+    onChange(parseFloat(String(texto).replace(',', '.')) || 0);
+    setEditando(false);
+  }
 
   if (editando) return (
     <input ref={ref} type="number" step="0.01" min="0" value={texto}
@@ -58,14 +66,14 @@ function ValorEditavel({ valor, onChange }) {
   return (
     <button onClick={iniciar} title="Toque para editar"
       className="text-sm font-semibold tabular-nums text-slate-200 hover:text-white rounded px-1.5 py-0.5 hover:bg-white/5 transition-colors min-w-[7rem] text-right">
-      {valor > 0 ? fmt(valor) : <span className="text-slate-600 font-normal text-xs">Toque p/ editar</span>}
+      {valor > 0 ? fmt(valor) : <span className="text-slate-600 font-normal text-xs">{placeholder}</span>}
     </button>
   );
 }
 
 // ── Linha de detalhe ─────────────────────────────────────────────────────────
 function Linha({ label, sub, valor, onEdit, cor }) {
-  const corCls = cor === 'red' ? 'text-red-400' : cor === 'green' ? 'text-emerald-400' : 'text-slate-200';
+  const corCls = cor === 'red' ? 'text-red-400' : cor === 'green' ? 'text-emerald-400' : cor === 'blue' ? 'text-blue-400' : 'text-slate-200';
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-white/[0.05] last:border-0 gap-2">
       <div className="flex-1 min-w-0">
@@ -80,10 +88,10 @@ function Linha({ label, sub, valor, onEdit, cor }) {
 }
 
 // ── Card collapsível ─────────────────────────────────────────────────────────
-function CardCollapse({ titulo, total, cor, icon: Icon, children, defaultOpen = false, loading: isLoading }) {
+function CardCollapse({ titulo, total, cor, icon: Icon, children, defaultOpen = false, loading: isLoading, badge }) {
   const [aberto, setAberto] = useState(defaultOpen);
-  const borda = { green: 'border-l-emerald-500', red: 'border-l-red-500', blue: 'border-l-blue-500' };
-  const texto = { green: 'text-emerald-400',     red: 'text-red-400',     blue: 'text-blue-400'     };
+  const borda  = { green: 'border-l-emerald-500', red: 'border-l-red-500', blue: 'border-l-blue-500', teal: 'border-l-teal-500', slate: 'border-l-slate-600' };
+  const texto  = { green: 'text-emerald-400',     red: 'text-red-400',     blue: 'text-blue-400',     teal: 'text-teal-400',     slate: 'text-slate-500'    };
 
   return (
     <div className={`rounded-xl bg-slate-800/80 border border-white/[0.06] border-l-4 ${borda[cor]} overflow-hidden`}>
@@ -92,6 +100,9 @@ function CardCollapse({ titulo, total, cor, icon: Icon, children, defaultOpen = 
         <div className="flex items-center gap-2">
           <Icon size={14} className={texto[cor]} />
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{titulo}</span>
+          {badge != null && (
+            <span className="text-[10px] text-slate-700 font-mono">{badge}</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {isLoading
@@ -109,48 +120,44 @@ function CardCollapse({ titulo, total, cor, icon: Icon, children, defaultOpen = 
 
 // ── Item da lista A Pagar ────────────────────────────────────────────────────
 function ItemAPagar({ item }) {
-  const isVencida  = item.status === 'vencida';
-  const isParcela  = item.origem === 'parcela';
-  const urgDias    = Math.abs(item.diasParaVencer);
-
-  const bordaCls = isVencida
-    ? 'border-red-500/25 bg-red-500/[0.04]'
-    : 'border-white/[0.06] bg-slate-800/30';
-  const ponto = isVencida ? 'bg-red-400 animate-pulse' : 'bg-yellow-400';
-  const urgCls = isVencida ? 'text-red-400' : item.diasParaVencer <= 3 ? 'text-yellow-400' : 'text-slate-500';
-  const urgTxt = isVencida ? `${urgDias}d atraso` : item.diasParaVencer === 0 ? 'Hoje' : `${item.diasParaVencer}d`;
+  const isVencida = item.status === 'vencida';
+  const urgDias   = Math.abs(item.diasParaVencer);
+  const urgCls    = isVencida ? 'text-red-400' : item.diasParaVencer <= 3 ? 'text-yellow-400' : 'text-slate-500';
+  const urgTxt    = isVencida ? `${urgDias}d atraso` : item.diasParaVencer === 0 ? 'Hoje' : `${item.diasParaVencer}d`;
+  const bordaCls  = isVencida ? 'border-red-500/20 bg-red-500/[0.04]' : 'border-white/[0.05] bg-slate-900/30';
+  const ponto     = isVencida ? 'bg-red-400 animate-pulse' : 'bg-yellow-400';
 
   return (
-    <div className={`flex items-center gap-3 px-3 py-3 rounded-xl border ${bordaCls}`}>
-      <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-0.5 ${ponto}`} />
+    <div className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border ${bordaCls}`}>
+      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${ponto}`} />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-1.5">
           <p className="text-sm font-semibold text-slate-200 truncate leading-tight">
             {item.fornecedor || item.descricao}
           </p>
-          {isParcela && item.totalParcelas > 1 && (
-            <span className="text-[10px] text-slate-600 shrink-0 font-mono">
+          {item.origem === 'parcela' && item.totalParcelas > 1 && (
+            <span className="text-[10px] text-slate-600 font-mono shrink-0">
               {item.numeroParcela}/{item.totalParcelas}x
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+        <div className="flex items-center gap-2 mt-0.5">
           {item.descricao && item.descricao !== item.fornecedor && (
-            <span className="text-[10px] text-slate-600 truncate max-w-[140px]">{item.descricao}</span>
+            <span className="text-[10px] text-slate-600 truncate max-w-[130px]">{item.descricao}</span>
           )}
-          {isParcela && item.meioNome && (
+          {item.origem === 'parcela' && item.meioNome && (
             <span className="text-[10px] text-slate-700 flex items-center gap-0.5 shrink-0">
               <CreditCard size={8} /> {item.meioNome}
             </span>
           )}
-          {!isParcela && item.categoria && (
+          {item.origem === 'despesa' && item.categoria && (
             <span className="text-[10px] text-slate-700 flex items-center gap-0.5 shrink-0">
               <Receipt size={8} /> {item.categoria}
             </span>
           )}
         </div>
       </div>
-      <div className="text-right shrink-0 min-w-[70px]">
+      <div className="text-right shrink-0 min-w-[68px]">
         <p className="text-sm font-bold text-white tabular-nums">{fmt(item.valor)}</p>
         <div className="flex items-center justify-end gap-1">
           <span className="text-[10px] text-slate-600">{fmtData(item.vencimento)}</span>
@@ -161,25 +168,70 @@ function ItemAPagar({ item }) {
   );
 }
 
+// ── Grupo collapsível na aba A Pagar ─────────────────────────────────────────
+function GrupoAPagar({ titulo, icon: Icon, cor, items }) {
+  const [aberto, setAberto] = useState(true);
+  if (items.length === 0) return null;
+
+  const total    = items.reduce((s, i) => s + i.valor, 0);
+  const nVencida = items.filter(i => i.status === 'vencida').length;
+  const corTotal = nVencida > 0 ? 'text-red-400' : 'text-slate-300';
+  const bordaCls = { red: 'border-red-500/20', yellow: 'border-yellow-500/20', slate: 'border-white/[0.06]' };
+
+  return (
+    <div className={`rounded-xl border overflow-hidden bg-slate-800/40 ${bordaCls[cor] || 'border-white/[0.06]'}`}>
+      <button onClick={() => setAberto(v => !v)}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/[0.02] transition-colors">
+        <div className="flex items-center gap-2">
+          <Icon size={13} className={cor === 'red' ? 'text-red-400' : 'text-slate-500'} />
+          <span className="text-xs font-bold text-slate-300">{titulo}</span>
+          <span className="text-[10px] text-slate-600">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+          {nVencida > 0 && (
+            <span className="text-[10px] font-bold text-red-400 animate-pulse">{nVencida} vencida{nVencida !== 1 ? 's' : ''}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-sm font-bold tabular-nums ${corTotal}`}>{fmt(total)}</span>
+          <ChevronDown size={13} className={`text-slate-600 transition-transform ${aberto ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+      {aberto && (
+        <div className="px-3 pb-3 flex flex-col gap-1.5 border-t border-white/[0.05] pt-2">
+          {items.map(i => <ItemAPagar key={`${i.origem}-${i.id}`} item={i} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 export function SaudeFinanceira() {
 
   const [aba,      setAba]      = useState('painel');
   const [mesAtivo, setMesAtivo] = useState(mesAtualStr);
 
-  // ── Caixa manual (localStorage) ─────────────────────────────────────────────
+  // ── Valores manuais em localStorage ─────────────────────────────────────────
   const mesKey = mesAtivo;
-  const [mp,           setMp]            = useState(() => parseFloat(localStorage.getItem(`painel_saldo_${mesKey}_mp`)     || '0') || 0);
-  const [banco,        setBanco]         = useState(() => parseFloat(localStorage.getItem(`painel_saldo_${mesKey}_banco`)  || '0') || 0);
-  const [outros,       setOutros]        = useState(() => parseFloat(localStorage.getItem(`painel_saldo_${mesKey}_outros`) || '0') || 0);
-  const [cofre,        setCofre]         = useState(() => parseFloat(localStorage.getItem('saude_cofre')                   || '0') || 0);
-  const [saldoLiberar, setSaldoLiberar]  = useState(() => parseFloat(localStorage.getItem('saude_saldo_liberar')           || '0') || 0);
-  const [estoqueChegar,setEstoqueChegar] = useState(() => parseFloat(localStorage.getItem('saude_estoque_chegar')          || '0') || 0);
+  const [mp,           setMp]           = useState(() => parseFloat(localStorage.getItem(`painel_saldo_${mesKey}_mp`)      || '0') || 0);
+  const [banco,        setBanco]        = useState(() => parseFloat(localStorage.getItem(`painel_saldo_${mesKey}_banco`)   || '0') || 0);
+  const [outros,       setOutros]       = useState(() => parseFloat(localStorage.getItem(`painel_saldo_${mesKey}_outros`)  || '0') || 0);
+  const [cofre,        setCofre]        = useState(() => parseFloat(localStorage.getItem('saude_cofre')                    || '0') || 0);
+  const [saldoLiberar, setSaldoLiberar] = useState(() => parseFloat(localStorage.getItem('saude_saldo_liberar')            || '0') || 0);
+  const [aReceber,     setAReceber]     = useState(() => parseFloat(localStorage.getItem(`saude_a_receber_${mesKey}`)      || '0') || 0);
+  const [estoqueChegar,setEstoqueChegar]= useState(() => parseFloat(localStorage.getItem('saude_estoque_chegar')           || '0') || 0);
 
   function salvar(campo, valor) {
-    const keys = { mp: `painel_saldo_${mesKey}_mp`, banco: `painel_saldo_${mesKey}_banco`, outros: `painel_saldo_${mesKey}_outros`, cofre: 'saude_cofre', saldoLiberar: 'saude_saldo_liberar', estoqueChegar: 'saude_estoque_chegar' };
+    const keys = {
+      mp:           `painel_saldo_${mesKey}_mp`,
+      banco:        `painel_saldo_${mesKey}_banco`,
+      outros:       `painel_saldo_${mesKey}_outros`,
+      cofre:        'saude_cofre',
+      saldoLiberar: 'saude_saldo_liberar',
+      aReceber:     `saude_a_receber_${mesKey}`,
+      estoqueChegar:'saude_estoque_chegar',
+    };
     localStorage.setItem(keys[campo], valor);
-    ({ mp: setMp, banco: setBanco, outros: setOutros, cofre: setCofre, saldoLiberar: setSaldoLiberar, estoqueChegar: setEstoqueChegar })[campo](valor);
+    ({ mp: setMp, banco: setBanco, outros: setOutros, cofre: setCofre, saldoLiberar: setSaldoLiberar, aReceber: setAReceber, estoqueChegar: setEstoqueChegar })[campo](valor);
   }
 
   // ── Estado do sistema ────────────────────────────────────────────────────────
@@ -191,7 +243,6 @@ export function SaudeFinanceira() {
   const [erro,        setErro]        = useState(null);
   const [updatedAt,   setUpdatedAt]   = useState(() => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
 
-  // Carrega TUDO em paralelo — sem lazy load por aba
   const carregar = useCallback(async (mes) => {
     setLoading(true); setErro(null);
     try {
@@ -218,34 +269,36 @@ export function SaudeFinanceira() {
   useEffect(() => { carregar(mesAtivo); }, [mesAtivo, carregar]);
 
   // ── Cálculos ─────────────────────────────────────────────────────────────────
+
+  // Caixa = dinheiro disponível agora
   const caixa       = mp + banco + outros + cofre + saldoLiberar;
-  const estoqueVal  = (estoque?.totalEstoque || 0) + estoqueChegar;
+  // Posição real = Caixa + A Receber (clientes) − O que falta pagar
   const totalAPagar = obrigacoes?.totalObrigacoes || 0;
-  const posicao     = caixa - totalAPagar;
+  const posicao     = caixa + aReceber - totalAPagar;
+  // Estoque é patrimonial — informativo, não entra na posição de caixa
+  const estoqueVal  = (estoque?.totalEstoque || 0) + estoqueChegar;
 
-  const receita  = painel?.receita?.bruta || 0;
-  const despMes  = painel?.despesas?.total || 0;
-  const parcMes  = painel?.parcelas?.total || 0;
-  const resultado = receita - despMes - parcMes;
-  const blingOk   = painel?.blingOk !== false;
+  // Dados Bling (informativos — não usados no cálculo principal)
+  const receitaBling = painel?.receita?.bruta || 0;
+  const despMes      = painel?.despesas?.total || 0;
+  const parcMes      = painel?.parcelas?.total || 0;
+  const blingOk      = painel?.blingOk !== false;
 
-  // Agrupamento A Pagar
-  const mesAtualMM = mesAtualStr();
-  const vencidas   = contasLista.filter(i => i.status === 'vencida');
-  const esteMes    = contasLista.filter(i => i.status === 'pendente' && i.vencimento?.startsWith(mesAtualMM));
-  const proxMeses  = contasLista.filter(i => i.status === 'pendente' && !i.vencimento?.startsWith(mesAtualMM));
-  const proxPorMes = proxMeses.reduce((acc, i) => {
-    const mm = i.vencimento?.slice(0, 7) || '';
-    if (!acc[mm]) acc[mm] = { label: mesParaLabel(mm), total: 0, items: [] };
-    acc[mm].total += i.valor;
-    acc[mm].items.push(i);
-    return acc;
-  }, {});
-  const proxMesesOrdenados = Object.entries(proxPorMes).sort(([a], [b]) => a.localeCompare(b));
+  // Agrupamento A Pagar por tipo
+  const despesas = contasLista.filter(i => i.origem === 'despesa');
+  const parcelas = contasLista.filter(i => i.origem === 'parcela');
+
+  // Badge da aba A Pagar
+  const totalVencidas = contasLista.filter(i => i.status === 'vencida').length;
 
   const ABAS = [
     { id: 'painel', label: 'Painel' },
-    { id: 'apagar', label: `A Pagar${contasLista.length > 0 ? ` (${contasLista.length})` : ''}` },
+    {
+      id: 'apagar',
+      label: contasLista.length > 0
+        ? `A Pagar (${contasLista.length}${totalVencidas > 0 ? ` · ${totalVencidas} venc.` : ''})`
+        : 'A Pagar',
+    },
   ];
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -275,7 +328,11 @@ export function SaudeFinanceira() {
             {ABAS.map(a => (
               <button key={a.id} onClick={() => setAba(a.id)}
                 className={`flex-1 py-2.5 text-xs font-bold border-b-2 transition-all ${
-                  aba === a.id ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-600 hover:text-slate-400'
+                  aba === a.id
+                    ? 'border-emerald-500 text-emerald-400'
+                    : totalVencidas > 0 && a.id === 'apagar'
+                      ? 'border-transparent text-red-500 hover:text-red-400'
+                      : 'border-transparent text-slate-600 hover:text-slate-400'
                 }`}>
                 {a.label}
               </button>
@@ -295,39 +352,36 @@ export function SaudeFinanceira() {
             </div>
           )}
 
-          {/* Seletor de mês — só relevante para o DRE */}
-          <div className="flex items-center gap-2 px-1">
-            <button onClick={() => setMesAtivo(m => navMes(m, -1))}
-              className="p-2 rounded-lg text-slate-600 hover:text-slate-200 hover:bg-white/[0.05] transition-all">
-              <ChevronLeft size={15} />
-            </button>
-            <span className="flex-1 text-center text-xs font-bold text-slate-400 uppercase tracking-wider capitalize">
-              {mesParaLabel(mesAtivo)}
-            </span>
-            <button onClick={() => setMesAtivo(m => navMes(m, 1))}
-              className="p-2 rounded-lg text-slate-600 hover:text-slate-200 hover:bg-white/[0.05] transition-all">
-              <ChevronRight size={15} />
-            </button>
-          </div>
-
           {/* ── Posição de Caixa — número grande ── */}
           <div className={`rounded-2xl border p-5 ${posicao >= 0 ? 'bg-emerald-950/40 border-emerald-700/20' : 'bg-red-950/40 border-red-700/20'}`}>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-1">Posição de Caixa Agora</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-1">
+              Posição de Caixa
+            </p>
             {loading
-              ? <div className="h-12 w-48 rounded-xl bg-slate-800 animate-pulse" />
+              ? <div className="h-12 w-48 rounded-xl bg-slate-800 animate-pulse mt-1" />
               : <p className={`text-5xl font-black tabular-nums leading-none ${posicao >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                   {fmt(posicao)}
                 </p>
             }
-            <p className="text-[10px] text-slate-700 mt-1.5">Caixa Disponível − Total a Pagar</p>
+            <p className="text-[10px] text-slate-700 mt-1.5">
+              Caixa + A Receber − A Pagar
+            </p>
+            {/* Grid de 3 */}
             <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-white/[0.05]">
               <div className="text-center">
                 <p className="text-[9px] text-slate-600 uppercase tracking-wider">Caixa</p>
                 <p className="text-sm font-bold text-emerald-400 tabular-nums">{fmt(caixa)}</p>
               </div>
               <div className="text-center">
-                <p className="text-[9px] text-slate-600 uppercase tracking-wider">Estoque</p>
-                <p className="text-sm font-bold text-blue-400 tabular-nums">{fmt(estoqueVal)}</p>
+                <p className="text-[9px] text-slate-600 uppercase tracking-wider">A Receber</p>
+                <button onClick={() => {
+                  const v = parseFloat(prompt('Valor a receber (R$):', aReceber || '')) || 0;
+                  salvar('aReceber', v);
+                }}
+                  className="text-sm font-bold text-blue-400 tabular-nums hover:text-blue-300 transition-colors"
+                  title="Toque para editar">
+                  {aReceber > 0 ? fmt(aReceber) : <span className="text-slate-700 font-normal text-xs">Editar</span>}
+                </button>
               </div>
               <div className="text-center">
                 <p className="text-[9px] text-slate-600 uppercase tracking-wider">A Pagar</p>
@@ -336,29 +390,17 @@ export function SaudeFinanceira() {
             </div>
           </div>
 
-          {/* ── Resultado do mês (DRE simples) ── */}
-          <CardCollapse titulo={`Resultado — ${mesParaLabel(mesAtivo)}`}
-            total={resultado} cor={resultado >= 0 ? 'green' : 'red'}
-            icon={resultado >= 0 ? TrendingUp : TrendingDown} loading={loading} defaultOpen>
-            {!blingOk && (
-              <div className="flex items-center gap-2 py-2 text-amber-400/80">
-                <AlertTriangle size={11} />
-                <p className="text-[10px]">Bling indisponível — receita NF-e pode estar incompleta</p>
-              </div>
-            )}
-            {receita === 0 && blingOk && (
-              <div className="flex items-center gap-2 py-2 text-slate-600">
-                <AlertTriangle size={11} />
-                <p className="text-[10px]">Nenhuma NF-e faturada no Bling neste mês ainda</p>
-              </div>
-            )}
-            <Linha label="Receita Bruta (NF-e Bling)" valor={receita} cor="green" />
-            <Linha label="Despesas operacionais"
-              valor={despMes} cor="red"
-              sub={painel?.despesas?.qtd ? `${painel.despesas.qtd} lançamentos${painel.despesas.pendente > 0 ? ` · R$ ${(painel.despesas.pendente).toLocaleString('pt-BR', {maximumFractionDigits:0})} pendente` : ''}` : undefined} />
-            <Linha label="Parcelas de compras"
-              valor={parcMes} cor="red"
-              sub={painel?.parcelas?.qtd ? `${painel.parcelas.qtd} parcelas${painel.parcelas.pendente > 0 ? ` · R$ ${(painel.parcelas.pendente).toLocaleString('pt-BR', {maximumFractionDigits:0})} pendente` : ''}` : undefined} />
+          {/* ── A Receber (editável) ── */}
+          <CardCollapse titulo="A Receber dos Clientes" total={aReceber} cor="blue"
+            icon={ArrowDownLeft} defaultOpen={aReceber === 0}>
+            <div className="pt-1 pb-1">
+              <p className="text-[11px] text-slate-600 mb-3">
+                Informe os valores que você espera receber — vendas confirmadas, Pix a confirmar, marketplace a liberar.
+              </p>
+              <Linha label="Total A Receber" valor={aReceber}
+                onEdit={v => salvar('aReceber', v)}
+                sub="Clientes + plataformas + pix pendentes" />
+            </div>
           </CardCollapse>
 
           {/* ── Total A Pagar (resumo com link) ── */}
@@ -372,10 +414,10 @@ export function SaudeFinanceira() {
                 ? <div className="h-6 w-24 rounded bg-slate-700 animate-pulse" />
                 : <span className="text-xl font-black tabular-nums text-red-400">{fmt(totalAPagar)}</span>}
             </div>
-            <div className="px-5 pb-3 border-t border-white/[0.05] space-y-0">
-              <Linha label={`Despesas pendentes (${obrigacoes?.qtdDespesas || 0})`}
+            <div className="px-5 pb-3 border-t border-white/[0.05]">
+              <Linha label={`Despesas operacionais (${obrigacoes?.qtdDespesas || 0})`}
                 valor={obrigacoes?.totalDespesas || 0} cor="red" />
-              <Linha label={`Parcelas a vencer (${obrigacoes?.qtdParcelas || 0})`}
+              <Linha label={`Parcelas de compras (${obrigacoes?.qtdParcelas || 0})`}
                 valor={obrigacoes?.totalParcelas || 0} cor="red" />
             </div>
             <button onClick={() => setAba('apagar')}
@@ -389,12 +431,16 @@ export function SaudeFinanceira() {
             <Linha label="Mercado Pago"    valor={mp}           onEdit={v => salvar('mp', v)} />
             <Linha label="Banco / Conta"   valor={banco}        onEdit={v => salvar('banco', v)} />
             <Linha label="Outros"          valor={outros}       onEdit={v => salvar('outros', v)} />
-            <Linha label="Cofre"           valor={cofre}        onEdit={v => salvar('cofre', v)}         sub="Dinheiro físico" />
-            <Linha label="Saldo a Liberar" valor={saldoLiberar} onEdit={v => salvar('saldoLiberar', v)}  sub="Pix/vendas a confirmar" />
+            <Linha label="Cofre"           valor={cofre}        onEdit={v => salvar('cofre', v)}        sub="Dinheiro físico" />
+            <Linha label="Saldo a Liberar" valor={saldoLiberar} onEdit={v => salvar('saldoLiberar', v)} sub="Pix/vendas a confirmar" />
           </CardCollapse>
 
-          {/* ── Estoque (collapsível) ── */}
-          <CardCollapse titulo="Estoque (valor custo)" total={estoqueVal} cor="blue" icon={Package} loading={loading}>
+          {/* ── Estoque (informativo, collapsível) ── */}
+          <CardCollapse titulo="Estoque — Patrimônio" total={estoqueVal} cor="teal" icon={Package} loading={loading}
+            badge="informativo">
+            <p className="text-[10px] text-slate-700 pt-2 mb-1">
+              Valor de custo dos produtos. Não entra na posição de caixa — é patrimônio.
+            </p>
             <Linha label="Em Casa" valor={estoque?.totalEstoque || 0}
               sub={estoque?.totalItens
                 ? `${estoque.totalItens} SKUs · ${estoque.totalQuantidade} unidades`
@@ -402,8 +448,30 @@ export function SaudeFinanceira() {
             <Linha label="A Chegar" valor={estoqueChegar} onEdit={v => salvar('estoqueChegar', v)} sub="Compras em trânsito" />
           </CardCollapse>
 
+          {/* ── Bling / DRE mensal (informativo) ── */}
+          <CardCollapse titulo={`Faturamento Bling — ${mesParaLabel(mesAtivo)}`}
+            total={receitaBling} cor="slate" icon={TrendingUp}
+            badge="informativo — não afeta o cálculo">
+            {!blingOk && (
+              <div className="flex items-center gap-2 py-2 text-amber-500/70">
+                <AlertTriangle size={11} />
+                <p className="text-[10px]">Bling indisponível ou não configurado — dados incompletos</p>
+              </div>
+            )}
+            {receitaBling === 0 && blingOk && (
+              <p className="text-[10px] text-slate-600 py-2">Nenhuma NF-e emitida no Bling para este mês</p>
+            )}
+            <Linha label="Receita NF-e" valor={receitaBling} cor="green" />
+            <Linha label="Despesas no mês"
+              valor={despMes} cor="red"
+              sub={painel?.despesas?.qtd ? `${painel.despesas.qtd} lançamentos` : undefined} />
+            <Linha label="Parcelas no mês"
+              valor={parcMes} cor="red"
+              sub={painel?.parcelas?.qtd ? `${painel.parcelas.qtd} parcelas` : undefined} />
+          </CardCollapse>
+
           <p className="text-[10px] text-slate-800 text-center pb-2">
-            DRE usa NF-e Bling + Firestore · Caixa digitado manualmente
+            Caixa e A Receber digitados manualmente · Obrigações do Firestore
           </p>
         </div>
       )}
@@ -426,7 +494,9 @@ export function SaudeFinanceira() {
           </div>
 
           {loading ? (
-            <div className="flex justify-center py-16"><Loader2 size={24} className="animate-spin text-slate-700" /></div>
+            <div className="flex justify-center py-16">
+              <Loader2 size={24} className="animate-spin text-slate-700" />
+            </div>
           ) : contasLista.length === 0 ? (
             <div className="flex flex-col items-center py-16 gap-3 text-slate-700">
               <CheckCircle2 size={40} className="opacity-30" />
@@ -434,68 +504,21 @@ export function SaudeFinanceira() {
             </div>
           ) : (
             <>
-              {/* VENCIDAS */}
-              {vencidas.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-                    <p className="text-xs font-black uppercase tracking-wider text-red-400">
-                      Vencidas — {fmt(vencidas.reduce((s,i) => s+i.valor, 0))}
-                    </p>
-                    <span className="text-[10px] text-slate-700">{vencidas.length} item{vencidas.length !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    {vencidas.map(i => <ItemAPagar key={`${i.origem}-${i.id}`} item={i} />)}
-                  </div>
-                </div>
-              )}
+              {/* DESPESAS OPERACIONAIS */}
+              <GrupoAPagar
+                titulo="Despesas Operacionais"
+                icon={Receipt}
+                cor={despesas.some(i => i.status === 'vencida') ? 'red' : 'slate'}
+                items={despesas}
+              />
 
-              {/* ESTE MÊS */}
-              {esteMes.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="w-2 h-2 rounded-full bg-yellow-400" />
-                    <p className="text-xs font-black uppercase tracking-wider text-yellow-400 capitalize">
-                      {mesParaLabel(mesAtualMM)} — {fmt(esteMes.reduce((s,i) => s+i.valor, 0))}
-                    </p>
-                    <span className="text-[10px] text-slate-700">{esteMes.length} item{esteMes.length !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    {esteMes.map(i => <ItemAPagar key={`${i.origem}-${i.id}`} item={i} />)}
-                  </div>
-                </div>
-              )}
-
-              {/* PRÓXIMOS MESES — collapsível por mês */}
-              {proxMesesOrdenados.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <ChevronRight size={12} className="text-slate-600" />
-                    <p className="text-xs font-black uppercase tracking-wider text-slate-500">
-                      Próximos meses — {fmt(proxMeses.reduce((s,i) => s+i.valor, 0))}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {proxMesesOrdenados.map(([mm, dados]) => (
-                      <details key={mm} className="rounded-xl border border-white/[0.06] bg-slate-800/30 overflow-hidden group">
-                        <summary className="flex items-center justify-between px-4 py-3 cursor-pointer list-none hover:bg-white/[0.03] transition-colors">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-slate-300 capitalize">{dados.label}</span>
-                            <span className="text-[10px] text-slate-600">{dados.items.length} item{dados.items.length !== 1 ? 's' : ''}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-slate-300 tabular-nums">{fmt(dados.total)}</span>
-                            <ChevronDown size={13} className="text-slate-600 group-open:rotate-180 transition-transform" />
-                          </div>
-                        </summary>
-                        <div className="px-3 pb-3 pt-2 flex flex-col gap-1.5 border-t border-white/[0.05]">
-                          {dados.items.map(i => <ItemAPagar key={`${i.origem}-${i.id}`} item={i} />)}
-                        </div>
-                      </details>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* PARCELAS DE COMPRAS */}
+              <GrupoAPagar
+                titulo="Parcelas de Compras"
+                icon={CreditCard}
+                cor={parcelas.some(i => i.status === 'vencida') ? 'red' : 'slate'}
+                items={parcelas}
+              />
             </>
           )}
 
