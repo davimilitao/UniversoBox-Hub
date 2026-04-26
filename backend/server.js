@@ -2246,6 +2246,101 @@ app.delete('/api/fin-compras/:id', requireFirebaseAuth, requireFirebaseRole(['ad
   }
 });
 
+// GET /api/fin-contas-unificadas — lista unificada fin_despesas + fin_parcelas
+// Query: ?mes=YYYY-MM (opcional) — filtra por mês de vencimento
+// Retorna items ordenados: vencida → pendente → pago
+app.get('/api/fin-contas-unificadas', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const { mes } = req.query; // YYYY-MM opcional
+    const db = admin.firestore();
+
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+
+    function statusItem(vencDate, situacao) {
+      if (situacao === 'pago') return 'pago';
+      const dias = Math.round((vencDate - hoje) / 86400000);
+      return dias < 0 ? 'vencida' : 'pendente';
+    }
+
+    function mesDeData(d) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    const [despSnap, parcSnap] = await Promise.all([
+      db.collection('fin_despesas').where('tenantId', '==', tenantId).get(),
+      db.collection('fin_parcelas').where('tenantId', '==', tenantId).get(),
+    ]);
+
+    const items = [];
+
+    despSnap.forEach(doc => {
+      const d = doc.data();
+      if (d.tipo === 'investimento') return; // coberto por fin_parcelas
+      const venc = d.data?.toDate?.() ?? (d.data ? new Date(d.data) : null);
+      if (!venc) return;
+      if (mes && mesDeData(venc) !== mes) return;
+      const status = statusItem(venc, d.situacao);
+      items.push({
+        id: doc.id, origem: 'despesa',
+        fornecedor: d.fornecedor || d.categoria || '',
+        descricao: d.descricao || '',
+        tipo: d.tipo || 'operacional',
+        categoria: d.categoria || '',
+        valor: Number(d.valor || 0),
+        vencimento: venc.toISOString(),
+        status,
+        diasParaVencer: Math.round((venc - hoje) / 86400000),
+      });
+    });
+
+    parcSnap.forEach(doc => {
+      const d = doc.data();
+      const venc = d.vencimento?.toDate?.() ?? (d.vencimento ? new Date(d.vencimento) : null);
+      if (!venc) return;
+      if (mes && mesDeData(venc) !== mes) return;
+      const status = statusItem(venc, d.status);
+      const parc = d.totalParcelas > 1 ? ` (${d.numeroParcela}/${d.totalParcelas}x)` : '';
+      items.push({
+        id: doc.id, origem: 'parcela',
+        fornecedor: d.fornecedor || '',
+        descricao: `${d.descricao || d.fornecedor || ''}${parc}`,
+        tipo: 'investimento',
+        categoria: d.meioNome || 'Parcela',
+        valor: Number(d.valor || 0),
+        vencimento: venc.toISOString(),
+        status,
+        diasParaVencer: Math.round((venc - hoje) / 86400000),
+        compraId: d.compraId || null,
+        numeroParcela: d.numeroParcela,
+        totalParcelas: d.totalParcelas,
+        meioNome: d.meioNome || '',
+      });
+    });
+
+    // vencida(0) → pendente(1) → pago(2), dentro do grupo: mais urgente primeiro
+    const rank = s => s === 'vencida' ? 0 : s === 'pendente' ? 1 : 2;
+    items.sort((a, b) => {
+      const dr = rank(a.status) - rank(b.status);
+      return dr !== 0 ? dr : a.diasParaVencer - b.diasParaVencer;
+    });
+
+    const soma = f => items.filter(f).reduce((s, i) => s + i.valor, 0);
+    return res.json({
+      ok: true, items,
+      totais: {
+        total:    soma(() => true),
+        vencida:  soma(i => i.status === 'vencida'),
+        pendente: soma(i => i.status === 'pendente'),
+        pago:     soma(i => i.status === 'pago'),
+      },
+    });
+  } catch (err) {
+    console.error('[GET /api/fin-contas-unificadas]', err);
+    return next(err);
+  }
+});
+
 // GET /api/fin-obrigacoes — agrega obrigações financeiras pendentes
 // Combina fin_despesas (exceto investimentos) + fin_parcelas pendentes
 app.get('/api/fin-obrigacoes', requireFirebaseAuth, async (req, res, next) => {

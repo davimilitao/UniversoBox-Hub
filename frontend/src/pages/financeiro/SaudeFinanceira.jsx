@@ -15,7 +15,7 @@ import { apiFetch } from '../../utils/getAuthToken';
 import {
   RefreshCw, Heart, Package, Banknote,
   TrendingDown, ChevronRight, AlertTriangle, Clock,
-  TrendingUp,
+  TrendingUp, Scale, CheckCircle2, CreditCard, Loader2,
 } from 'lucide-react';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -135,6 +135,28 @@ export function SaudeFinanceira() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   })();
 
+  const [aba, setAba] = useState('painel'); // 'painel' | 'obrigacoes' | 'posicao'
+  const [contas,        setContas]        = useState([]);
+  const [totaisContas,  setTotaisContas]  = useState({ total: 0, vencida: 0, pendente: 0, pago: 0 });
+  const [loadingContas, setLoadingContas] = useState(false);
+
+  const carregarContas = useCallback(async () => {
+    setLoadingContas(true);
+    try {
+      const res = await apiFetch('/api/fin-contas-unificadas');
+      if (res.ok) {
+        const j = await res.json();
+        setContas(j.items || []);
+        setTotaisContas(j.totais || { total: 0, vencida: 0, pendente: 0, pago: 0 });
+      }
+    } catch (e) { /* silencioso */ }
+    finally { setLoadingContas(false); }
+  }, []);
+
+  useEffect(() => {
+    if (aba === 'obrigacoes') carregarContas();
+  }, [aba, carregarContas]);
+
   // ── Campos manuais em localStorage ──────────────────────────────────────────
   // Compatível com PosicaoFinanceira (mesmas chaves para mp/banco/outros)
   const [mp,            setMp]            = useState(() => parseFloat(localStorage.getItem(`painel_saldo_${mes}_mp`)     || '0') || 0);
@@ -227,34 +249,73 @@ export function SaudeFinanceira() {
   // Projetado inclui "A Receber 30 dias" (entrada prevista no caixa)
   const saldoProjetado   = saldoFinal + receber30;
 
+  // ── Helpers para a lista de obrigações ──────────────────────────────────────
+  function statusCls(s) {
+    if (s === 'vencida')  return 'text-red-400';
+    if (s === 'pendente') return 'text-yellow-400';
+    return 'text-emerald-400';
+  }
+  function statusLabel(s, dias) {
+    if (s === 'pago') return 'Pago';
+    if (s === 'vencida') return `${Math.abs(dias)}d atraso`;
+    if (dias === 0) return 'Vence hoje';
+    return `${dias}d`;
+  }
+  function origemLabel(o) {
+    return o === 'parcela' ? 'Parcela' : 'Despesa';
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────────
+  const ABAS = [
+    { id: 'painel',      label: 'Painel'      },
+    { id: 'obrigacoes',  label: 'Obrigações'  },
+    { id: 'posicao',     label: 'Posição'     },
+  ];
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-24">
 
       {/* Header */}
-      <div className="px-4 pt-6 pb-4 border-b border-white/5">
-        <div className="max-w-xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              <Heart size={16} className="text-emerald-400" />
-              Saúde Financeira
-            </h1>
-            <p className="text-[11px] text-slate-600 mt-0.5 flex items-center gap-1">
-              <Clock size={10} />
-              Atualizado às {atualizadoAs}
-            </p>
+      <div className="px-4 pt-6 pb-0 border-b border-white/5">
+        <div className="max-w-xl mx-auto">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                <Heart size={16} className="text-emerald-400" />
+                Saúde Financeira
+              </h1>
+              <p className="text-[11px] text-slate-600 mt-0.5 flex items-center gap-1">
+                <Clock size={10} />
+                Atualizado às {atualizadoAs}
+              </p>
+            </div>
+            <button
+              onClick={() => { carregar(); if (aba === 'obrigacoes') carregarContas(); }}
+              disabled={loading || loadingContas}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-800 border border-white/10 text-xs text-slate-400 hover:text-slate-200 transition-colors disabled:opacity-40 min-h-[44px]"
+            >
+              <RefreshCw size={13} className={(loading || loadingContas) ? 'animate-spin' : ''} />
+              Atualizar
+            </button>
           </div>
-          <button
-            onClick={carregar}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-800 border border-white/10 text-xs text-slate-400 hover:text-slate-200 transition-colors disabled:opacity-40 min-h-[44px]"
-          >
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-            Atualizar
-          </button>
+          {/* Tabs */}
+          <div className="flex gap-0.5 bg-slate-900/60 rounded-t-xl p-1">
+            {ABAS.map(a => (
+              <button key={a.id} onClick={() => setAba(a.id)}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                  aba === a.id
+                    ? 'bg-slate-800 text-slate-100 shadow'
+                    : 'text-slate-600 hover:text-slate-400'
+                }`}>
+                {a.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
+      {/* ══ ABA: PAINEL ══ */}
+      {aba === 'painel' && (
       <div className="max-w-xl mx-auto px-4 pt-5 flex flex-col gap-4">
 
         {/* Erro */}
@@ -402,6 +463,127 @@ export function SaudeFinanceira() {
         </p>
 
       </div>
+      )}
+
+      {/* ══ ABA: OBRIGAÇÕES ══ */}
+      {aba === 'obrigacoes' && (
+      <div className="max-w-xl mx-auto px-4 pt-5 flex flex-col gap-4">
+
+        {/* Totais rápidos */}
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { label: 'Vencidas',  valor: totaisContas.vencida,  cor: 'red'    },
+            { label: 'Pendentes', valor: totaisContas.pendente, cor: 'yellow' },
+            { label: 'Pagas',     valor: totaisContas.pago,     cor: 'emerald'},
+          ].map(k => (
+            <div key={k.label} className="rounded-xl bg-slate-800 border border-white/5 p-3 text-center">
+              <p className="text-[10px] text-slate-500 mb-1">{k.label}</p>
+              <p className={`text-sm font-bold tabular-nums text-${k.cor}-400`}>{BRL.format(k.valor)}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Lista unificada */}
+        {loadingContas ? (
+          <div className="flex justify-center py-12">
+            <Loader2 size={20} className="animate-spin text-slate-600" />
+          </div>
+        ) : contas.length === 0 ? (
+          <div className="flex flex-col items-center py-16 gap-2 text-slate-700">
+            <CheckCircle2 size={36} className="opacity-30" />
+            <p className="text-sm">Nenhuma obrigação encontrada</p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {contas.map(item => (
+              <div key={`${item.origem}-${item.id}`}
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
+                  item.status === 'vencida'  ? 'border-red-500/20 bg-red-500/[0.03]' :
+                  item.status === 'pendente' ? 'border-white/[0.06] bg-slate-800/50' :
+                  'border-white/[0.04] opacity-60 bg-slate-900/30'
+                }`}>
+                <div className={`w-2 h-2 rounded-full shrink-0 ${
+                  item.status === 'vencida'  ? 'bg-red-400 animate-pulse' :
+                  item.status === 'pendente' ? 'bg-yellow-400' : 'bg-emerald-500'
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-1.5 flex-wrap">
+                    <span className="text-sm font-bold text-slate-200 truncate">{item.fornecedor || item.descricao}</span>
+                    <span className="text-[10px] text-slate-600 rounded px-1 bg-slate-700/50">
+                      {item.origem === 'parcela' ? 'Parcela' : item.tipo === 'mensal_fixa' ? 'Fixa' : 'Operac.'}
+                    </span>
+                  </div>
+                  {item.descricao && item.descricao !== item.fornecedor && (
+                    <p className="text-[10px] text-slate-600 truncate">{item.descricao}</p>
+                  )}
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-bold text-white tabular-nums">{BRL.format(item.valor)}</p>
+                  <p className={`text-[10px] font-mono font-bold ${statusCls(item.status)}`}>
+                    {statusLabel(item.status, item.diasParaVencer)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      )}
+
+      {/* ══ ABA: POSIÇÃO ══ */}
+      {aba === 'posicao' && (
+      <div className="max-w-xl mx-auto px-4 pt-5 flex flex-col gap-4">
+
+        {/* Ativos */}
+        <CardSecao titulo="Ativos" total={totalDisponivel + totalEstoque} corBorda="emerald" icon={TrendingUp}>
+          <Linha label="Disponível (caixa)"  valor={totalDisponivel} auto
+            sub="Mercado Pago + Banco + Outros + Cofre + A Liberar" />
+          <Linha label="Estoque (valor)"     valor={totalEstoque}    auto
+            sub="Em casa + a chegar" />
+        </CardSecao>
+
+        {/* Passivos = Obrigações (Firestore, mesma fonte que aba Obrigações) */}
+        <CardSecao titulo="Passivos (Obrigações)" total={contasPagar} corBorda="red" icon={TrendingDown} loadingTotal={loading}>
+          <Linha label={`Despesas pendentes (${qtdDespesas})`} valor={totalDespesas} auto
+            sub="Fixas e operacionais — fonte Firestore" />
+          <Linha label={`Parcelas a vencer (${qtdParcelas})`}  valor={totalParcelas} auto
+            sub="Compras parceladas — fonte Firestore" />
+        </CardSecao>
+
+        {/* Posição Líquida */}
+        {(() => {
+          const ativos   = totalDisponivel + totalEstoque;
+          const positivo = ativos - contasPagar >= 0;
+          return (
+            <div className={`rounded-xl border p-5 ${positivo ? 'bg-emerald-900/20 border-emerald-700/30' : 'bg-red-900/20 border-red-700/30'}`}>
+              <div className="flex items-center gap-2 mb-3">
+                <Scale size={15} className={positivo ? 'text-emerald-400' : 'text-red-400'} />
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Posição Líquida</p>
+              </div>
+              <p className={`text-4xl font-black tabular-nums leading-none ${positivo ? 'text-emerald-400' : 'text-red-400'}`}>
+                {BRL.format(ativos - contasPagar)}
+              </p>
+              <p className="text-[10px] text-slate-600 mt-2">Ativos − Passivos (tudo via Firestore)</p>
+              <div className="mt-3 pt-3 border-t border-white/5 grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] text-slate-600">Total Ativos</p>
+                  <p className="text-sm font-bold text-emerald-400 tabular-nums">{BRL.format(ativos)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-600">Total Passivos</p>
+                  <p className="text-sm font-bold text-red-400 tabular-nums">{BRL.format(contasPagar)}</p>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        <p className="text-[10px] text-slate-700 text-center pb-2">
+          Passivos = obrigações reais do Firestore · Planilha Excel não utilizada
+        </p>
+      </div>
+      )}
+
     </div>
   );
 }

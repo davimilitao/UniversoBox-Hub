@@ -10,7 +10,7 @@
  *   1.0.0 — 2026-04-12 — Criação: fusão de GestaoDespesas 2.0 + Contas 2.0.
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   TrendingUp, AlertTriangle, Clock, Calendar, CheckCircle2,
   AlertCircle, CreditCard, Plus, Loader2,
@@ -474,6 +474,30 @@ export function GestaoFinanceira() {
   // ── Abas
   const [aba, setAba] = useState('lancamentos');
 
+  // ── Aba Contas do Mês (unificada)
+  const [mesContas,        setMesContas]        = useState(labelMesAtual());
+  const [contasMes,        setContasMes]        = useState([]);
+  const [totaisContasMes,  setTotaisContasMes]  = useState({ total: 0, vencida: 0, pendente: 0, pago: 0 });
+  const [loadingContasMes, setLoadingContasMes] = useState(false);
+
+  const carregarContasMes = useCallback(async (mes) => {
+    setLoadingContasMes(true);
+    try {
+      const res = await apiFetch(`/api/fin-contas-unificadas?mes=${mes}`);
+      if (res.ok) {
+        const j = await res.json();
+        setContasMes(j.items || []);
+        setTotaisContasMes(j.totais || { total: 0, vencida: 0, pendente: 0, pago: 0 });
+      }
+    } catch (e) { /* silencioso */ }
+    finally { setLoadingContasMes(false); }
+  }, []);
+
+  // Carrega ao entrar na aba ou trocar mês
+  useEffect(() => {
+    if (aba === 'contas') carregarContasMes(mesContas);
+  }, [aba, mesContas, carregarContasMes]);
+
   // ── Filtros (aba Lançamentos)
   const [mesAtivo,       setMesAtivo]       = useState('');
   const [tipoAtivo,      setTipoAtivo]      = useState('all');
@@ -594,7 +618,8 @@ export function GestaoFinanceira() {
           <h1 className="text-base font-bold text-slate-200">Financeiro</h1>
         </div>
         <div className="flex border-b border-white/[0.08] overflow-x-auto">
-          <TabBtn id="lancamentos" label="Despesas"   ativo={aba} onClick={setAba} />
+          <TabBtn id="lancamentos" label="Despesas"      ativo={aba} onClick={setAba} />
+          <TabBtn id="contas"      label="Contas do Mês" ativo={aba} onClick={setAba} />
           <TabBtn id="parcelas"    label="Parcelas"   badge={nParcelasVencidas}  ativo={aba} onClick={setAba} />
           <TabBtn id="cartoes"     label="Cartões"    badge={meiosPagamento.length} ativo={aba} onClick={setAba} />
         </div>
@@ -662,6 +687,109 @@ export function GestaoFinanceira() {
             onToggleStatus={handleToggleStatus}
             onDelete={handleDelete}
           />
+        </div>
+      )}
+
+      {/* ── Aba Contas do Mês ────────────────────────────────────────────────── */}
+      {aba === 'contas' && (
+        <div className="p-6 flex flex-col gap-4">
+
+          {/* Navegação de mês */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-1 bg-slate-900 border border-white/[0.07] rounded-xl px-1 py-1">
+              <button
+                onClick={() => {
+                  const [y, m] = mesContas.split('-').map(Number);
+                  const d = new Date(y, m - 2, 1);
+                  setMesContas(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+                }}
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] transition-all">
+                <ChevronLeft size={14} />
+              </button>
+              <span className="text-slate-100 text-sm font-bold px-3 min-w-[120px] text-center">
+                {new Date(mesContas + '-15').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+              </span>
+              <button
+                onClick={() => {
+                  const [y, m] = mesContas.split('-').map(Number);
+                  const d = new Date(y, m, 1);
+                  setMesContas(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+                }}
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] transition-all">
+                <ChevronRight size={14} />
+              </button>
+            </div>
+            <button onClick={() => carregarContasMes(mesContas)} disabled={loadingContasMes}
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+              <RefreshCw size={12} className={loadingContasMes ? 'animate-spin' : ''} /> Atualizar
+            </button>
+          </div>
+
+          {/* Totais do mês */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: 'Vencidas',  valor: totaisContasMes.vencida,  cor: 'red'    },
+              { label: 'Pendentes', valor: totaisContasMes.pendente, cor: 'yellow' },
+              { label: 'Pagas',     valor: totaisContasMes.pago,     cor: 'emerald'},
+            ].map(k => (
+              <div key={k.label} className="rounded-xl bg-slate-800 border border-white/5 p-3 text-center">
+                <p className="text-[10px] text-slate-500 mb-1">{k.label}</p>
+                <p className={`text-sm font-bold tabular-nums text-${k.cor}-400`}>{brl(k.valor)}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Lista */}
+          {loadingContasMes ? (
+            <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin text-slate-600" /></div>
+          ) : contasMes.length === 0 ? (
+            <div className="flex flex-col items-center py-16 gap-2 text-slate-700">
+              <CheckCircle2 size={36} className="opacity-30" />
+              <p className="text-sm">Nenhuma conta para este mês</p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {contasMes.map(item => (
+                <div key={`${item.origem}-${item.id}`}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
+                    item.status === 'vencida'  ? 'border-red-500/20 bg-red-500/[0.03]' :
+                    item.status === 'pendente' ? 'border-white/[0.06] bg-slate-800/50' :
+                    'border-white/[0.04] opacity-60 bg-slate-900/30'
+                  }`}>
+                  <div className={`w-2 h-2 rounded-full shrink-0 ${
+                    item.status === 'vencida'  ? 'bg-red-400 animate-pulse' :
+                    item.status === 'pendente' ? 'bg-yellow-400' : 'bg-emerald-500'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
+                      <span className="text-sm font-bold text-slate-200 truncate">{item.fornecedor || item.descricao}</span>
+                      <span className="text-[10px] text-slate-600 bg-slate-700/50 rounded px-1">
+                        {item.origem === 'parcela' ? 'Parcela' : item.tipo === 'mensal_fixa' ? 'Fixa' : 'Operac.'}
+                      </span>
+                    </div>
+                    {item.descricao && item.descricao !== item.fornecedor && (
+                      <p className="text-[10px] text-slate-600 truncate">{item.descricao}</p>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-bold text-white tabular-nums">{brl(item.valor)}</p>
+                    <p className={`text-[10px] font-mono font-bold ${
+                      item.status === 'vencida' ? 'text-red-400' :
+                      item.status === 'pendente' ? 'text-yellow-400' : 'text-emerald-400'
+                    }`}>
+                      {item.status === 'pago' ? 'Pago' :
+                       item.status === 'vencida' ? `${Math.abs(item.diasParaVencer)}d atraso` :
+                       item.diasParaVencer === 0 ? 'Hoje' : `${item.diasParaVencer}d`}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-center justify-between px-4 py-2 text-xs text-slate-500 border-t border-white/5 mt-2">
+                <span>{contasMes.length} lançamento{contasMes.length !== 1 ? 's' : ''}</span>
+                <span className="font-bold text-slate-300">{brl(totaisContasMes.total)}</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
