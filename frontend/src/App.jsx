@@ -16,7 +16,6 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { LoginPage }          from './pages/LoginPage';
 import { DashboardPage }      from './pages/DashboardPage';
 import { GestaoFinanceira }   from './pages/financeiro/GestaoFinanceira';
-import { PosicaoFinanceira }  from './pages/financeiro/PosicaoFinanceira';
 import { SaudeFinanceira }    from './pages/financeiro/SaudeFinanceira';
 import { Recebiveis }         from './pages/financeiro/Recebiveis';
 import { BlingPedidos }       from './pages/expedicao/BlingPedidos';
@@ -68,7 +67,7 @@ export default function App() {
         <Route path="/financeiro/margem"   element={<Navigate to="/financeiro/calculadora" replace />} />
         <Route path="/financeiro/painel"   element={<Navigate to="/financeiro/saude" replace />} />
         <Route path="/financeiro/dre"      element={<Navigate to="/financeiro/saude" replace />} />
-        <Route path="/financeiro/posicao"      element={<PosicaoFinanceira />} />
+        <Route path="/financeiro/posicao"      element={<Navigate to="/financeiro/saude" replace />} />
         <Route path="/financeiro/calculadora"  element={<CalculadoraMarketplace />} />
         {/* Sistema */}
         <Route path="/sistema/config"      element={<ConfiguracoesSistema />} />
