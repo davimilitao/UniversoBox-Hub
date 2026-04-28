@@ -6161,7 +6161,7 @@ app.get('/api/ml/orders/:orderId/label', async (req, res, next) => {
 // GET /api/ml/debug/label/:orderId
 // Diagnóstico — testa cada variante do endpoint de etiqueta e retorna raw.
 // ════════════════════════════════════════════════════════════════════════════
-app.get('/api/ml/debug/label/:orderId', requireFirebaseAuth, async (req, res, next) => {
+app.get('/api/ml/debug/label/:orderId', async (req, res, next) => {
   try {
     const orderId = safeTrim(req.params.orderId);
     const token   = await mlEnsureToken();
