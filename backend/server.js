@@ -6841,63 +6841,40 @@ app.get('/api/ml/dashboard', requireFirebaseAuth, async (req, res, next) => {
       })));
     }
 
-    // ── Código de autorização do dia (seller shipping packs) ──────────────
-    // O endpoint correto para o código diário de coleta é /users/{id}/shipping_packs
+    // ── Código de autorização + corte via shipment do primeiro pedido Agência ─
+    // O código diário e o horário de corte ficam no objeto drop_off do shipment.
+    // Não existe endpoint global público para isso no ML — vem por pedido.
     try {
-      const packRes = await fetchWithTimeout(
-        `${ML_API_BASE}/users/${userId}/shipping_packs?date=${today}`,
-        { headers }, 8000
-      );
-      if (packRes.ok) {
-        const packData = await packRes.json();
-        // O código pode estar em authorization_code, code, ou pack_code
-        authCode = packData.authorization_code
-          || packData.code
-          || packData.pack_code
-          || (Array.isArray(packData) && packData[0]?.authorization_code)
-          || null;
-      }
-    } catch (_) {}
+      const firstAgencia = rawOrders.find(o => {
+        const lg = detectLogistica(o);
+        return lg !== 'flex' && lg !== 'fulfillment' && o.shipping?.id;
+      });
+      if (firstAgencia?.shipping?.id) {
+        const shipRes = await fetchWithTimeout(
+          `${ML_API_BASE}/shipments/${firstAgencia.shipping.id}`,
+          { headers }, 8000
+        ).catch(() => null);
+        if (shipRes?.ok) {
+          const ship = await shipRes.json().catch(() => ({}));
+          // Log para identificar campos reais no Railway
+          console.log('[dashboard] agencia shipment logistic_type:', ship.logistic_type,
+            '| substatus:', ship.substatus, '| shipId:', firstAgencia.shipping.id);
+          if (ship.drop_off) console.log('[dashboard] drop_off:', JSON.stringify(ship.drop_off));
+          if (ship.lead_time) console.log('[dashboard] lead_time:', JSON.stringify(ship.lead_time));
 
-    // Fallback: tenta shipping_preferences/flex
-    if (!authCode) {
-      try {
-        const flexRes = await fetchWithTimeout(
-          `${ML_API_BASE}/users/${userId}/shipping_preferences/flex`,
-          { headers }, 6000
-        );
-        if (flexRes.ok) {
-          const flexData = await flexRes.json();
-          authCode = flexData.authorization_code || flexData.code || null;
-        }
-      } catch (_) {}
-    }
+          authCode = ship?.drop_off?.authorization_code
+            || ship?.drop_off?.code
+            || ship?.authorization_code
+            || null;
 
-    // ── Horário de corte — tabela semanal fixa por seller ─────────────────
-    // O ML não expõe a tabela semanal via API pública; o cut_off vem por envio
-    // individual. Aqui buscamos das shipping_preferences para extrair o do dia.
-    try {
-      const prefRes = await fetchWithTimeout(
-        `${ML_API_BASE}/users/${userId}/shipping_preferences`,
-        { headers }, 8000
-      );
-      if (prefRes.ok) {
-        const pref = await prefRes.json();
-        const opts = pref.custom_shipping_options || pref.modes || [];
-        const cutoffs = {};
-        const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-        for (const opt of opts) {
-          if (opt.cut_off_time) {
-            // Tenta mapear por dia
-            const day = opt.day || opt.week_day || null;
-            if (day !== null && DAYS[day]) {
-              cutoffs[DAYS[day]] = opt.cut_off_time.slice(0, 5); // "HH:MM"
-            } else if (!cutoffs.default) {
-              cutoffs.default = opt.cut_off_time.slice(0, 5);
-            }
+          const rawCutoff = ship?.drop_off?.cutoff_time
+            || ship?.lead_time?.cutoff
+            || ship?.carrier_info?.cutoff
+            || null;
+          if (rawCutoff) {
+            cutoffSchedule = { default: String(rawCutoff).slice(0, 5) };
           }
         }
-        if (Object.keys(cutoffs).length > 0) cutoffSchedule = cutoffs;
       }
     } catch (_) {}
 
