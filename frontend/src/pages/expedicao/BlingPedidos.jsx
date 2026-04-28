@@ -668,6 +668,21 @@ export function BlingPedidos() {
 
   useEffect(() => { fetchNFs(); }, [fetchNFs]);
 
+  // Auto-detecta Flex para NFs que já têm numeroPedido na lista (sem precisar expandir)
+  useEffect(() => {
+    if (!nfs.length || !Object.keys(mlByOrderId).length) return;
+    const autoFlags = {};
+    for (const nf of nfs) {
+      if (!nf.numeroPedido) continue;
+      const tipo = mlByOrderId[String(nf.numeroPedido)];
+      if (tipo === 'flex') autoFlags[nf.id] = true;
+      if (tipo) setNfLogistica(prev => ({ ...prev, [nf.id]: tipo }));
+    }
+    if (Object.keys(autoFlags).length) {
+      setFlexFlags(prev => ({ ...prev, ...autoFlags }));
+    }
+  }, [nfs, mlByOrderId]);
+
   function handleRangeConfirm(ini, fim) {
     setRangeIni(ini); setRangeFim(fim); setShowPicker(false);
   }

@@ -16,7 +16,7 @@ import {
   RefreshCw, Plus, Loader2, ChevronRight, User, MapPin, X,
   ScanLine, Printer, PackageCheck, SendHorizonal, CircleCheck,
   BoxesIcon, Truck, ClipboardCheck, Camera, CameraOff,
-  BarChart2, Tag, Bell, BellOff, ChevronDown, ChevronUp,
+  BarChart2, Tag, Bell, BellOff, ChevronDown, ChevronUp, Images,
 } from 'lucide-react';
 import { useOrderNotifier }  from '../../hooks/useOrderNotifier';
 import { useBarcodeCamera }  from '../../hooks/useBarcodeCamera';
@@ -679,6 +679,8 @@ function ItemRow({ it, onCheck, orderId, showToast }) {
   const foto = it.stockPhotos?.[0] || it.image || null;
   const bin  = it.customBin || it.bin || '';
   const [printing, setPrinting] = useState(false);
+  const [fotosAbertas, setFotosAbertas] = useState(false);
+  const temFotosExtras = !!(it.boxPhotos?.[0] || it.binPhoto);
 
   async function handlePrintBin() {
     setPrinting(true);
@@ -750,25 +752,37 @@ function ItemRow({ it, onCheck, orderId, showToast }) {
         </div>
       )}
 
-      {/* Fotos extras */}
-      {(it.boxPhotos?.[0] || it.binPhoto) && (
-        <div className={`grid gap-2 p-3 border-t border-white/5 bg-slate-900/50
-          ${[it.boxPhotos?.[0], it.binPhoto].filter(Boolean).length === 1 ? 'grid-cols-1 max-w-[120px]' : 'grid-cols-2'}`}>
-          {it.boxPhotos?.[0] && (
-            <div>
-              <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Embalado</p>
-              <img src={it.boxPhotos[0]} onError={e=>{e.target.src='/assets/placeholder.png';}}
-                className="w-full aspect-square object-cover rounded-xl border border-white/8 bg-slate-800" alt="" />
+      {/* Fotos extras — colapsadas por padrão */}
+      {temFotosExtras && (
+        <>
+          <button
+            onClick={() => setFotosAbertas(v => !v)}
+            className="w-full flex items-center gap-2 px-3 py-1.5 border-t border-white/5 bg-slate-900/30 text-[11px] font-bold text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            <Images size={12} />
+            {fotosAbertas ? 'Ocultar fotos' : `Ver fotos de referência`}
+            <ChevronDown size={11} className={`ml-auto transition-transform ${fotosAbertas ? 'rotate-180' : ''}`} />
+          </button>
+          {fotosAbertas && (
+            <div className={`grid gap-2 p-3 bg-slate-900/50
+              ${[it.boxPhotos?.[0], it.binPhoto].filter(Boolean).length === 1 ? 'grid-cols-1 max-w-[120px]' : 'grid-cols-2'}`}>
+              {it.boxPhotos?.[0] && (
+                <div>
+                  <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Embalado</p>
+                  <img src={it.boxPhotos[0]} onError={e=>{e.target.src='/assets/placeholder.png';}}
+                    className="w-full aspect-square object-cover rounded-xl border border-white/8 bg-slate-800" alt="" />
+                </div>
+              )}
+              {it.binPhoto && (
+                <div>
+                  <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Prateleira</p>
+                  <img src={it.binPhoto} onError={e=>{e.target.src='/assets/placeholder.png';}}
+                    className="w-full aspect-square object-cover rounded-xl border border-white/8 bg-slate-800" alt="" />
+                </div>
+              )}
             </div>
           )}
-          {it.binPhoto && (
-            <div>
-              <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Prateleira</p>
-              <img src={it.binPhoto} onError={e=>{e.target.src='/assets/placeholder.png';}}
-                className="w-full aspect-square object-cover rounded-xl border border-white/8 bg-slate-800" alt="" />
-            </div>
-          )}
-        </div>
+        </>
       )}
     </div>
   );
@@ -885,8 +899,108 @@ function ShippingLabelButton({ mlOrderId, numeroPedido, marketplace, blingNfId }
 
 // ─── Modal Separação ──────────────────────────────────────────────────────────
 function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
+  // 'idle' | 'printing' | 'ok' | 'err'
+  const [danfeSt,  setDanfeSt]  = useState('idle');
+  const [labelSt,  setLabelSt]  = useState('idle');
+  const [danfeMsg, setDanfeMsg] = useState('');
+  const [labelMsg, setLabelMsg] = useState('');
+  // null = desconhecido, true = QZ disponível, false = QZ indisponível
+  const [qzDisp,   setQzDisp]   = useState(null);
+
+  useEffect(() => {
+    if (!order) return;
+    let cancelled = false;
+
+    async function autoprint() {
+      // Verifica QZ primeiro; se indisponível, exibe botões manuais
+      try { await qzConnect(); } catch {
+        if (!cancelled) setQzDisp(false);
+        return;
+      }
+      if (cancelled) return;
+      setQzDisp(true);
+
+      const mlFallbackId = order.mlOrderId || (
+        order.marketplace === 'MERCADO_LIVRE' && /^\d{10,20}$/.test(String(order.numeroPedido || ''))
+          ? String(order.numeroPedido) : null
+      );
+
+      setDanfeSt('printing'); setLabelSt('printing');
+
+      await Promise.allSettled([
+        (async () => {
+          try {
+            await printDanfe(order.blingNfId, m => { if (!cancelled) setDanfeMsg(m); });
+            if (!cancelled) { setDanfeSt('ok'); setDanfeMsg('DANFE impressa ✓'); }
+          } catch (e) {
+            if (!cancelled) { setDanfeSt('err'); setDanfeMsg(e.message); }
+          }
+        })(),
+        (async () => {
+          if (!order.blingNfId && !mlFallbackId) {
+            if (!cancelled) { setLabelSt('err'); setLabelMsg('Sem etiqueta disponível'); }
+            return;
+          }
+          try {
+            if (order.blingNfId) {
+              await printTransportLabelBling(order.blingNfId, m => { if (!cancelled) setLabelMsg(m); });
+            } else {
+              await printShippingLabel(mlFallbackId, m => { if (!cancelled) setLabelMsg(m); });
+            }
+            if (!cancelled) { setLabelSt('ok'); setLabelMsg('Etiqueta impressa ✓'); }
+          } catch (e) {
+            if (!cancelled) { setLabelSt('err'); setLabelMsg(e.message); }
+          }
+        })(),
+      ]);
+    }
+
+    autoprint();
+    return () => { cancelled = true; };
+  }, [order?.id]);
+
   if (!order) return null;
   const its = Array.isArray(order.items) ? order.items : [];
+
+  function PrintStatusRow({ icon, label, st, msg, fallback }) {
+    const isPrinting = st === 'printing';
+    const isOk       = st === 'ok';
+    const isErr      = st === 'err';
+    return (
+      <div className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all
+        ${isOk  ? 'border-emerald-500/30 bg-emerald-500/8 text-emerald-400' :
+          isErr  ? 'border-red-500/20 bg-red-500/5' :
+          isPrinting ? 'border-blue-500/20 bg-blue-500/5 text-blue-400' :
+          'border-white/8 bg-slate-800/40 text-slate-400'}`}>
+        {isPrinting ? <Loader2 size={14} className="animate-spin text-blue-400 shrink-0"/> :
+         isOk       ? <CircleCheck size={14} className="text-emerald-400 shrink-0"/> :
+         isErr      ? <span className="text-sm shrink-0">⚠️</span> :
+                      icon}
+        <span className={`flex-1 text-xs font-bold truncate
+          ${isOk ? 'text-emerald-400' : isErr ? 'text-red-400' : isPrinting ? 'text-blue-300' : 'text-slate-400'}`}>
+          {isPrinting ? (msg || `Imprimindo ${label}…`) :
+           isOk       ? msg :
+           isErr      ? msg :
+                        label}
+        </span>
+        {isErr && fallback && (
+          <button
+            className="shrink-0 text-[10px] underline text-slate-500 hover:text-slate-300"
+            onClick={e => { e.stopPropagation(); fallback(); }}>
+            tentar manual
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const mlFallbackId = order.mlOrderId || (
+    order.marketplace === 'MERCADO_LIVRE' && /^\d{10,20}$/.test(String(order.numeroPedido || ''))
+      ? String(order.numeroPedido) : null
+  );
+
+  const printingActive = danfeSt === 'printing' || labelSt === 'printing';
+
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
       onClick={e => e.target === e.currentTarget && onFechar()}>
@@ -938,23 +1052,57 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
             </div>
           )}
         </div>
-        <div className="px-4 pb-1 space-y-2">
-          <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider px-1">Impressões</p>
-          <div className="flex items-center gap-2">
-            <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">1</span>
-            <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">2</span>
-            <div className="flex-1"><ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} blingNfId={order.blingNfId} /></div>
-          </div>
+
+        {/* Impressões */}
+        <div className="px-4 pb-3 space-y-2">
+          {qzDisp === null && (
+            <div className="flex items-center gap-2 text-[11px] text-slate-500 px-1 py-1">
+              <Loader2 size={11} className="animate-spin"/>
+              <span>Conectando impressora…</span>
+            </div>
+          )}
+          {qzDisp === true ? (
+            <>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider px-1">
+                Impressão automática
+              </p>
+              <PrintStatusRow
+                icon={<Printer size={14} className="shrink-0"/>}
+                label="DANFE Simplificada"
+                st={danfeSt} msg={danfeMsg}
+                fallback={() => { setDanfeSt('idle'); }}
+              />
+              <PrintStatusRow
+                icon={<Tag size={14} className="shrink-0"/>}
+                label="Etiqueta de Transporte"
+                st={labelSt} msg={labelMsg}
+                fallback={() => { setLabelSt('idle'); }}
+              />
+            </>
+          ) : qzDisp === false ? (
+            <>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider px-1">Impressões manuais</p>
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">1</span>
+                <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">2</span>
+                <div className="flex-1"><ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} blingNfId={order.blingNfId} /></div>
+              </div>
+            </>
+          ) : null}
         </div>
+
         <div className="flex gap-2 p-4 border-t border-white/5">
           <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>
-          <button onClick={() => onConfirmar(proximo?.id || '')} disabled={confirmando}
+          <button onClick={() => onConfirmar(proximo?.id || '')} disabled={confirmando || printingActive}
             className="flex-[2] py-2.5 rounded-xl text-sm font-extrabold bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white transition-all shadow-lg shadow-blue-900/30">
-            {confirmando ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/>Confirmando…</span>
-                         : proximo ? '✓ Confirmar e ir ao próximo' : '✓ Confirmar separação'}
+            {confirmando
+              ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/>Confirmando…</span>
+              : printingActive
+              ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/>Imprimindo…</span>
+              : proximo ? '✓ Confirmar e ir ao próximo' : '✓ Confirmar separação'}
           </button>
         </div>
       </div>

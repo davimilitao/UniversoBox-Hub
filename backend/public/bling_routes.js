@@ -133,7 +133,7 @@ app.get('/bling/pedidos', async (req, res, next) => {
     const items = notas.map(n => ({
       id:          n.id,
       numero:      n.numero,
-      numeroPedido: null,           // carregado sob demanda
+      numeroPedido: n.numeroPedidoLoja || n.numeroPedido || null,
       dataEmissao: n.dataEmissao,
       situacao:    (typeof n.situacao === 'object' ? n.situacao?.descricao : n.situacao) || '',
       cliente:     { nome: n.contato?.nome || '' },
