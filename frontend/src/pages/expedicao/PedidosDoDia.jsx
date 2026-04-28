@@ -962,7 +962,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
   if (!order) return null;
   const its = Array.isArray(order.items) ? order.items : [];
 
-  function PrintStatusRow({ icon, label, st, msg, fallback }) {
+  function PrintStatusRow({ icon, label, st, msg, fallback, onReprint }) {
     const isPrinting = st === 'printing';
     const isOk       = st === 'ok';
     const isErr      = st === 'err';
@@ -990,6 +990,13 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
             tentar manual
           </button>
         )}
+        {isOk && onReprint && (
+          <button
+            className="shrink-0 text-[10px] underline text-slate-500 hover:text-slate-300"
+            onClick={e => { e.stopPropagation(); onReprint(); }}>
+            reimprimir
+          </button>
+        )}
       </div>
     );
   }
@@ -998,6 +1005,33 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
     order.marketplace === 'MERCADO_LIVRE' && /^\d{10,20}$/.test(String(order.numeroPedido || ''))
       ? String(order.numeroPedido) : null
   );
+
+  async function reprintDanfe() {
+    if (!order.blingNfId) return;
+    setDanfeSt('printing'); setDanfeMsg('');
+    try {
+      await printDanfe(order.blingNfId, m => setDanfeMsg(m));
+      setDanfeSt('ok'); setDanfeMsg('DANFE impressa ✓');
+    } catch (e) {
+      setDanfeSt('err'); setDanfeMsg(e.message);
+    }
+  }
+
+  async function reprintLabel() {
+    setLabelSt('printing'); setLabelMsg('');
+    try {
+      if (order.blingNfId) {
+        await printTransportLabelBling(order.blingNfId, m => setLabelMsg(m));
+      } else if (mlFallbackId) {
+        await printShippingLabel(mlFallbackId, m => setLabelMsg(m));
+      } else {
+        throw new Error('Sem etiqueta disponível');
+      }
+      setLabelSt('ok'); setLabelMsg('Etiqueta impressa ✓');
+    } catch (e) {
+      setLabelSt('err'); setLabelMsg(e.message);
+    }
+  }
 
   const printingActive = danfeSt === 'printing' || labelSt === 'printing';
 
@@ -1071,12 +1105,14 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
                 label="DANFE Simplificada"
                 st={danfeSt} msg={danfeMsg}
                 fallback={() => { setDanfeSt('idle'); }}
+                onReprint={order.blingNfId ? reprintDanfe : undefined}
               />
               <PrintStatusRow
                 icon={<Tag size={14} className="shrink-0"/>}
                 label="Etiqueta de Transporte"
                 st={labelSt} msg={labelMsg}
                 fallback={() => { setLabelSt('idle'); }}
+                onReprint={(order.blingNfId || mlFallbackId) ? reprintLabel : undefined}
               />
             </>
           ) : qzDisp === false ? (
@@ -1306,6 +1342,10 @@ export default function PedidosDoDia() {
     const tick = () => setClock(new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit' }));
     tick(); const t = setInterval(tick, 1000); return () => clearInterval(t);
   }, []);
+
+  // Pré-conecta QZ Tray ao abrir a página — o popup "Invalid Certificate" aparece
+  // agora (início do turno), não no meio da separação de um pedido
+  useEffect(() => { qzConnect().catch(() => {}); }, []);
 
   // Toast
   const showToast = useCallback((msg, tipo = 'info') => {
