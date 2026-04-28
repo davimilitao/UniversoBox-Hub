@@ -31,7 +31,9 @@ function splitLine(line, d) {
 function findCol(headers, candidates) {
   const norm = s => s.toLowerCase().replace(/\s+/g, '').replace(/[()\/]/g, '');
   for (const c of candidates) {
-    const i = headers.findIndex(h => norm(h) === norm(c));
+    const nc = norm(c);
+    // Correspondência exata primeiro, depois startsWith (para colunas com sufixo de data, etc.)
+    const i = headers.findIndex(h => { const nh = norm(h); return nh === nc || nh.startsWith(nc); });
     if (i !== -1) return i;
   }
   return -1;
@@ -42,6 +44,22 @@ function pNum(r) {
   if (!s || s === '0' || s === '0.00') return null;
   const n = parseFloat(s);
   return isNaN(n) ? null : n;
+}
+
+// Estoque: 0 é valor válido (produto zerado)
+function pStock(r) {
+  const s = (r || '').toString().trim().replace(',', '.');
+  if (!s || s === '-') return null;
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
+// Data no formato DD/MM/YYYY → ISO YYYY-MM-DD; "-" ou vazio → null
+function pData(r) {
+  if (!r || r.trim() === '-') return null;
+  const m = r.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${m[2]}-${m[1]}`;
 }
 
 function pImgs(r) {
@@ -96,7 +114,7 @@ function parseCSV(text) {
 
   const fm = {
     sku:          findCol(headers, ['Código', 'Codigo', 'sku', 'SKU']),
-    name:         findCol(headers, ['Descrição', 'Descricao', 'Nome', 'name']),
+    name:         findCol(headers, ['Descrição', 'Descricao', 'Produto', 'Nome', 'name']),
     bin:          findCol(headers, ['Localização', 'Localizacao', 'Local', 'bin']),
     ean:          findCol(headers, ['GTIN/EAN', 'EAN', 'GTIN']),
     eanBox:       findCol(headers, ['GTIN/EAN da Embalagem', 'EAN da Embalagem']),
@@ -106,13 +124,16 @@ function parseCSV(text) {
     width:        findCol(headers, ['Largura do produto', 'Largura']),
     height:       findCol(headers, ['Altura do Produto', 'Altura do produto', 'Altura']),
     depth:        findCol(headers, ['Profundidade do produto', 'Profundidade']),
-    stock:        findCol(headers, ['Estoque', 'estoque']),
+    stock:        findCol(headers, ['Estoque', 'estoque', 'Quantidade', 'quantidade']),
     itensPorCaixa: findCol(headers, ['Itens p/ caixa', 'Itens por caixa']),
     preco:        findCol(headers, ['Preço', 'Preco']),
     precoCusto:   findCol(headers, ['Preço de custo', 'Preco de custo']),
     situacao:     findCol(headers, ['Situação', 'Situacao']),
     marca:        findCol(headers, ['Marca', 'marca']),
     tagsRaw:      findCol(headers, ['Grupo de Tags/Tags', 'Tags']),
+    // Campos do relatório de estoque
+    ultimaVenda:  findCol(headers, ['Data última venda', 'Data ultima venda']),
+    ultimaCompra: findCol(headers, ['Data última compra', 'Data ultima compra']),
   };
 
   const produtos = [];
@@ -198,10 +219,12 @@ function parseCSV(text) {
       images:        imgs.length ? imgs : (dadosPai.images || []),
       weight:        pNum(get('weight'))      ?? dadosPai.weight      ?? null,
       weightBruto:   pNum(get('weightBruto')) ?? dadosPai.weightBruto ?? null,
+      ultimaVenda:   pData(get('ultimaVenda'))  ?? null,
+      ultimaCompra:  pData(get('ultimaCompra')) ?? null,
       width:         w,
       height:        h,
       depth:         d,
-      stock:         pNum(get('stock'))       ?? null,
+      stock:         pStock(get('stock'))      ?? null,
       itensPorCaixa: pNum(get('itensPorCaixa')) ?? dadosPai.itensPorCaixa ?? null,
       preco:         pNum(get('preco'))       ?? dadosPai.preco       ?? null,
       precoCusto:    pNum(get('precoCusto'))  ?? dadosPai.precoCusto  ?? null,
@@ -280,7 +303,7 @@ export default function ImportarCSV() {
         const r = await fetch('/import/products', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ produtos: batch }),
+          body: JSON.stringify({ products: batch }),
         });
         const data = await r.json();
         if (data.ok) totalOk += data.count ?? batch.length;
@@ -304,13 +327,17 @@ export default function ImportarCSV() {
     return arr.slice(0, 30);
   })();
 
+  const temRelatorioEstoque = parsedData?.produtos?.some(p => p.ultimaVenda !== null || p.ultimaCompra !== null);
+
   const stats = parsedData ? {
-    total:   parsedData.produtos.length,
-    grades:  parsedData.grades,
-    comDim:  parsedData.produtos.filter(p => p.width && p.height && p.depth).length,
-    comFoto: parsedData.produtos.filter(p => p.images?.length > 0).length,
-    semDim:  parsedData.produtos.filter(p => !p.width || !p.height || !p.depth).length,
-    ignorados: parsedData.ignorados,
+    total:      parsedData.produtos.length,
+    grades:     parsedData.grades,
+    comDim:     parsedData.produtos.filter(p => p.width && p.height && p.depth).length,
+    comFoto:    parsedData.produtos.filter(p => p.images?.length > 0).length,
+    semDim:     parsedData.produtos.filter(p => !p.width || !p.height || !p.depth).length,
+    ignorados:  parsedData.ignorados,
+    comEstoque: parsedData.produtos.filter(p => p.stock !== null && p.stock > 0).length,
+    comVenda:   parsedData.produtos.filter(p => p.ultimaVenda).length,
   } : null;
 
   return (
@@ -381,10 +408,10 @@ export default function ImportarCSV() {
           <div className="flex gap-3 p-4 rounded-xl bg-blue-500/5 border border-blue-500/15">
             <Info size={16} className="text-blue-400 shrink-0 mt-0.5" />
             <div className="text-xs text-slate-400 space-y-1 leading-relaxed">
-              <p className="font-semibold text-blue-300">Como exportar do Bling:</p>
-              <p>Produtos → Listar Produtos → Exportar → <strong>CSV</strong></p>
-              <p>Marque todos os campos incluindo <strong>Localização, GTIN/EAN, Dimensões, Peso, Fotos externas</strong>.</p>
-              <p className="text-slate-600">Produtos com grade exportam a linha pai (sem código) + filhas (código + composição). O importador resolve automaticamente o nome completo.</p>
+              <p className="font-semibold text-blue-300">Formatos aceitos:</p>
+              <p><strong className="text-slate-300">Catálogo completo:</strong> Produtos → Listar Produtos → Exportar → CSV. Marque Localização, GTIN/EAN, Dimensões, Peso, Fotos externas.</p>
+              <p><strong className="text-slate-300">Relatório de estoque:</strong> Relatórios → Posição de Estoque → Exportar → CSV. Captura quantidade atual + datas de última venda e compra.</p>
+              <p className="text-slate-600">Produtos com grade exportam a linha pai (sem código) + filhas (código + composição). O importador resolve o nome completo automaticamente.</p>
             </div>
           </div>
         )}
@@ -394,8 +421,17 @@ export default function ImportarCSV() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             <StatCard label="Produtos"   value={stats.total}    color="emerald" />
             <StatCard label="Grades"     value={stats.grades}   color="purple"  sub="variações resolvidas" />
-            <StatCard label="Com foto"   value={stats.comFoto}  color="blue" />
-            <StatCard label="Com dims"   value={stats.comDim}   color="blue" />
+            {temRelatorioEstoque ? (
+              <>
+                <StatCard label="Em estoque"  value={stats.comEstoque} color="blue" sub={`de ${stats.total}`} />
+                <StatCard label="Com venda"   value={stats.comVenda}   color="blue" sub="têm data últ. venda" />
+              </>
+            ) : (
+              <>
+                <StatCard label="Com foto"   value={stats.comFoto}  color="blue" />
+                <StatCard label="Com dims"   value={stats.comDim}   color="blue" />
+              </>
+            )}
             <StatCard label="Sem dims"   value={stats.semDim}   color={stats.semDim > 0 ? 'amber' : 'slate'} />
             <StatCard label="Ignorados"  value={stats.ignorados} color={stats.ignorados > 0 ? 'amber' : 'slate'} sub="SKU inválido" />
           </div>
@@ -446,10 +482,17 @@ export default function ImportarCSV() {
                   <tr className="border-b border-white/[0.05] bg-slate-900/40">
                     <th className="text-left px-3 py-2 text-[10px] text-slate-600 font-semibold uppercase tracking-wider w-36">SKU</th>
                     <th className="text-left px-3 py-2 text-[10px] text-slate-600 font-semibold uppercase tracking-wider">Nome</th>
-                    <th className="text-left px-3 py-2 text-[10px] text-slate-600 font-semibold uppercase tracking-wider w-24">Dims (cm)</th>
-                    <th className="text-left px-3 py-2 text-[10px] text-slate-600 font-semibold uppercase tracking-wider w-16">Peso</th>
                     <th className="text-left px-3 py-2 text-[10px] text-slate-600 font-semibold uppercase tracking-wider w-16">Estoque</th>
-                    <th className="text-left px-3 py-2 text-[10px] text-slate-600 font-semibold uppercase tracking-wider w-10">Foto</th>
+                    {temRelatorioEstoque && (
+                      <th className="text-left px-3 py-2 text-[10px] text-slate-600 font-semibold uppercase tracking-wider w-24">Últ. Venda</th>
+                    )}
+                    {!temRelatorioEstoque && (
+                      <>
+                        <th className="text-left px-3 py-2 text-[10px] text-slate-600 font-semibold uppercase tracking-wider w-24">Dims (cm)</th>
+                        <th className="text-left px-3 py-2 text-[10px] text-slate-600 font-semibold uppercase tracking-wider w-16">Peso</th>
+                        <th className="text-left px-3 py-2 text-[10px] text-slate-600 font-semibold uppercase tracking-wider w-10">Foto</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -466,24 +509,35 @@ export default function ImportarCSV() {
                       <td className="px-3 py-2 text-slate-300 max-w-xs">
                         <span className="block truncate">{p.name}</span>
                       </td>
-                      <td className="px-3 py-2">
-                        {(p.width && p.height && p.depth)
-                          ? <span className="text-blue-400 tabular-nums">{p.width}×{p.height}×{p.depth}</span>
-                          : <span className="text-slate-700">—</span>
-                        }
-                      </td>
-                      <td className="px-3 py-2 tabular-nums text-slate-400">{p.weight ? `${p.weight} kg` : <span className="text-slate-700">—</span>}</td>
                       <td className="px-3 py-2 tabular-nums">
-                        <span className={p.stock != null ? (p.stock === 0 ? 'text-red-400' : 'text-slate-300') : 'text-slate-700'}>
-                          {p.stock ?? '—'}
+                        <span className={p.stock != null ? (p.stock === 0 ? 'text-red-400' : 'text-emerald-400') : 'text-slate-700'}>
+                          {p.stock != null ? p.stock : '—'}
                         </span>
                       </td>
-                      <td className="px-3 py-2">
-                        {p.images?.length > 0
-                          ? <CheckCircle2 size={13} className="text-emerald-400" />
-                          : <span className="text-slate-700">—</span>
-                        }
-                      </td>
+                      {temRelatorioEstoque && (
+                        <td className="px-3 py-2 tabular-nums text-[11px]">
+                          {p.ultimaVenda
+                            ? <span className="text-slate-300">{p.ultimaVenda.slice(8,10)}/{p.ultimaVenda.slice(5,7)}/{p.ultimaVenda.slice(0,4)}</span>
+                            : <span className="text-slate-700">—</span>}
+                        </td>
+                      )}
+                      {!temRelatorioEstoque && (
+                        <>
+                          <td className="px-3 py-2">
+                            {(p.width && p.height && p.depth)
+                              ? <span className="text-blue-400 tabular-nums">{p.width}×{p.height}×{p.depth}</span>
+                              : <span className="text-slate-700">—</span>
+                            }
+                          </td>
+                          <td className="px-3 py-2 tabular-nums text-slate-400">{p.weight ? `${p.weight} kg` : <span className="text-slate-700">—</span>}</td>
+                          <td className="px-3 py-2">
+                            {p.images?.length > 0
+                              ? <CheckCircle2 size={13} className="text-emerald-400" />
+                              : <span className="text-slate-700">—</span>
+                            }
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))}
                   {previewProdutos.length === 0 && (

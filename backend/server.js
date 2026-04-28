@@ -1258,12 +1258,19 @@ app.post('/import/products', async (req, res, next) => {
         marca:    safeTrim(p.marca)    || '',
       };
 
-      // Campos numéricos — só grava se tiver valor
-      const nums = ['weight','weightBruto','width','height','depth','stock','itensPorCaixa','preco','precoCusto'];
+      // Campos numéricos — só grava se tiver valor (stock aceita 0)
+      const nums = ['weight','weightBruto','width','height','depth','itensPorCaixa','preco','precoCusto'];
       for (const k of nums) {
         const v = Number(p[k]);
         if (p[k] !== null && p[k] !== undefined && !isNaN(v) && v > 0) doc[k] = v;
       }
+      if (p.stock !== null && p.stock !== undefined && !isNaN(Number(p.stock))) {
+        doc.stock = Number(p.stock);
+      }
+
+      // Campos de data do relatório de estoque (ISO YYYY-MM-DD ou null)
+      if (p.ultimaVenda)  doc.ultimaVenda  = p.ultimaVenda;
+      if (p.ultimaCompra) doc.ultimaCompra = p.ultimaCompra;
 
       batch.set(db.collection('products').doc(sku), doc, { merge: true });
     }
