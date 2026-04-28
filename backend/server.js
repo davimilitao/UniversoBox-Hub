@@ -5980,20 +5980,26 @@ app.get('/api/ml/painel', async (req, res, next) => {
     const me     = await meRes.json();
     const userId = me.id;
 
-    const nowBR   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-    const todayStr    = nowBR.toISOString().slice(0, 10);
-    const tomorrowStr = new Date(nowBR.getTime() + 86400000).toISOString().slice(0, 10);
+    const nowBR      = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    const todayStr   = nowBR.toISOString().slice(0, 10);
+    const tomorrowStr= new Date(nowBR.getTime() + 86400000).toISOString().slice(0, 10);
+    // Janela de 45 dias atrás — evita pedidos pagos antigos que nunca foram despachados
+    const desde45d   = new Date(nowBR.getTime() - 45 * 86400000).toISOString().slice(0, 10);
 
-    // ── 2. Busca pedidos paid em paralelo ─────────────────────────────────
+    // ── 2. Busca pedidos em paralelo ──────────────────────────────────────
+    // cross_docking = Agência (vendedor imprime etiqueta e entrega na agência)
+    // fulfillment   = Full (ML cuida do envio — vendedor NÃO imprime etiqueta)
     const queries = [
-      // Hoje: prontos para enviar (etiqueta disponível)
-      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=ready_to_ship&limit=50`,
-      // Próximos dias: pagos, cross_docking, criados nos últimos 15 dias
-      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.logistic_type=cross_docking&limit=50`,
-      // Em trânsito
-      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=shipped&limit=50`,
+      // Agência hoje: cross_docking prontos para enviar (etiqueta disponível)
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.logistic_type=cross_docking&shipping.status=ready_to_ship&sort=date_desc&limit=50`,
+      // Agência próximos dias: cross_docking criados nos últimos 45 dias ainda não prontos
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.logistic_type=cross_docking&order.date_created.from=${desde45d}T00:00:00.000-03:00&sort=date_desc&limit=50`,
+      // Full no centro de distribuição (informativo — sem etiqueta para o vendedor)
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.logistic_type=fulfillment&shipping.status=ready_to_ship&sort=date_desc&limit=50`,
+      // Em trânsito (cross_docking já despachados)
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.logistic_type=cross_docking&shipping.status=shipped&sort=date_desc&limit=50`,
       // Finalizadas recentes
-      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=delivered&limit=20`,
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=delivered&sort=date_desc&limit=20`,
     ];
 
     const results = await Promise.allSettled(
@@ -6005,42 +6011,32 @@ app.get('/api/ml/painel', async (req, res, next) => {
         ? settled.value.results : [];
     }
 
-    const readyToShip = getOrders(results[0]);
-    const crossDocking = getOrders(results[1]);
-    const inTransit   = getOrders(results[2]);
-    const delivered   = getOrders(results[3]);
+    // results[0] = Agência ready_to_ship (hoje, precisa imprimir etiqueta)
+    // results[1] = Agência cross_docking recentes (próximos dias, etiqueta ainda não pronta)
+    // results[2] = Full no centro de distribuição (informativo)
+    // results[3] = Agência em trânsito (já despachados)
+    // results[4] = Finalizadas recentes
+    const agenciaHoje   = getOrders(results[0]);
+    const crossPending  = getOrders(results[1]).filter(o => !agenciaHoje.find(r => r.id === o.id));
+    const fullCentro    = getOrders(results[2]);
+    const inTransit     = getOrders(results[3]);
+    const delivered     = getOrders(results[4]);
 
-    // ── 3. Classifica cross_docking por data de envio ─────────────────────
-    function getShipDate(o) {
-      return o.shipping?.estimated_delivery_time?.date
-        || o.shipping?.date_created
-        || o.date_created;
-    }
-
-    const crossToday    = crossDocking.filter(o => getShipDate(o)?.slice(0, 10) === todayStr);
-    const crossTomorrow = crossDocking.filter(o => getShipDate(o)?.slice(0, 10) === tomorrowStr);
-    const crossOther    = crossDocking.filter(o => {
-      const d = getShipDate(o)?.slice(0, 10);
+    // Classifica pending por data de criação (proxy para data de envio)
+    const agenciaAmanha = crossPending.filter(o => {
+      const d = o.date_created?.slice(0, 10);
+      return d === todayStr || d === tomorrowStr;
+    });
+    const agenciaProximos = crossPending.filter(o => {
+      const d = o.date_created?.slice(0, 10);
       return d && d !== todayStr && d !== tomorrowStr;
     });
 
-    // ── 4. Tenta buscar o código de autorização diário ────────────────────
-    let authCode = null;
+    // ── 4. Detalhe do primeiro shipment Agência (cutoff + shape discovery) ─
+    let authCode   = null;
     let cutoffTime = null;
     try {
-      // O código de autorização vive nos detalhes do carrier/envio agendado
-      const carrierRes = await fetchWithTimeout(
-        `${ML_API_BASE}/users/${userId}/shipping_authorization_codes`,
-        { headers }, 6000
-      ).catch(() => null);
-
-      if (carrierRes?.ok) {
-        const carrierData = await carrierRes.json().catch(() => null);
-        authCode = carrierData?.code || carrierData?.authorization_code || null;
-      }
-
-      // Tenta extrair horário de corte do primeiro shipment com ready_to_ship
-      const firstShipmentId = readyToShip[0]?.shipping?.id || crossToday[0]?.shipping?.id;
+      const firstShipmentId = agenciaHoje[0]?.shipping?.id;
       if (firstShipmentId) {
         const shipRes = await fetchWithTimeout(
           `${ML_API_BASE}/shipments/${firstShipmentId}`,
@@ -6048,10 +6044,10 @@ app.get('/api/ml/painel', async (req, res, next) => {
         ).catch(() => null);
         if (shipRes?.ok) {
           const ship = await shipRes.json().catch(() => ({}));
-          cutoffTime = ship?.drop_off?.cutoff_time
-            || ship?.carrier_info?.cutoff
-            || ship?.scheduled_end_time
-            || null;
+          cutoffTime = ship?.drop_off?.cutoff_time || ship?.carrier_info?.cutoff || null;
+          authCode   = ship?.authorization_code || ship?.drop_off?.code || null;
+          console.log('[ml/painel] shipment keys:', Object.keys(ship));
+          if (ship.drop_off) console.log('[ml/painel] drop_off:', JSON.stringify(ship.drop_off));
         }
       }
     } catch (_) {}
@@ -6059,14 +6055,10 @@ app.get('/api/ml/painel', async (req, res, next) => {
     // ── 5. Monta resposta estruturada ─────────────────────────────────────
     const formatOrder = o => ({
       id:          String(o.id),
-      status:      o.status,
       shipmentId:  o.shipping?.id || null,
-      shipStatus:  o.shipping?.status || null,
-      logisticType: o.shipping?.logistic_type || null,
       buyerName:   o.buyer?.nickname || '',
       total:       o.total_amount,
       dateCreated: o.date_created,
-      shipDate:    getShipDate(o)?.slice(0, 10),
       items:       (o.order_items || []).map(i => ({
         title: i.item?.title || '',
         sku:   i.item?.seller_sku || '',
@@ -6077,22 +6069,23 @@ app.get('/api/ml/painel', async (req, res, next) => {
 
     res.json({
       ok: true,
-      sellerId:  userId,
+      sellerId:   userId,
       sellerNick: me.nickname,
-      date: todayStr,
+      date:       todayStr,
       authCode,
       cutoffTime,
       summary: {
-        hoje:        readyToShip.length,
-        amanha:      crossTomorrow.length,
-        proximosDias: crossOther.length,
-        emTransito:  inTransit.length,
-        finalizadas: delivered.length,
+        agenciaHoje:    agenciaHoje.length,
+        agenciaAmanha:  agenciaAmanha.length,
+        agenciaProximos: agenciaProximos.length,
+        fullCentro:     fullCentro.length,
+        emTransito:     inTransit.length,
+        finalizadas:    delivered.length,
       },
-      hoje:        readyToShip.map(formatOrder),
-      amanha:      crossTomorrow.map(formatOrder),
-      proximosDias: crossOther.map(formatOrder),
-      emTransito:  inTransit.slice(0, 10).map(formatOrder),
+      agenciaHoje:    agenciaHoje.map(formatOrder),
+      agenciaAmanha:  agenciaAmanha.map(formatOrder),
+      agenciaProximos: agenciaProximos.slice(0, 10).map(formatOrder),
+      emTransito:     inTransit.slice(0, 10).map(formatOrder),
     });
 
   } catch (err) {
