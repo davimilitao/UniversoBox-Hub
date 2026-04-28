@@ -6344,6 +6344,71 @@ app.get('/api/ml/debug/label/:orderId', async (req, res, next) => {
 
 
 // ════════════════════════════════════════════════════════════════════════════
+// GET /api/ml/debug/orders
+// Retorna campos brutos dos primeiros 3 pedidos cross_docking paid —
+// usado para mapear quais campos ML usa para agrupar "Amanhã" / "Próximos".
+// REMOVER após diagnóstico.
+// ════════════════════════════════════════════════════════════════════════════
+app.get('/api/ml/debug/orders', async (req, res, next) => {
+  try {
+    const token   = await mlEnsureToken();
+    const headers = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+
+    const meRes = await fetchWithTimeout(`${ML_API_BASE}/users/me`, { headers }, 8000);
+    const me    = await meRes.json();
+    const uid   = me.id;
+
+    // Busca pedidos cross_docking pagos — os que o ML chama de "Próximos dias"
+    const url = `${ML_API_BASE}/orders/search?seller=${uid}&order.status=paid&shipping.logistic_type=cross_docking&sort=date_desc&limit=5`;
+    const r   = await fetchWithTimeout(url, { headers }, 12000);
+    const raw = await r.json();
+    const orders = raw.results || [];
+
+    // Para cada pedido, busca também o shipment completo
+    const detailed = await Promise.all(orders.slice(0, 3).map(async o => {
+      let shipment = null;
+      if (o.shipping?.id) {
+        const sr = await fetchWithTimeout(`${ML_API_BASE}/shipments/${o.shipping.id}`, { headers }, 8000).catch(() => null);
+        if (sr?.ok) shipment = await sr.json().catch(() => null);
+      }
+      return {
+        orderId:          o.id,
+        orderStatus:      o.status,
+        dateCreated:      o.date_created,
+        lastUpdated:      o.last_updated,
+        shippingId:       o.shipping?.id,
+        shippingStatus:   o.shipping?.status,
+        shippingSubstatus: o.shipping?.substatus,
+        logisticType:     o.shipping?.logistic_type,
+        // campos que podem indicar prazo de envio
+        shippingDateCreated:  o.shipping?.date_created,
+        shippingDateUpdated:  o.shipping?.date_updated,
+        // dados brutos do shipment (campos chave para prazo)
+        shipment: shipment ? {
+          status:        shipment.status,
+          substatus:     shipment.substatus,
+          date_created:  shipment.date_created,
+          last_updated:  shipment.last_updated,
+          date_first_printed: shipment.date_first_printed,
+          lead_time:     shipment.lead_time,
+          drop_off:      shipment.drop_off,
+          shipping_option: shipment.shipping_option,
+          estimated_delivery_limit: shipment.estimated_delivery_limit,
+          declared_value: undefined, // omit noise
+          // todos os campos de nível raiz disponíveis
+          _allKeys: Object.keys(shipment),
+        } : null,
+      };
+    }));
+
+    res.json({ sellerId: uid, sellerNick: me.nickname, total: raw.paging?.total, orders: detailed });
+  } catch (err) {
+    console.error('[GET /api/ml/debug/orders]', err.message);
+    next(err);
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // POST /api/ml/labels/batch
 // Gera PDF com múltiplas etiquetas de transporte.
 // Body: { orderIds: string[] }
