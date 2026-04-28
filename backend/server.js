@@ -5965,6 +5965,143 @@ app.get('/api/ml/orders/today', async (req, res, next) => {
 
 
 // ════════════════════════════════════════════════════════════════════════════
+// GET /api/ml/painel
+// Painel de expedição ML: pedidos de hoje, amanhã, código de autorização,
+// horário de corte. Replica visualmente o painel de vendas do ML.
+// ════════════════════════════════════════════════════════════════════════════
+app.get('/api/ml/painel', async (req, res, next) => {
+  try {
+    const token   = await mlEnsureToken();
+    const headers = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+
+    // ── 1. Seller ID ──────────────────────────────────────────────────────
+    const meRes  = await fetchWithTimeout(`${ML_API_BASE}/users/me`, { headers }, 8000);
+    if (!meRes.ok) throw Object.assign(new Error('ml_not_authorized'), { statusCode: 401 });
+    const me     = await meRes.json();
+    const userId = me.id;
+
+    const nowBR   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    const todayStr    = nowBR.toISOString().slice(0, 10);
+    const tomorrowStr = new Date(nowBR.getTime() + 86400000).toISOString().slice(0, 10);
+
+    // ── 2. Busca pedidos paid em paralelo ─────────────────────────────────
+    const queries = [
+      // Hoje: prontos para enviar (etiqueta disponível)
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=ready_to_ship&limit=50`,
+      // Próximos dias: pagos, cross_docking, criados nos últimos 15 dias
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.logistic_type=cross_docking&limit=50`,
+      // Em trânsito
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=shipped&limit=50`,
+      // Finalizadas recentes
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=delivered&limit=20`,
+    ];
+
+    const results = await Promise.allSettled(
+      queries.map(url => fetchWithTimeout(url, { headers }, 12000).then(r => r.ok ? r.json() : null))
+    );
+
+    function getOrders(settled) {
+      return settled.status === 'fulfilled' && settled.value?.results
+        ? settled.value.results : [];
+    }
+
+    const readyToShip = getOrders(results[0]);
+    const crossDocking = getOrders(results[1]);
+    const inTransit   = getOrders(results[2]);
+    const delivered   = getOrders(results[3]);
+
+    // ── 3. Classifica cross_docking por data de envio ─────────────────────
+    function getShipDate(o) {
+      return o.shipping?.estimated_delivery_time?.date
+        || o.shipping?.date_created
+        || o.date_created;
+    }
+
+    const crossToday    = crossDocking.filter(o => getShipDate(o)?.slice(0, 10) === todayStr);
+    const crossTomorrow = crossDocking.filter(o => getShipDate(o)?.slice(0, 10) === tomorrowStr);
+    const crossOther    = crossDocking.filter(o => {
+      const d = getShipDate(o)?.slice(0, 10);
+      return d && d !== todayStr && d !== tomorrowStr;
+    });
+
+    // ── 4. Tenta buscar o código de autorização diário ────────────────────
+    let authCode = null;
+    let cutoffTime = null;
+    try {
+      // O código de autorização vive nos detalhes do carrier/envio agendado
+      const carrierRes = await fetchWithTimeout(
+        `${ML_API_BASE}/users/${userId}/shipping_authorization_codes`,
+        { headers }, 6000
+      ).catch(() => null);
+
+      if (carrierRes?.ok) {
+        const carrierData = await carrierRes.json().catch(() => null);
+        authCode = carrierData?.code || carrierData?.authorization_code || null;
+      }
+
+      // Tenta extrair horário de corte do primeiro shipment com ready_to_ship
+      const firstShipmentId = readyToShip[0]?.shipping?.id || crossToday[0]?.shipping?.id;
+      if (firstShipmentId) {
+        const shipRes = await fetchWithTimeout(
+          `${ML_API_BASE}/shipments/${firstShipmentId}`,
+          { headers }, 6000
+        ).catch(() => null);
+        if (shipRes?.ok) {
+          const ship = await shipRes.json().catch(() => ({}));
+          cutoffTime = ship?.drop_off?.cutoff_time
+            || ship?.carrier_info?.cutoff
+            || ship?.scheduled_end_time
+            || null;
+        }
+      }
+    } catch (_) {}
+
+    // ── 5. Monta resposta estruturada ─────────────────────────────────────
+    const formatOrder = o => ({
+      id:          String(o.id),
+      status:      o.status,
+      shipmentId:  o.shipping?.id || null,
+      shipStatus:  o.shipping?.status || null,
+      logisticType: o.shipping?.logistic_type || null,
+      buyerName:   o.buyer?.nickname || '',
+      total:       o.total_amount,
+      dateCreated: o.date_created,
+      shipDate:    getShipDate(o)?.slice(0, 10),
+      items:       (o.order_items || []).map(i => ({
+        title: i.item?.title || '',
+        sku:   i.item?.seller_sku || '',
+        qty:   i.quantity,
+        price: i.unit_price,
+      })),
+    });
+
+    res.json({
+      ok: true,
+      sellerId:  userId,
+      sellerNick: me.nickname,
+      date: todayStr,
+      authCode,
+      cutoffTime,
+      summary: {
+        hoje:        readyToShip.length,
+        amanha:      crossTomorrow.length,
+        proximosDias: crossOther.length,
+        emTransito:  inTransit.length,
+        finalizadas: delivered.length,
+      },
+      hoje:        readyToShip.map(formatOrder),
+      amanha:      crossTomorrow.map(formatOrder),
+      proximosDias: crossOther.map(formatOrder),
+      emTransito:  inTransit.slice(0, 10).map(formatOrder),
+    });
+
+  } catch (err) {
+    console.error('[GET /api/ml/painel]', err.message);
+    next(err);
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // POST /api/ml/orders/:orderId/status
 // Salva o status local do pedido (imprimir / expedir / enviado) no Firestore.
 // Não chama a API do ML — é apenas controle interno de expedição.
