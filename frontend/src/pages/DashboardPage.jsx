@@ -496,6 +496,153 @@ function ColetaWidget() {
   );
 }
 
+// ─── PainelMLCard ─────────────────────────────────────────────────────────────
+
+function PainelMLCard() {
+  const [data,        setData]        = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [openSection, setOpenSection] = useState('agenciaHoje');
+
+  async function load() {
+    setLoading(true);
+    try {
+      const token = await getToken();
+      const res   = await fetch('/api/ml/painel', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setData(await res.json());
+    } catch (_) {}
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  if (loading) return (
+    <div className="rounded-2xl border border-slate-800/50 bg-slate-900/30 p-4">
+      <div className="flex items-center gap-2 text-slate-500 text-sm">
+        <RefreshCw size={13} className="animate-spin" />
+        Carregando painel ML…
+      </div>
+    </div>
+  );
+
+  if (!data?.ok) return null;
+
+  const { agenciaHoje = [], agenciaAmanha = [], agenciaProximos = [], emTransito = [], fullCentro = [], summary = {}, authCode, cutoffTime, sellerNick } = data;
+
+  const sections = [
+    { key: 'agenciaHoje',    label: 'Agência — Hoje',     count: summary.agenciaHoje    || 0, orders: agenciaHoje,    tone: 'blue',   sub: 'prontos para despachar' },
+    { key: 'agenciaAmanha',  label: 'Agência — Amanhã',   count: summary.agenciaAmanha  || 0, orders: agenciaAmanha,  tone: 'indigo', sub: 'pedidos chegando amanhã' },
+    { key: 'fullCentro',     label: 'Full — Centro ML',   count: summary.fullCentro     || 0, orders: fullCentro,     tone: 'teal',   sub: 'ML despacha — só conferência' },
+    { key: 'emTransito',     label: 'Em trânsito',        count: summary.emTransito     || 0, orders: emTransito,     tone: 'slate',  sub: 'já despachados' },
+  ];
+
+  const toneCls = {
+    blue:   { badge: 'bg-blue-500/15 text-blue-300',    ring: '' },
+    indigo: { badge: 'bg-indigo-500/15 text-indigo-300', ring: 'ring-1 ring-indigo-500/30' },
+    teal:   { badge: 'bg-teal-500/15 text-teal-300',    ring: '' },
+    slate:  { badge: 'bg-slate-700/40 text-slate-400',  ring: '' },
+  };
+
+  return (
+    <div className="rounded-2xl border border-slate-700/40 bg-slate-900/40 overflow-hidden">
+      {/* Cabeçalho */}
+      <div className="px-4 py-3 border-b border-slate-800/60 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Building2 size={14} className="text-blue-400" />
+          <p className="text-slate-200 font-semibold text-sm">Painel Mercado Livre</p>
+          {sellerNick && <span className="text-slate-600 text-xs">{sellerNick}</span>}
+        </div>
+        <button onClick={load} disabled={loading} className="text-slate-600 hover:text-slate-400 transition-colors">
+          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
+
+      {/* Seções colapsáveis */}
+      {sections.map(s => {
+        const t = toneCls[s.tone];
+        const isOpen = openSection === s.key;
+        return (
+          <div key={s.key} className="border-b border-slate-800/40 last:border-0">
+            <button
+              onClick={() => setOpenSection(prev => prev === s.key ? null : s.key)}
+              className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-800/30 transition-colors text-left"
+            >
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold tabular-nums shrink-0 ${t.badge} ${t.ring}`}>
+                {s.count}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-slate-200 text-sm font-medium">{s.label}</p>
+                <p className="text-slate-600 text-xs">{s.sub}</p>
+              </div>
+              <ChevronDown size={14} className={`text-slate-600 transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isOpen && (
+              <div className="px-4 pb-3 space-y-2">
+                {s.orders.length === 0 ? (
+                  <p className="text-slate-600 text-xs text-center py-3">Nenhum pedido nesta categoria</p>
+                ) : (
+                  <>
+                    {s.orders.slice(0, 25).map(o => (
+                      <div key={o.id} className="rounded-xl border border-slate-800/50 bg-slate-800/20 px-3 py-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-slate-300 text-xs font-medium truncate">{o.buyerName || '—'}</p>
+                            {(o.items || []).slice(0, 2).map((it, i) => (
+                              <p key={i} className="text-slate-500 text-[11px] truncate mt-0.5">
+                                {it.qty}× {it.title}
+                                {it.sku ? <span className="text-slate-700 ml-1">· {it.sku}</span> : null}
+                              </p>
+                            ))}
+                            {(o.items || []).length > 2 && (
+                              <p className="text-slate-700 text-[11px]">+{o.items.length - 2} item(ns)</p>
+                            )}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-slate-300 text-xs font-semibold tabular-nums">{BRL.format(o.total || 0)}</p>
+                            <p className="text-slate-600 text-[10px] tabular-nums">
+                              {o.dateCreated
+                                ? new Date(o.dateCreated).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+                                : '—'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {s.orders.length > 25 && (
+                      <p className="text-slate-600 text-xs text-center">+{s.orders.length - 25} mais</p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Rodapé: código de autorização + horário de corte */}
+      {(authCode || cutoffTime) && (
+        <div className="px-4 py-2.5 border-t border-slate-800/60 flex items-center gap-4 flex-wrap bg-slate-900/30">
+          {authCode && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-600 text-[10px] uppercase tracking-wide">Código:</span>
+              <span className="text-blue-300 font-bold text-xs tabular-nums tracking-wider">{authCode}</span>
+            </div>
+          )}
+          {cutoffTime && (
+            <div className="flex items-center gap-1.5">
+              <Timer size={10} className="text-slate-600" />
+              <span className="text-slate-400 text-xs">Corte: {cutoffTime}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ReclamacoesCard ──────────────────────────────────────────────────────────
 
 function ReclamacoesCard({ claims }) {
@@ -640,19 +787,22 @@ export function DashboardPage() {
               authCode={data.authCode}
             />
 
-            {/* 2 — Alertas inteligentes (só aparece quando há algo) */}
+            {/* 2 — Painel ML: pedidos por modalidade (Agência Hoje / Amanhã / Full / Em trânsito) */}
+            <PainelMLCard />
+
+            {/* 3 — Alertas inteligentes (só aparece quando há algo) */}
             <AlertasBand />
 
-            {/* 3 — Coleta do dia */}
+            {/* 4 — Coleta do dia */}
             <ColetaWidget />
 
-            {/* 4 — A caminho (compras em trânsito) */}
+            {/* 5 — A caminho (compras em trânsito) */}
             <AcaminhoWidget />
 
-            {/* 5 — Reclamações (só aparece quando há) */}
+            {/* 6 — Reclamações (só aparece quando há) */}
             <ReclamacoesCard claims={data.claims} />
 
-            {/* 6 — Tabela de corte semanal */}
+            {/* 7 — Tabela de corte semanal */}
             <CutoffWeekCompact cutoffSchedule={data.cutoffSchedule} />
 
             <p className="text-center text-slate-700 text-xs pb-2">
