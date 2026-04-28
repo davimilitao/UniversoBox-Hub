@@ -5986,20 +5986,17 @@ app.get('/api/ml/painel', async (req, res, next) => {
     // Janela de 45 dias atrás — evita pedidos pagos antigos que nunca foram despachados
     const desde45d   = new Date(nowBR.getTime() - 45 * 86400000).toISOString().slice(0, 10);
 
-    // ── 2. Busca pedidos em paralelo ──────────────────────────────────────
-    // cross_docking = Agência (vendedor imprime etiqueta e entrega na agência)
-    // fulfillment   = Full (ML cuida do envio — vendedor NÃO imprime etiqueta)
+    // ── 2. Busca pedidos em paralelo (queries amplas — filtragem real é feita em código) ──
+    // IMPORTANTE: os parâmetros logistic_type do ML API não são confiáveis.
+    // A API pode devolver Flex ou Full dentro de uma query cross_docking.
+    // Por isso: busca ampla por status, filtra pelo campo real o.shipping.logistic_type.
     const queries = [
-      // Agência hoje: cross_docking prontos para enviar (etiqueta disponível)
-      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.logistic_type=cross_docking&shipping.status=ready_to_ship&sort=date_desc&limit=50`,
-      // Agência próximos dias: cross_docking criados nos últimos 45 dias ainda não prontos
-      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.logistic_type=cross_docking&order.date_created.from=${desde45d}T00:00:00.000-03:00&sort=date_desc&limit=50`,
-      // Full no centro de distribuição (informativo — sem etiqueta para o vendedor)
-      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.logistic_type=fulfillment&shipping.status=ready_to_ship&sort=date_desc&limit=50`,
-      // Em trânsito (cross_docking já despachados)
-      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.logistic_type=cross_docking&shipping.status=shipped&sort=date_desc&limit=50`,
-      // Finalizadas recentes
-      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=delivered&sort=date_desc&limit=20`,
+      // Pedidos prontos para enviar (ready_to_ship) — últimos 45 dias
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=ready_to_ship&order.date_created.from=${desde45d}T00:00:00.000-03:00&sort=date_desc&limit=100`,
+      // Pedidos pendentes (pagos mas ainda não prontos) — últimos 45 dias
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&order.date_created.from=${desde45d}T00:00:00.000-03:00&sort=date_desc&limit=100`,
+      // Em trânsito — últimos 45 dias
+      `${ML_API_BASE}/orders/search?seller=${userId}&order.status=paid&shipping.status=shipped&order.date_created.from=${desde45d}T00:00:00.000-03:00&sort=date_desc&limit=50`,
     ];
 
     const results = await Promise.allSettled(
@@ -6011,26 +6008,38 @@ app.get('/api/ml/painel', async (req, res, next) => {
         ? settled.value.results : [];
     }
 
-    // results[0] = Agência ready_to_ship (hoje, precisa imprimir etiqueta)
-    // results[1] = Agência cross_docking recentes (próximos dias, etiqueta ainda não pronta)
-    // results[2] = Full no centro de distribuição (informativo)
-    // results[3] = Agência em trânsito (já despachados)
-    // results[4] = Finalizadas recentes
-    const agenciaHoje   = getOrders(results[0]);
-    const crossPending  = getOrders(results[1]).filter(o => !agenciaHoje.find(r => r.id === o.id));
-    const fullCentro    = getOrders(results[2]);
-    const inTransit     = getOrders(results[3]);
-    const delivered     = getOrders(results[4]);
+    // Filtragem pelo campo REAL do objeto — não pelo query param
+    const lg = o => (o.shipping?.logistic_type || '').toLowerCase();
 
-    // Classifica pending por data de criação (proxy para data de envio)
-    const agenciaAmanha = crossPending.filter(o => {
-      const d = o.date_created?.slice(0, 10);
-      return d === todayStr || d === tomorrowStr;
-    });
-    const agenciaProximos = crossPending.filter(o => {
-      const d = o.date_created?.slice(0, 10);
-      return d && d !== todayStr && d !== tomorrowStr;
-    });
+    const readyToShip  = getOrders(results[0]);
+    const allPaid      = getOrders(results[1]);
+    const inTransitRaw = getOrders(results[2]);
+
+    // Dedup por ID
+    const seen = new Set();
+    function dedup(list) {
+      return list.filter(o => { if (seen.has(o.id)) return false; seen.add(o.id); return true; });
+    }
+
+    // Agência hoje = cross_docking + ready_to_ship
+    const agenciaHoje  = dedup(readyToShip.filter(o => lg(o) === 'cross_docking'));
+
+    // Full hoje = fulfillment + ready_to_ship
+    const fullCentro   = dedup(readyToShip.filter(o => lg(o) === 'fulfillment'));
+
+    // Pendentes cross_docking (pagos, não ready_to_ship, não já em agenciaHoje)
+    const agenciaIdSet = new Set(agenciaHoje.map(o => o.id));
+    const crossPending = dedup(
+      allPaid.filter(o => lg(o) === 'cross_docking' && !agenciaIdSet.has(o.id) && o.shipping?.status !== 'ready_to_ship')
+    );
+
+    // Em trânsito = cross_docking já despachados
+    const inTransit = dedup(inTransitRaw.filter(o => lg(o) === 'cross_docking'));
+
+    // Próximos: todos os cross_docking pendentes, sem tentar adivinhar "amanhã" por date_created
+    // (o campo real de prazo está no /shipments/{id}.lead_time — ainda não mapeado)
+    const agenciaAmanha   = [];   // reservado: será preenchido quando mapearmos lead_time
+    const agenciaProximos = crossPending;
 
     // ── 4. Detalhe do primeiro shipment Agência (cutoff + shape discovery) ─
     let authCode   = null;

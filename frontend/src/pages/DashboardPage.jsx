@@ -529,13 +529,13 @@ function PainelMLCard() {
 
   if (!data?.ok) return null;
 
-  const { agenciaHoje = [], agenciaAmanha = [], agenciaProximos = [], emTransito = [], fullCentro = [], summary = {}, authCode, cutoffTime, sellerNick } = data;
+  const { agenciaHoje = [], agenciaProximos = [], emTransito = [], fullCentro = [], summary = {}, authCode, cutoffTime, sellerNick } = data;
 
   const sections = [
-    { key: 'agenciaHoje',    label: 'Agência — Hoje',     count: summary.agenciaHoje    || 0, orders: agenciaHoje,    tone: 'blue',   sub: 'prontos para despachar' },
-    { key: 'agenciaAmanha',  label: 'Agência — Amanhã',   count: summary.agenciaAmanha  || 0, orders: agenciaAmanha,  tone: 'indigo', sub: 'pedidos chegando amanhã' },
-    { key: 'fullCentro',     label: 'Full — Centro ML',   count: summary.fullCentro     || 0, orders: fullCentro,     tone: 'teal',   sub: 'ML despacha — só conferência' },
-    { key: 'emTransito',     label: 'Em trânsito',        count: summary.emTransito     || 0, orders: emTransito,     tone: 'slate',  sub: 'já despachados' },
+    { key: 'agenciaHoje',     label: 'Agência — Hoje',         count: summary.agenciaHoje     || 0, orders: agenciaHoje,    tone: 'blue',   sub: 'prontos para despachar (etiqueta disponível)' },
+    { key: 'agenciaProximos', label: 'Agência — Próximos dias', count: summary.agenciaProximos || 0, orders: agenciaProximos, tone: 'indigo', sub: 'pendentes de etiqueta' },
+    { key: 'fullCentro',      label: 'Full — Centro ML',       count: summary.fullCentro      || 0, orders: fullCentro,     tone: 'teal',   sub: 'ML despacha — só conferência' },
+    { key: 'emTransito',      label: 'Em trânsito',            count: summary.emTransito      || 0, orders: emTransito,     tone: 'slate',  sub: 'já despachados' },
   ];
 
   const toneCls = {
