@@ -854,7 +854,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
               </div>
               {order.blingNfId && (
                 <a
-                  href={`https://www.bling.com.br/notas.fiscais.edicao.php#id=${order.blingNfId}`}
+                  href={`https://www.bling.com.br/notas.fiscais.php#edit/${order.blingNfId}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/8 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500/50 transition-all text-xs font-bold"
@@ -937,7 +937,7 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
           </div>
           {order.blingNfId && (
             <a
-              href={`https://www.bling.com.br/notas.fiscais.edicao.php#id=${order.blingNfId}`}
+              href={`https://www.bling.com.br/notas.fiscais.php#edit/${order.blingNfId}`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/8 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500/50 transition-all text-xs font-bold"
