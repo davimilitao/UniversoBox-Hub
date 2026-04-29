@@ -199,231 +199,8 @@ async function printDanfe(blingNfId, onStatus) {
   }
 }
 
-/**
- * Imprime etiqueta de transporte via Bling (10x15 térmica).
- * Tenta v3 primeiro (PDF base64 → QZ Tray ou blob). Fallback: endpoint
- * principal que pode retornar ZPL, PDF ou URL do relatório legado.
- * @param {string} blingNfId — ID da NF no Bling
- * @param {Function} onStatus — callback de status para o UI
- */
-async function printTransportLabelBling(blingNfId, onStatus) {
-  onStatus?.('Buscando etiqueta de transporte…');
-  const token = localStorage.getItem('expedicao_token') || '';
-
-  // ── 1. Tenta endpoint v3 (PDF base64) ────────────────────────────────────
-  let data = null;
-  try {
-    const resV3 = await fetch(`/bling/etiqueta-v3/${encodeURIComponent(blingNfId)}`, {
-      headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
-    });
-    const dV3 = await resV3.json().catch(() => ({}));
-    if (resV3.ok && dV3.ok && dV3.pdf) {
-      data = dV3;
-    }
-  } catch (err) { console.warn('[printTransportLabelBling] etiqueta-v3 falhou:', err.message); }
-
-  // ── 2. Fallback: endpoint principal (ZPL, PDF base64, ou pdfUrl) ─────────
-  if (!data) {
-    const res = await fetch(`/bling/etiqueta-transporte/${encodeURIComponent(blingNfId)}`, {
-      headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
-    });
-    data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta`);
-    }
-  }
-
-  const b64pdf = data.pdf || null;
-  const zplStr = data.zpl || null;
-  const pdfUrl = data.pdfUrl || null;
-
-  // ── 3. ZPL via QZ Tray (preferido para impressoras térmicas) ─────────────
-  if (zplStr) {
-    onStatus?.('Conectando à impressora…');
-    try {
-      const qz = await qzConnect();
-      const printer = await qz.printers.getDefault();
-      const config = qz.configs.create(printer, { language: { type: 'ZPL' } });
-      await qz.print(config, [{ type: 'raw', format: 'plain', data: zplStr }]);
-      return;
-    } catch (qzErr) {
-      console.warn('[printTransportLabelBling] QZ ZPL indisponível:', qzErr.message);
-    }
-  }
-
-  // ── 4. PDF base64: QZ Tray → fallback blob no browser ────────────────────
-  if (b64pdf) {
-    onStatus?.('Conectando à impressora…');
-    let qzOk = false;
-    try {
-      const qz = await qzConnect();
-      const printer = await qz.printers.getDefault();
-      const config = qz.configs.create(printer, {
-        scaleContent: false,
-        colorType: 'blackwhite',
-        rotation: 0,
-        margins: { top: 0, right: 0, bottom: 0, left: 0 },
-      });
-      await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64pdf }]);
-      qzOk = true;
-    } catch (qzErr) {
-      console.warn('[printTransportLabelBling] QZ indisponível:', qzErr.message);
-    }
-    if (qzOk) return;
-    const blob = new Blob([Uint8Array.from(atob(b64pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    onStatus?.('Abrindo etiqueta no navegador…');
-    window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-    return;
-  }
-
-  // ── 5. Fallback URL (relatório legado do Bling ou ZPL download) ──────────
-  if (pdfUrl) { onStatus?.('Abrindo etiqueta no Bling…'); window.open(pdfUrl, '_blank'); return; }
-  if (zplStr) {
-    const blob = new Blob([zplStr], { type: 'text/plain' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = `etiqueta-${blingNfId}.zpl`; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    return;
-  }
-  throw new Error('Etiqueta não disponível — nenhum formato suportado.');
-}
-
-/**
- * Ponto único de impressão de etiqueta de transporte para um pedido.
- * Estratégia: tenta Bling primeiro (qualquer marketplace com NF emitida).
- * Se Bling falhar E o pedido é Mercado Livre → tenta API do ML.
- * Se a API do ML também falhar → a função já abre o navegador como último recurso.
- *
- * @param {object}   order         — documento Firestore do pedido
- * @param {string|null} mlFallbackId — ID do pedido no ML (order.mlOrderId ou numeroPedido)
- * @param {Function} onStatus      — callback de texto de progresso para o UI
- */
-async function printLabelForOrder(order, mlFallbackId, onStatus) {
-  if (order.blingNfId) {
-    try {
-      await printTransportLabelBling(order.blingNfId, onStatus);
-      return; // Bling funcionou — pronto
-    } catch (blingErr) {
-      // Bling não tem a etiqueta de transporte para este marketplace.
-      // Para pedidos do Mercado Livre: fallback para API do ML (que abre no
-      // navegador se a API falhar, usando a URL de impressão do ML).
-      if (mlFallbackId && order.marketplace === 'MERCADO_LIVRE') {
-        onStatus?.('Etiqueta Bling indisponível — buscando via ML…');
-        await printShippingLabel(mlFallbackId, onStatus);
-        return;
-      }
-      throw blingErr; // Outros marketplaces (Shopee, etc.): propaga o erro original
-    }
-  } else if (mlFallbackId) {
-    await printShippingLabel(mlFallbackId, onStatus);
-  } else {
-    throw new Error('Sem etiqueta de transporte disponível para este pedido.');
-  }
-}
-
-/**
- * Imprime etiqueta de transporte do Mercado Livre via QZ Tray.
- * Suporta ZPL (impressoras térmicas) e PDF (impressoras comuns).
- * @param {string} mlOrderId  — número do pedido ML (numeroPedido / mlOrderId do order)
- * @param {Function} onStatus — callback de status para exibir progresso no UI
- */
-async function printShippingLabel(mlOrderId, onStatus) {
-  // ── 1. Busca a etiqueta no backend PRIMEIRO (antes do QZ) ─────────────
-  onStatus?.('Buscando etiqueta no ML…');
-  const token = localStorage.getItem('expedicao_token') || '';
-  const res   = await fetch(`/api/ml/orders/${encodeURIComponent(mlOrderId)}/label`, {
-    headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
-  });
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    // API falhou — abre a página do pedido no ML para impressão manual.
-    // mlWebUrl aponta para mercadolivre.com.br/vendas/{orderId}/detalhe
-    // que SEMPRE existe e tem o botão "Imprimir etiqueta".
-    if (data.mlWebUrl) {
-      onStatus?.('API indisponível — abrindo pedido no ML para impressão manual…');
-      window.open(data.mlWebUrl, '_blank');
-      // Se tiver também URL do envio, abre em segunda aba
-      if (data.mlShipUrl) window.open(data.mlShipUrl, '_blank');
-      return; // não lança erro — usuário vê a página do ML
-    }
-    throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta`);
-  }
-
-  // ── 2. Resolve o PDF/ZPL em memória ───────────────────────────────────
-  let b64pdf = null;
-  let zplStr = null;
-  let pdfUrl = data.pdfUrl || null;
-
-  if (data.format === 'zpl' && data.zpl) {
-    zplStr = data.zpl;
-  } else if (data.format === 'pdf' && data.pdf) {
-    b64pdf = data.pdf;
-  } else if (data.format === 'pdf_url' && data.pdfUrl) {
-    onStatus?.('Baixando PDF…');
-    try {
-      const pdfRes = await fetch(data.pdfUrl);
-      const buf    = await pdfRes.arrayBuffer();
-      b64pdf = btoa(String.fromCharCode(...new Uint8Array(buf)));
-    } catch {
-      // fallback: abre no browser
-    }
-  }
-
-  // ── 3. Tenta imprimir via QZ Tray ─────────────────────────────────────
-  onStatus?.('Conectando à impressora…');
-  let qzOk = false;
-  try {
-    const qz = await qzConnect();
-    const printer = await qz.printers.getDefault();
-
-    if (zplStr) {
-      const config = qz.configs.create(printer, { language: { type: 'ZPL' } });
-      await qz.print(config, [{ type: 'raw', format: 'plain', data: zplStr }]);
-      qzOk = true;
-    } else if (b64pdf) {
-      const config = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
-      await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64pdf }]);
-      qzOk = true;
-    }
-  } catch (qzErr) {
-    console.warn('[printShippingLabel] QZ Tray indisponível:', qzErr.message);
-    // Não lança — cai para fallback browser
-  }
-
-  if (qzOk) return;
-
-  // ── 4. Fallback: abre PDF no browser (sem impressora física) ──────────
-  onStatus?.('Abrindo PDF no navegador…');
-  if (b64pdf) {
-    const blob = new Blob([Uint8Array.from(atob(b64pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
-    const url  = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-    return;
-  }
-  if (pdfUrl) {
-    window.open(pdfUrl, '_blank');
-    return;
-  }
-  if (zplStr) {
-    // ZPL sem QZ Tray: baixa como arquivo .zpl para uso posterior
-    onStatus?.('Baixando arquivo ZPL…');
-    const blob = new Blob([zplStr], { type: 'text/plain' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `etiqueta-${mlOrderId}.zpl`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    return;
-  }
-
-  throw new Error('Etiqueta não disponível — verifique se o pedido tem envio associado no ML.');
-}
+// Etiqueta de transporte: impressa diretamente no Bling (interface web).
+// Não há função aqui — ver CLAUDE.md regra Operacional #1.
 
 async function printBinLabel(orderId, item, onStatus) {
   const qz = await qzConnect();
@@ -891,61 +668,14 @@ function DanfeButton({ blingNfId }) {
   );
 }
 
-// ─── Botão Etiqueta de Transporte (Bling relatório → fallback ML ZPL) ───────
-function ShippingLabelButton({ mlOrderId, numeroPedido, marketplace, blingNfId }) {
-  const [st,  setSt]  = useState(null);
-  const [msg, setMsg] = useState('');
-
-  // Prioridade: Bling (funciona para qualquer marketplace com NF emitida).
-  // Fallback ML: usa API do ML quando não há blingNfId mas temos mlOrderId.
-  const mlFallbackId = mlOrderId || (
-    marketplace === 'MERCADO_LIVRE' && /^\d{10,20}$/.test(String(numeroPedido || ''))
-      ? String(numeroPedido)
-      : null
-  );
-
-  if (!blingNfId && !mlFallbackId) return null;
-
-  async function handle() {
-    setSt('loading'); setMsg('Abrindo…');
-    try {
-      if (blingNfId) {
-        await printTransportLabelBling(blingNfId, m => setMsg(m));
-      } else {
-        await printShippingLabel(mlFallbackId, m => setMsg(m));
-      }
-      setSt('ok'); setMsg('Aberto ✓');
-      setTimeout(() => { setSt(null); setMsg(''); }, 4000);
-    } catch(e) {
-      setSt('err'); setMsg(e.message);
-    }
-  }
-
-  return (
-    <button
-      onClick={handle}
-      disabled={st === 'loading'}
-      className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl border text-sm font-bold transition-all
-        ${st === 'loading' ? 'border-slate-600 bg-slate-800/60 text-slate-500 cursor-wait' :
-          st === 'ok'      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' :
-          st === 'err'     ? 'border-red-500/30 bg-red-500/5 text-red-400' :
-          'border-blue-500/30 bg-blue-500/5 text-blue-400 hover:border-blue-400/60 hover:bg-blue-500/10'}`}
-    >
-      {st === 'loading' ? <><Loader2 size={14} className="animate-spin"/><span className="text-xs font-normal">{msg}</span></> :
-       st === 'ok'      ? <><CircleCheck size={14}/><span>{msg}</span></> :
-       st === 'err'     ? <><span className="text-sm">⚠️</span><span className="text-xs font-normal truncate max-w-[260px]">{msg}</span><span className="ml-auto text-[10px] underline shrink-0" onClick={e=>{e.stopPropagation();setSt(null);}}>tentar</span></> :
-       <><Tag size={14}/> Imprimir Etiqueta de Envio</>}
-    </button>
-  );
-}
+// Etiqueta de transporte: impressa diretamente no Bling (interface web).
+// ShippingLabelButton removido — ver CLAUDE.md regra Operacional #1.
 
 // ─── Modal Separação ──────────────────────────────────────────────────────────
 function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
   // 'idle' | 'printing' | 'ok' | 'err'
   const [danfeSt,  setDanfeSt]  = useState('idle');
-  const [labelSt,  setLabelSt]  = useState('idle');
   const [danfeMsg, setDanfeMsg] = useState('');
-  const [labelMsg, setLabelMsg] = useState('');
   // null = desconhecido, true = QZ disponível, false = QZ indisponível
   const [qzDisp,   setQzDisp]   = useState(null);
 
@@ -954,7 +684,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
     let cancelled = false;
 
     async function autoprint() {
-      // Verifica QZ primeiro; se indisponível, exibe botões manuais
+      // Verifica QZ; se indisponível exibe botão manual
       try { await qzConnect(); } catch {
         if (!cancelled) setQzDisp(false);
         return;
@@ -962,57 +692,21 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
       if (cancelled) return;
       setQzDisp(true);
 
-      const mlFallbackId = order.mlOrderId || (
-        order.marketplace === 'MERCADO_LIVRE' && /^\d{10,20}$/.test(String(order.numeroPedido || ''))
-          ? String(order.numeroPedido) : null
-      );
-
-      // ── Guard: já imprimiu este pedido nesta sessão? ──────────────────────
-      // Evita reimprimir (e gastar etiqueta) se o operador fechar e reabrir o modal.
-      const done = autoPrintDone.get(order.id) || { danfe: false, label: false };
-      if (done.danfe && done.label) {
-        // Ambos impressos — mostra estado 'ok' direto com botões Reimprimir
-        if (!cancelled) {
-          setDanfeSt('ok'); setDanfeMsg('DANFE já impressa');
-          setLabelSt('ok'); setLabelMsg('Etiqueta já impressa');
-        }
+      // Guard: já imprimiu DANFE nesta sessão → não reimprimir
+      const done = autoPrintDone.get(order.id) || { danfe: false };
+      if (done.danfe) {
+        if (!cancelled) { setDanfeSt('ok'); setDanfeMsg('DANFE já impressa'); }
         return;
       }
 
-      // Marca o pedido como em progresso (parcial) para evitar duplo disparo
-      if (!done.danfe) setDanfeSt('printing');
-      else { setDanfeSt('ok'); setDanfeMsg('DANFE já impressa'); }
-      if (!done.label) setLabelSt('printing');
-      else { setLabelSt('ok'); setLabelMsg('Etiqueta já impressa'); }
-
-      await Promise.allSettled([
-        // DANFE ─────────────────────────────────────────────────────────────
-        (async () => {
-          if (done.danfe) return; // já imprimiu
-          try {
-            await printDanfe(order.blingNfId, m => { if (!cancelled) setDanfeMsg(m); });
-            autoPrintDone.set(order.id, { ...autoPrintDone.get(order.id) || {}, danfe: true });
-            if (!cancelled) { setDanfeSt('ok'); setDanfeMsg('DANFE impressa ✓'); }
-          } catch (e) {
-            if (!cancelled) { setDanfeSt('err'); setDanfeMsg(e.message); }
-          }
-        })(),
-        // Etiqueta de transporte ─────────────────────────────────────────────
-        (async () => {
-          if (done.label) return; // já imprimiu
-          if (!order.blingNfId && !mlFallbackId) {
-            if (!cancelled) { setLabelSt('err'); setLabelMsg('Sem etiqueta disponível'); }
-            return;
-          }
-          try {
-            await printLabelForOrder(order, mlFallbackId, m => { if (!cancelled) setLabelMsg(m); });
-            autoPrintDone.set(order.id, { ...autoPrintDone.get(order.id) || {}, label: true });
-            if (!cancelled) { setLabelSt('ok'); setLabelMsg('Etiqueta impressa ✓'); }
-          } catch (e) {
-            if (!cancelled) { setLabelSt('err'); setLabelMsg(e.message); }
-          }
-        })(),
-      ]);
+      setDanfeSt('printing');
+      try {
+        await printDanfe(order.blingNfId, m => { if (!cancelled) setDanfeMsg(m); });
+        autoPrintDone.set(order.id, { danfe: true });
+        if (!cancelled) { setDanfeSt('ok'); setDanfeMsg('DANFE impressa ✓'); }
+      } catch (e) {
+        if (!cancelled) { setDanfeSt('err'); setDanfeMsg(e.message); }
+      }
     }
 
     autoprint();
@@ -1061,11 +755,6 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
     );
   }
 
-  const mlFallbackId = order.mlOrderId || (
-    order.marketplace === 'MERCADO_LIVRE' && /^\d{10,20}$/.test(String(order.numeroPedido || ''))
-      ? String(order.numeroPedido) : null
-  );
-
   async function reprintDanfe() {
     if (!order.blingNfId) return;
     setDanfeSt('printing'); setDanfeMsg('');
@@ -1077,17 +766,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
     }
   }
 
-  async function reprintLabel() {
-    setLabelSt('printing'); setLabelMsg('');
-    try {
-      await printLabelForOrder(order, mlFallbackId, m => setLabelMsg(m));
-      setLabelSt('ok'); setLabelMsg('Etiqueta impressa ✓');
-    } catch (e) {
-      setLabelSt('err'); setLabelMsg(e.message);
-    }
-  }
-
-  const printingActive = danfeSt === 'printing' || labelSt === 'printing';
+  const printingActive = danfeSt === 'printing';
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
@@ -1161,13 +840,6 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
                 fallback={() => { setDanfeSt('idle'); }}
                 onReprint={order.blingNfId ? reprintDanfe : undefined}
               />
-              <PrintStatusRow
-                icon={<Tag size={14} className="shrink-0"/>}
-                label="Etiqueta de Transporte"
-                st={labelSt} msg={labelMsg}
-                fallback={() => { setLabelSt('idle'); }}
-                onReprint={(order.blingNfId || mlFallbackId) ? reprintLabel : undefined}
-              />
             </>
           ) : qzDisp === false ? (
             <>
@@ -1176,10 +848,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
                 <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">1</span>
                 <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">2</span>
-                <div className="flex-1"><ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} blingNfId={order.blingNfId} /></div>
-              </div>
+              {/* Etiqueta de transporte: imprima diretamente no Bling */}
             </>
           ) : null}
         </div>
@@ -1249,13 +918,9 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
         <div className="px-4 pb-1 space-y-2">
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider px-1">Impressões</p>
           <div className="flex items-center gap-2">
-            <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">1</span>
             <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">2</span>
-            <div className="flex-1"><ShippingLabelButton mlOrderId={order.mlOrderId} numeroPedido={order.numeroPedido} marketplace={order.marketplace} blingNfId={order.blingNfId} /></div>
-          </div>
+          {/* Etiqueta de transporte: imprima diretamente no Bling */}
         </div>
         <div className="flex gap-2 p-4 border-t border-white/5">
           <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>

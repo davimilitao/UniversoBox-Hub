@@ -272,6 +272,44 @@ app.get('/bling/debug/nfe/:id', async (req, res, next) => {
   }
 });
 
+// ── TESTE: logisticasinternal/etiquetas/danfes com OAuth2 ────────
+// GET /bling/debug/etiqueta-logistica/:nfId
+// Testa se o endpoint interno do Bling aceita nosso token OAuth2.
+// REMOVER após diagnóstico.
+app.get('/bling/debug/etiqueta-logistica/:nfId', async (req, res, next) => {
+  try {
+    const nfId = String(req.params.nfId).replace(/\D/g, '');
+    const token = await blingEnsureToken();
+
+    // Tenta com www.bling.com.br (endpoint interno descoberto via DevTools)
+    const r = await fetch('https://www.bling.com.br/Api/v3/logisticasinternal/etiquetas/danfes', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ idsNotas: [nfId] }),
+    });
+
+    const ct   = r.headers.get('content-type') || '';
+    const body = await r.text();
+    let parsed = null;
+    try { parsed = JSON.parse(body); } catch {}
+
+    res.json({
+      status:      r.status,
+      ok:          r.ok,
+      contentType: ct,
+      raw:         body.slice(0, 1000),
+      parsed,
+      nfId,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── CLONAR NF → CRIAR PEDIDO ─────────────────────────────────────
 app.post('/bling/clonar', async (req, res, next) => {
   try {
