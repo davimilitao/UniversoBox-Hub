@@ -681,13 +681,8 @@ function EtiquetaButton({ orderId, blingNfId }) {
   async function handle() {
     setSt('loading'); setMsg('Buscando etiqueta…');
     try {
-      const token = localStorage.getItem('expedicao_token') || '';
-      const r = await fetch(`/api/etiqueta-logistica/${orderId}`, {
-        headers: { 'authorization': `Bearer ${token}` },
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      if (d.link) {
+      const d = await api(`/api/etiqueta-logistica/${orderId}`);
+      if (d?.link) {
         window.open(d.link, '_blank', 'noopener,noreferrer');
         setSt('ok'); setMsg('Etiqueta aberta ✓');
         setTimeout(() => { setSt(null); setMsg(''); }, 5000);
