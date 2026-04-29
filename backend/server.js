@@ -6315,14 +6315,19 @@ app.get('/api/ml/orders/:orderId/label', async (req, res, next) => {
       }
     }
 
-    // ── 4. Nada funcionou — retorna URL web do ML como último recurso ──────
-    // O usuário pode clicar para abrir a página de impressão do ML diretamente
-    const mlWebPrintUrl = `https://www.mercadolibre.com.br/envios/label/print?shipmentIds=${shipmentId}&caller=SP&label_type=forward`;
-    console.log(`[ml/label] todas tentativas falharam — fallback URL web: ${mlWebPrintUrl}`);
+    // ── 4. Nada funcionou — retorna links diretos do ML como último recurso ──
+    // • URL de detalhe do pedido: abre a página do pedido no ML donde o
+    //   vendedor clica "Imprimir etiqueta" (sempre funciona, requer login ML)
+    // • URL de envio: página de rastreio do shipment
+    // NOTA: mercadolibre.com.br/envios/label/print NÃO existe no ML Brasil.
+    const mlOrderDetailUrl = `https://www.mercadolivre.com.br/vendas/${orderId}/detalhe`;
+    const mlShipUrl        = `https://www.mercadolivre.com.br/envios/${shipmentId}`;
+    console.log(`[ml/label] todas tentativas falharam — fallback: ${mlOrderDetailUrl}`);
     return res.status(422).json({
       error:      'label_indisponivel',
-      message:    'Não foi possível obter a etiqueta via API. Clique em "Abrir no ML" para imprimir pelo site.',
-      mlWebUrl:   mlWebPrintUrl,
+      message:    'Não foi possível obter a etiqueta via API. Abrindo o pedido no ML para imprimir manualmente.',
+      mlWebUrl:   mlOrderDetailUrl,
+      mlShipUrl,
       shipmentId,
       orderId,
     });
@@ -6380,7 +6385,8 @@ app.get('/api/ml/debug/label/:orderId', async (req, res, next) => {
     res.json({
       orderId, shipmentId,
       shipment: { status: shipData.status, substatus: shipData.substatus, tracking_method: shipData.tracking_method, type: shipData.type, logistic_type: shipData.logistic_type },
-      mlWebPrintUrl: `https://www.mercadolibre.com.br/envios/label/print?shipmentIds=${shipmentId}&caller=SP&label_type=forward`,
+      mlOrderDetailUrl: `https://www.mercadolivre.com.br/vendas/${orderId}/detalhe`,
+      mlShipUrl:        `https://www.mercadolivre.com.br/envios/${shipmentId}`,
       variants: results,
     });
   } catch (err) {
