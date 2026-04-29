@@ -29,6 +29,11 @@ function getTerminalId() {
 }
 const TERMINAL_ID = getTerminalId();
 
+// Guard de auto-impressão: evita reimprimir ao fechar e reabrir o modal.
+// Chave: orderId → { danfe: bool, label: bool }
+// Escopo de sessão — limpa quando a página é recarregada.
+const autoPrintDone = new Map();
+
 async function api(path, opts = {}) {
   const token = localStorage.getItem('expedicao_token') || '';
   const res = await fetch(path, {
@@ -958,24 +963,46 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
           ? String(order.numeroPedido) : null
       );
 
-      setDanfeSt('printing'); setLabelSt('printing');
+      // ── Guard: já imprimiu este pedido nesta sessão? ──────────────────────
+      // Evita reimprimir (e gastar etiqueta) se o operador fechar e reabrir o modal.
+      const done = autoPrintDone.get(order.id) || { danfe: false, label: false };
+      if (done.danfe && done.label) {
+        // Ambos impressos — mostra estado 'ok' direto com botões Reimprimir
+        if (!cancelled) {
+          setDanfeSt('ok'); setDanfeMsg('DANFE já impressa');
+          setLabelSt('ok'); setLabelMsg('Etiqueta já impressa');
+        }
+        return;
+      }
+
+      // Marca o pedido como em progresso (parcial) para evitar duplo disparo
+      if (!done.danfe) setDanfeSt('printing');
+      else { setDanfeSt('ok'); setDanfeMsg('DANFE já impressa'); }
+      if (!done.label) setLabelSt('printing');
+      else { setLabelSt('ok'); setLabelMsg('Etiqueta já impressa'); }
 
       await Promise.allSettled([
+        // DANFE ─────────────────────────────────────────────────────────────
         (async () => {
+          if (done.danfe) return; // já imprimiu
           try {
             await printDanfe(order.blingNfId, m => { if (!cancelled) setDanfeMsg(m); });
+            autoPrintDone.set(order.id, { ...autoPrintDone.get(order.id) || {}, danfe: true });
             if (!cancelled) { setDanfeSt('ok'); setDanfeMsg('DANFE impressa ✓'); }
           } catch (e) {
             if (!cancelled) { setDanfeSt('err'); setDanfeMsg(e.message); }
           }
         })(),
+        // Etiqueta de transporte ─────────────────────────────────────────────
         (async () => {
+          if (done.label) return; // já imprimiu
           if (!order.blingNfId && !mlFallbackId) {
             if (!cancelled) { setLabelSt('err'); setLabelMsg('Sem etiqueta disponível'); }
             return;
           }
           try {
             await printLabelForOrder(order, mlFallbackId, m => { if (!cancelled) setLabelMsg(m); });
+            autoPrintDone.set(order.id, { ...autoPrintDone.get(order.id) || {}, label: true });
             if (!cancelled) { setLabelSt('ok'); setLabelMsg('Etiqueta impressa ✓'); }
           } catch (e) {
             if (!cancelled) { setLabelSt('err'); setLabelMsg(e.message); }
