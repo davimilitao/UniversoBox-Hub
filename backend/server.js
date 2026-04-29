@@ -6148,7 +6148,6 @@ app.post('/api/ml/orders/:orderId/status', async (req, res, next) => {
 app.get('/api/ml/orders/:orderId/label', (req, res) => {
   res.status(410).json({ error: 'removido', message: 'Etiqueta de transporte: imprima pelo Bling.' });
 });
-  try {
 
 
 // ════════════════════════════════════════════════════════════════════════════
