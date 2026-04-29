@@ -7,8 +7,11 @@
  *              + Relatório do dia (aba Expedido)
  *              + Etiqueta de prateleira (ZPL via QZ Tray)
  *              + Logos reais de marketplace
- * @version 4.0.0
- * @date 2026-04-04
+ * @version 4.1.0
+ * @date 2026-04-29
+ * @changelog
+ *   4.1.0 — Adicionado botão "Imprimir Etiqueta no Bling" em ModalSeparado e ModalExpedicao
+ *           com deep link direto para a NF via blingNfId; importado ExternalLink do lucide-react
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -17,6 +20,7 @@ import {
   ScanLine, Printer, PackageCheck, SendHorizonal, CircleCheck,
   BoxesIcon, Truck, ClipboardCheck, Camera, CameraOff,
   BarChart2, Tag, Bell, BellOff, ChevronDown, ChevronUp, Images,
+  ExternalLink,
 } from 'lucide-react';
 import { useOrderNotifier }  from '../../hooks/useOrderNotifier';
 import { useBarcodeCamera }  from '../../hooks/useBarcodeCamera';
@@ -848,7 +852,18 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
                 <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">1</span>
                 <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
               </div>
-              {/* Etiqueta de transporte: imprima diretamente no Bling */}
+              {order.blingNfId && (
+                <a
+                  href={`https://www.bling.com.br/notas.fiscais.edicao.php#id=${order.blingNfId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/8 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500/50 transition-all text-xs font-bold"
+                >
+                  <ExternalLink size={13} className="shrink-0"/>
+                  <span>Imprimir Etiqueta no Bling</span>
+                  <ChevronRight size={13} className="ml-auto shrink-0 opacity-60"/>
+                </a>
+              )}
             </>
           ) : null}
         </div>
@@ -920,7 +935,18 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
           <div className="flex items-center gap-2">
             <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
           </div>
-          {/* Etiqueta de transporte: imprima diretamente no Bling */}
+          {order.blingNfId && (
+            <a
+              href={`https://www.bling.com.br/notas.fiscais.edicao.php#id=${order.blingNfId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/8 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500/50 transition-all text-xs font-bold"
+            >
+              <ExternalLink size={13} className="shrink-0"/>
+              <span>Imprimir Etiqueta no Bling</span>
+              <ChevronRight size={13} className="ml-auto shrink-0 opacity-60"/>
+            </a>
+          )}
         </div>
         <div className="flex gap-2 p-4 border-t border-white/5">
           <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>
