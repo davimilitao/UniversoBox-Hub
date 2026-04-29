@@ -27,6 +27,13 @@ npm run build   # Builds frontend → backend/public/spa, then installs backend 
 npm start       # Starts backend serving SPA at /spa
 ```
 
+**OBRIGATÓRIO antes de push que toque em `package.json`, `server.js` ou qualquer arquivo de config de build:**
+```bash
+# Na raiz do projeto — simula exatamente o que o Railway executa
+npm run build
+# Se falhar aqui, vai falhar no Railway. Corrigir antes de subir.
+```
+
 ## Architecture
 
 **Monorepo:** `/backend` (Node.js + Express) + `/frontend` (React + Vite SPA)
