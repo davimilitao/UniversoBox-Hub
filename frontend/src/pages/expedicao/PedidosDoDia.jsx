@@ -20,7 +20,6 @@ import {
   ScanLine, Printer, PackageCheck, SendHorizonal, CircleCheck,
   BoxesIcon, Truck, ClipboardCheck, Camera, CameraOff,
   BarChart2, Tag, Bell, BellOff, ChevronDown, ChevronUp, Images,
-  ExternalLink,
 } from 'lucide-react';
 import { useOrderNotifier }  from '../../hooks/useOrderNotifier';
 import { useBarcodeCamera }  from '../../hooks/useBarcodeCamera';
@@ -672,8 +671,66 @@ function DanfeButton({ blingNfId }) {
   );
 }
 
-// Etiqueta de transporte: impressa diretamente no Bling (interface web).
-// ShippingLabelButton removido — ver CLAUDE.md regra Operacional #1.
+// ─── Botão Etiqueta de Transporte ────────────────────────────────────────────
+// Usa GET /api/etiqueta-logistica/:orderId → Bling /logisticas/etiquetas (OAuth2)
+// Retorna link PDF → abre em nova aba. Fallback: abre NF no Bling manualmente.
+function EtiquetaButton({ orderId, blingNfId }) {
+  const [st,  setSt]  = useState(null); // null | loading | ok | err
+  const [msg, setMsg] = useState('');
+
+  async function handle() {
+    setSt('loading'); setMsg('Buscando etiqueta…');
+    try {
+      const token = localStorage.getItem('expedicao_token') || '';
+      const r = await fetch(`/api/etiqueta-logistica/${orderId}`, {
+        headers: { 'authorization': `Bearer ${token}` },
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      if (d.link) {
+        window.open(d.link, '_blank', 'noopener,noreferrer');
+        setSt('ok'); setMsg('Etiqueta aberta ✓');
+        setTimeout(() => { setSt(null); setMsg(''); }, 5000);
+      } else {
+        throw new Error('Link não retornado pelo Bling');
+      }
+    } catch (e) {
+      setSt('err'); setMsg(e.message);
+    }
+  }
+
+  function handleFallback(e) {
+    e.stopPropagation();
+    window.open(`https://www.bling.com.br/notas.fiscais.php#edit/${blingNfId}`, '_blank', 'noopener,noreferrer');
+    setSt(null); setMsg('');
+  }
+
+  if (!orderId) return null;
+
+  return (
+    <button onClick={handle} disabled={st === 'loading'}
+      className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl border text-sm font-bold transition-all
+        ${st === 'loading' ? 'border-slate-600 bg-slate-800/60 text-slate-500 cursor-wait' :
+          st === 'ok'      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' :
+          st === 'err'     ? 'border-red-500/30 bg-red-500/5 text-red-400' :
+          'border-dashed border-blue-500/40 bg-blue-500/5 text-blue-400 hover:border-blue-500/60 hover:bg-blue-500/10'}`}>
+      {st === 'loading' ? <><Loader2 size={14} className="animate-spin"/><span className="text-xs font-normal">{msg}</span></> :
+       st === 'ok'      ? <><CircleCheck size={14}/><span>{msg}</span></> :
+       st === 'err'     ? (
+         <>
+           <span className="text-sm">⚠️</span>
+           <span className="text-xs font-normal truncate flex-1">{msg}</span>
+           {blingNfId && (
+             <span className="ml-auto text-[10px] underline shrink-0" onClick={handleFallback}>
+               abrir no Bling
+             </span>
+           )}
+         </>
+       ) :
+       <><Tag size={14}/> Etiqueta de Transporte</>}
+    </button>
+  );
+}
 
 // ─── Modal Separação ──────────────────────────────────────────────────────────
 function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
@@ -844,6 +901,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
                 fallback={() => { setDanfeSt('idle'); }}
                 onReprint={order.blingNfId ? reprintDanfe : undefined}
               />
+              <EtiquetaButton orderId={order.id} blingNfId={order.blingNfId} />
             </>
           ) : qzDisp === false ? (
             <>
@@ -852,18 +910,10 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
                 <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">1</span>
                 <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
               </div>
-              {order.blingNfId && (
-                <a
-                  href={`https://www.bling.com.br/notas.fiscais.php#edit/${order.blingNfId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/8 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500/50 transition-all text-xs font-bold"
-                >
-                  <ExternalLink size={13} className="shrink-0"/>
-                  <span>Imprimir Etiqueta no Bling</span>
-                  <ChevronRight size={13} className="ml-auto shrink-0 opacity-60"/>
-                </a>
-              )}
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[10px] font-black text-blue-400">2</span>
+                <div className="flex-1"><EtiquetaButton orderId={order.id} blingNfId={order.blingNfId} /></div>
+              </div>
             </>
           ) : null}
         </div>
@@ -935,18 +985,7 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
           <div className="flex items-center gap-2">
             <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
           </div>
-          {order.blingNfId && (
-            <a
-              href={`https://www.bling.com.br/notas.fiscais.php#edit/${order.blingNfId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/8 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500/50 transition-all text-xs font-bold"
-            >
-              <ExternalLink size={13} className="shrink-0"/>
-              <span>Imprimir Etiqueta no Bling</span>
-              <ChevronRight size={13} className="ml-auto shrink-0 opacity-60"/>
-            </a>
-          )}
+          <EtiquetaButton orderId={order.id} blingNfId={order.blingNfId} />
         </div>
         <div className="flex gap-2 p-4 border-t border-white/5">
           <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>

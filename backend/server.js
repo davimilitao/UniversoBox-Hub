@@ -6141,12 +6141,95 @@ app.post('/api/ml/orders/:orderId/status', async (req, res, next) => {
 });
 
 
-// GET /api/ml/orders/:orderId/label — REMOVIDO
-// Etiqueta de transporte é impressa diretamente no Bling (interface web).
-// O endpoint interno logisticasinternal/etiquetas/danfes exige sessão web,
-// não aceita OAuth2. Ver regra em CLAUDE.md.
+// GET /api/ml/orders/:orderId/label — REMOVIDO (endpoint interno Bling exige sessão web)
 app.get('/api/ml/orders/:orderId/label', (req, res) => {
-  res.status(410).json({ error: 'removido', message: 'Etiqueta de transporte: imprima pelo Bling.' });
+  res.status(410).json({ error: 'removido', message: 'Use GET /api/etiqueta-logistica/:orderId' });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// GET /api/etiqueta-logistica/:orderId
+// Busca etiqueta de transporte via API oficial Bling OAuth2.
+// Fluxo: orderId → numeroPedido → vendaId (GET /pedidos/vendas) →
+//        link etiqueta PDF (GET /logisticas/etiquetas)
+// ════════════════════════════════════════════════════════════════════════════
+app.get('/api/etiqueta-logistica/:orderId', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const orderId = safeTrim(req.params.orderId);
+    const formato = (req.query.formato || 'PDF').toUpperCase(); // PDF | ZPL
+
+    // 1. Busca o pedido no Firestore para obter numeroPedido
+    const snap = await db.collection('orders').doc(orderId).get();
+    if (!snap.exists) return res.status(404).json({ error: 'Pedido não encontrado', orderId });
+
+    const order = snap.data();
+    const numeroPedido = order.numeroPedido;
+    const blingNfId    = order.blingNfId;
+
+    if (!numeroPedido && !blingNfId) {
+      return res.status(422).json({ error: 'Pedido sem numeroPedido e sem blingNfId — não é possível localizar etiqueta.' });
+    }
+
+    // 2. Busca pedido de venda no Bling pelo número do pedido da loja
+    //    Tenta com numeroPedido primeiro; fallback: busca por data de hoje
+    let vendaId = null;
+    const diagnostico = {};
+
+    if (numeroPedido) {
+      try {
+        const enc = encodeURIComponent(numeroPedido);
+        const r = await blingFetch(`/pedidos/vendas?numerosLojas[]=${enc}&pagina=1&limite=10`);
+        diagnostico.pedidosVendas_numerosLojas = { count: r?.data?.length, primeiro: r?.data?.[0]?.id };
+        if (r?.data?.length > 0) {
+          vendaId = r.data[0].id;
+        }
+      } catch (e) {
+        diagnostico.pedidosVendas_err = e.message;
+      }
+    }
+
+    // Fallback: busca vendas do dia e filtra por notaFiscal.id
+    if (!vendaId && blingNfId) {
+      try {
+        const today = getTodayBR().replace(/-/g, '/');
+        const r = await blingFetch(`/pedidos/vendas?dataInicial=${today}&dataFinal=${today}&pagina=1&limite=100`);
+        diagnostico.pedidosVendas_hoje = { count: r?.data?.length };
+        const match = (r?.data || []).find(v => String(v.notaFiscal?.id) === String(blingNfId));
+        if (match) { vendaId = match.id; diagnostico.vendaId_via_nf = vendaId; }
+      } catch (e) {
+        diagnostico.pedidosVendas_hoje_err = e.message;
+      }
+    }
+
+    if (!vendaId) {
+      return res.status(404).json({
+        error: 'Não foi possível localizar o pedido de venda no Bling para obter a etiqueta.',
+        diagnostico,
+        dica: 'Verifique se numeroPedido salvo no order corresponde ao numeroPedidoLoja no Bling.',
+      });
+    }
+
+    // 3. Busca etiqueta via API oficial OAuth2
+    const etiqResp = await blingFetch(`/logisticas/etiquetas?formato=${formato}&idsVendas[]=${vendaId}`);
+    diagnostico.etiqueta = { raw: etiqResp };
+
+    const etiquetas = etiqResp?.data || [];
+    if (!etiquetas.length) {
+      return res.status(404).json({
+        error: 'Bling não retornou etiqueta para esta venda.',
+        vendaId,
+        diagnostico,
+      });
+    }
+
+    const link = etiquetas[0]?.link;
+    if (!link) {
+      return res.status(404).json({ error: 'Etiqueta sem link', vendaId, data: etiquetas, diagnostico });
+    }
+
+    res.json({ ok: true, link, formato, vendaId, orderId, diagnostico });
+  } catch (err) {
+    next(err);
+  }
 });
 
 
