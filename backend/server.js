@@ -6367,58 +6367,57 @@ app.get('/api/ml/debug/orders', async (req, res, next) => {
     const me    = await meRes.json();
     const uid   = me.id;
 
-    // ── Busca todos os ready_to_ship e seus shipments em paralelo ────────
-    const nowBR     = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-    const todayISO  = nowBR.toISOString().slice(0, 10);
-    const tomorrowISO = new Date(nowBR.getTime() + 86400000).toISOString().slice(0, 10);
-
-    // Pega todos os ready_to_ship (total=49, cabe em limit=100)
-    const rtsRes = await fetchWithTimeout(
-      `${ML_API_BASE}/orders/search?seller=${uid}&shipping.status=ready_to_ship&sort=date_desc&limit=100`,
-      { headers }, 15000
-    );
-    const rtsRaw  = await rtsRes.json();
-    const rtsOrders = rtsRaw.results || [];
-
-    // Busca todos os shipments em paralelo
-    const shipments = await Promise.all(rtsOrders.map(async o => {
-      if (!o.shipping?.id) return { orderId: o.id, error: 'no_shipping_id' };
-      const sr = await fetchWithTimeout(`${ML_API_BASE}/shipments/${o.shipping.id}`, { headers }, 8000).catch(() => null);
-      if (!sr?.ok) return { orderId: o.id, shipmentId: o.shipping.id, error: `http_${sr?.status}` };
-      const s = await sr.json().catch(() => null);
-      return {
-        orderId:      o.id,
-        shipmentId:   o.shipping.id,
-        logisticType: s?.logistic_type || null,
-        shipStatus:   s?.status || null,
-        substatus:    s?.substatus || null,
-        deliveryFrom: s?.shipping_option?.desired_promised_delivery?.from || null,
-        cutoff:       s?.drop_off?.cutoff_time || null,
-        authCode:     s?.authorization_code || s?.drop_off?.code || null,
-        buyer:        o.buyer?.nickname,
-        total:        o.total_amount,
-      };
+    // ── Testa todos os status possíveis + endpoint de shipments direto ───
+    const BASE = `${ML_API_BASE}/orders/search?seller=${uid}&sort=date_desc&limit=5`;
+    const statusTests = [
+      'ready_to_ship','handling','pending','to_be_agreed',
+      'shipped','delivered','not_delivered','cancelled',
+      'waiting_for_label','almost_expired',
+    ];
+    const statusCounts = {};
+    await Promise.all(statusTests.map(async s => {
+      const r   = await fetchWithTimeout(`${BASE}&shipping.status=${s}`, { headers }, 8000).catch(() => null);
+      const raw = r?.ok ? await r.json().catch(() => null) : null;
+      statusCounts[s] = raw?.paging?.total ?? 'err';
     }));
 
-    // Agrupa para visualização rápida
-    const byLogistic = {};
-    const byDeliveryDate = {};
-    for (const s of shipments) {
-      const lt  = s.logisticType || 'unknown';
-      const dd  = s.deliveryFrom ? s.deliveryFrom.slice(0, 10) : 'unknown';
-      byLogistic[lt]     = (byLogistic[lt]     || 0) + 1;
-      byDeliveryDate[dd] = (byDeliveryDate[dd] || 0) + 1;
+    // Tenta endpoint de shipments do usuário (pode existir)
+    const shipEndpoints = [
+      `/users/${uid}/shipments?status=ready_to_ship&limit=5`,
+      `/users/${uid}/shipments?limit=5`,
+      `/shipments/search?seller_id=${uid}&status=ready_to_ship&limit=5`,
+    ];
+    const shipTests = {};
+    await Promise.all(shipEndpoints.map(async path => {
+      const r   = await fetchWithTimeout(`${ML_API_BASE}${path}`, { headers }, 8000).catch(() => null);
+      const raw = r?.ok ? await r.json().catch(() => null) : null;
+      shipTests[path] = raw?.paging?.total ?? raw?.error ?? (r?.status || 'err');
+    }));
+
+    // Pega os 5 pedidos mais recentes sem filtro e mostra o shipping.id de cada
+    const recentRes = await fetchWithTimeout(`${ML_API_BASE}/orders/search?seller=${uid}&sort=date_desc&limit=5`, { headers }, 8000);
+    const recent    = await recentRes.json();
+    const recentOrders = (recent.results || []).map(o => ({
+      id: o.id, shippingId: o.shipping?.id, orderStatus: o.status, dateCreated: o.date_created,
+    }));
+
+    // Busca o shipment do primeiro pedido recente
+    let shipSample = null;
+    if (recentOrders[0]?.shippingId) {
+      const sr = await fetchWithTimeout(`${ML_API_BASE}/shipments/${recentOrders[0].shippingId}`, { headers }, 8000).catch(() => null);
+      if (sr?.ok) {
+        const s = await sr.json().catch(() => null);
+        shipSample = { status: s?.status, substatus: s?.substatus, logistic_type: s?.logistic_type,
+          desired_promised_delivery: s?.shipping_option?.desired_promised_delivery };
+      }
     }
 
     res.json({
-      sellerId:       uid,
-      sellerNick:     me.nickname,
-      today:          todayISO,
-      tomorrow:       tomorrowISO,
-      totalReadyToShip: rtsOrders.length,
-      byLogisticType: byLogistic,   // ← quantos Agência vs Full
-      byDeliveryDate: byDeliveryDate, // ← agrupamento por data de entrega
-      shipments,                    // ← lista completa para inspeção
+      sellerId: uid, sellerNick: me.nickname,
+      statusCounts,   // ← qual shipping.status tem quantos pedidos
+      shipEndpoints: shipTests, // ← se /users/{uid}/shipments funciona
+      recentOrders,   // ← 5 mais recentes com shippingId
+      shipSample,     // ← status real do shipment mais recente
     });
   } catch (err) {
     console.error('[GET /api/ml/debug/orders]', err.message);
