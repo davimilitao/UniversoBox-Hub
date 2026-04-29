@@ -6367,13 +6367,17 @@ app.get('/api/ml/debug/orders', async (req, res, next) => {
     const me    = await meRes.json();
     const uid   = me.id;
 
-    const desde = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
-
-    // Busca ampla — sem filtro de status — últimos 45 dias, pagos
-    const url = `${ML_API_BASE}/orders/search?seller=${uid}&order.status=paid&order.date_created.from=${desde}T00:00:00.000-03:00&sort=date_desc&limit=100`;
+    // Busca mais simples possível — sem filtros — só seller + limit
+    // Se retornar 0, o problema é autenticação ou seller ID
+    const url = `${ML_API_BASE}/orders/search?seller=${uid}&sort=date_desc&limit=50`;
     const r   = await fetchWithTimeout(url, { headers }, 15000);
     const raw = await r.json();
     const orders = raw.results || [];
+
+    // Loga resposta bruta para diagnóstico no Railway
+    console.log('[debug/orders] paging:', JSON.stringify(raw.paging));
+    console.log('[debug/orders] raw keys:', Object.keys(raw));
+    if (raw.error) console.log('[debug/orders] ML error:', raw.error, raw.message);
 
     // Agrupa por combinação shipping.status + logistic_type
     const groups = {};
