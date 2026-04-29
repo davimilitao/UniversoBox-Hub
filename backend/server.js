@@ -6164,9 +6164,9 @@ app.get('/api/ml/orders/:orderId/label', async (req, res, next) => {
       return null;
     }
 
-    async function tryLabelEndpoint(url, label) {
+    async function tryLabelEndpoint(url, label, extraHeaders = {}) {
       console.log(`[ml/label] tentando (${label}): ${url}`);
-      const r  = await fetchWithTimeout(url, { headers }, 12000);
+      const r  = await fetchWithTimeout(url, { headers: { ...headers, ...extraHeaders } }, 12000);
       const ct = r.headers.get('content-type') || '';
       const st = r.status;
       console.log(`[ml/label] (${label}) status=${st} ct=${ct}`);
@@ -6201,14 +6201,33 @@ app.get('/api/ml/orders/:orderId/label', async (req, res, next) => {
         return { format: 'zpl', zpl: raw, via: label };
       }
 
-      // JSON — extrai URL ou ZPL inline
+      // JSON — extrai URL, ZPL ou PDF base64
       let data = {};
       try { data = JSON.parse(raw); } catch {}
 
       // ZPL inline no JSON
-      const zplInline = data?.zpl || data?.content || data?.label || data?.data?.zpl;
+      const zplInline = data?.zpl || data?.label || data?.data?.zpl;
       if (typeof zplInline === 'string' && zplInline.includes('^XA')) {
         return { format: 'zpl', zpl: zplInline, via: label };
+      }
+
+      // PDF base64 inline no JSON — ML FLEX retorna { type:'pdf', content:'base64...' }
+      // também testa campos alternativos que a API pode usar
+      const base64Candidates = [
+        data?.content, data?.pdf, data?.data?.content, data?.data?.pdf,
+        // array: [{ type:'pdf', content:'...' }]
+        Array.isArray(data) && data[0]?.content,
+        Array.isArray(data) && data[0]?.pdf,
+      ].filter(v => typeof v === 'string' && v.length > 200);
+
+      for (const candidate of base64Candidates) {
+        try {
+          const buf = Buffer.from(candidate, 'base64');
+          if (buf.slice(0, 4).toString('ascii') === '%PDF') {
+            console.log(`[ml/label] (${label}) PDF base64 detectado no campo JSON (${candidate.length} chars)`);
+            return { format: 'pdf', pdf: candidate, via: `${label}+json_base64` };
+          }
+        } catch {}
       }
 
       // URL de PDF no JSON (várias formas que o ML pode retornar)
@@ -6265,24 +6284,31 @@ app.get('/api/ml/orders/:orderId/label', async (req, res, next) => {
     }
 
     // ── 3. Cascata de endpoints de etiqueta ──────────────────────────────
-    // IMPORTANTE: /shipments/{id}/labels NÃO usa shipment_ids= (isso é para lote via /shipments/labels)
+    // Cada entrada: [url, label, extraHeaders?]
+    // ML FLEX (self_service) responde melhor com Accept:application/pdf explícito.
+    // pdf2 retorna PDF com mais infos; zpl2 retorna ZPL para impressoras térmicas.
+    const PDF_ACCEPT  = { Accept: 'application/pdf' };
+    const ZPL_ACCEPT  = { Accept: 'application/zpl' };
+    const JSON_ACCEPT = { Accept: 'application/json' };
+
     const attempts = [
-      // individual sem parâmetro extra
-      [`${ML_API_BASE}/shipments/${shipmentId}/labels`, 'individual_noparams'],
-      // individual ZPL
-      [`${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=zpl2`, 'individual_zpl2'],
-      // individual PDF
-      [`${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf2`, 'individual_pdf2'],
-      // individual PDF (sem 2)
-      [`${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf`, 'individual_pdf'],
+      // individual — com Accept: application/pdf (ML FLEX responde melhor assim)
+      [`${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf2`,  'individual_pdf2_accept',    PDF_ACCEPT],
+      [`${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=pdf`,   'individual_pdf_accept',     PDF_ACCEPT],
+      // individual — ZPL (impressoras térmicas)
+      [`${ML_API_BASE}/shipments/${shipmentId}/labels?response_type=zpl2`,  'individual_zpl2_accept',    ZPL_ACCEPT],
+      // individual sem parâmetro, Accept JSON (alguns subtipos retornam JSON c/ URL)
+      [`${ML_API_BASE}/shipments/${shipmentId}/labels`,                      'individual_json',           JSON_ACCEPT],
+      // individual sem Accept (fallback genérico)
+      [`${ML_API_BASE}/shipments/${shipmentId}/labels`,                      'individual_noparams',       {}],
       // endpoint de lote com 1 ID
-      [`${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}&response_type=zpl2`, 'batch_zpl2'],
-      [`${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}&response_type=pdf2`, 'batch_pdf2'],
-      [`${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}`, 'batch_noparams'],
+      [`${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}&response_type=pdf2`,  'batch_pdf2',    PDF_ACCEPT],
+      [`${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}&response_type=zpl2`,  'batch_zpl2',    ZPL_ACCEPT],
+      [`${ML_API_BASE}/shipments/labels?shipment_ids=${shipmentId}`,                      'batch_noparams', {}],
     ];
 
-    for (const [url, label] of attempts) {
-      const result = await tryLabelEndpoint(url, label);
+    for (const [url, label, extraHdrs] of attempts) {
+      const result = await tryLabelEndpoint(url, label, extraHdrs || {});
       if (result) {
         console.log(`[ml/label] ✓ sucesso via (${result.via}) format=${result.format}`);
         return res.json({ ok: true, ...result, shipmentId, orderId });

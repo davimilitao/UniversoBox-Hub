@@ -287,6 +287,39 @@ async function printTransportLabelBling(blingNfId, onStatus) {
 }
 
 /**
+ * Ponto único de impressão de etiqueta de transporte para um pedido.
+ * Estratégia: tenta Bling primeiro (qualquer marketplace com NF emitida).
+ * Se Bling falhar E o pedido é Mercado Livre → tenta API do ML.
+ * Se a API do ML também falhar → a função já abre o navegador como último recurso.
+ *
+ * @param {object}   order         — documento Firestore do pedido
+ * @param {string|null} mlFallbackId — ID do pedido no ML (order.mlOrderId ou numeroPedido)
+ * @param {Function} onStatus      — callback de texto de progresso para o UI
+ */
+async function printLabelForOrder(order, mlFallbackId, onStatus) {
+  if (order.blingNfId) {
+    try {
+      await printTransportLabelBling(order.blingNfId, onStatus);
+      return; // Bling funcionou — pronto
+    } catch (blingErr) {
+      // Bling não tem a etiqueta de transporte para este marketplace.
+      // Para pedidos do Mercado Livre: fallback para API do ML (que abre no
+      // navegador se a API falhar, usando a URL de impressão do ML).
+      if (mlFallbackId && order.marketplace === 'MERCADO_LIVRE') {
+        onStatus?.('Etiqueta Bling indisponível — buscando via ML…');
+        await printShippingLabel(mlFallbackId, onStatus);
+        return;
+      }
+      throw blingErr; // Outros marketplaces (Shopee, etc.): propaga o erro original
+    }
+  } else if (mlFallbackId) {
+    await printShippingLabel(mlFallbackId, onStatus);
+  } else {
+    throw new Error('Sem etiqueta de transporte disponível para este pedido.');
+  }
+}
+
+/**
  * Imprime etiqueta de transporte do Mercado Livre via QZ Tray.
  * Suporta ZPL (impressoras térmicas) e PDF (impressoras comuns).
  * @param {string} mlOrderId  — número do pedido ML (numeroPedido / mlOrderId do order)
@@ -942,11 +975,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
             return;
           }
           try {
-            if (order.blingNfId) {
-              await printTransportLabelBling(order.blingNfId, m => { if (!cancelled) setLabelMsg(m); });
-            } else {
-              await printShippingLabel(mlFallbackId, m => { if (!cancelled) setLabelMsg(m); });
-            }
+            await printLabelForOrder(order, mlFallbackId, m => { if (!cancelled) setLabelMsg(m); });
             if (!cancelled) { setLabelSt('ok'); setLabelMsg('Etiqueta impressa ✓'); }
           } catch (e) {
             if (!cancelled) { setLabelSt('err'); setLabelMsg(e.message); }
@@ -1020,13 +1049,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
   async function reprintLabel() {
     setLabelSt('printing'); setLabelMsg('');
     try {
-      if (order.blingNfId) {
-        await printTransportLabelBling(order.blingNfId, m => setLabelMsg(m));
-      } else if (mlFallbackId) {
-        await printShippingLabel(mlFallbackId, m => setLabelMsg(m));
-      } else {
-        throw new Error('Sem etiqueta disponível');
-      }
+      await printLabelForOrder(order, mlFallbackId, m => setLabelMsg(m));
       setLabelSt('ok'); setLabelMsg('Etiqueta impressa ✓');
     } catch (e) {
       setLabelSt('err'); setLabelMsg(e.message);
