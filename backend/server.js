@@ -6367,42 +6367,58 @@ app.get('/api/ml/debug/orders', async (req, res, next) => {
     const me    = await meRes.json();
     const uid   = me.id;
 
-    // ── Testa múltiplos filtros em paralelo para descobrir quais funcionam ──
-    const BASE = `${ML_API_BASE}/orders/search?seller=${uid}&sort=date_desc&limit=10`;
-    const testQueries = [
-      { name: 'sem_filtro',              url: `${BASE}` },
-      { name: 'status_paid',             url: `${BASE}&order.status=paid` },
-      { name: 'shipping_ready_to_ship',  url: `${BASE}&shipping.status=ready_to_ship` },
-      { name: 'shipping_shipped',        url: `${BASE}&shipping.status=shipped` },
-      { name: 'shipping_delivered',      url: `${BASE}&shipping.status=delivered` },
-      { name: 'logistic_cross_docking',  url: `${BASE}&shipping.logistic_type=cross_docking` },
-      { name: 'logistic_fulfillment',    url: `${BASE}&shipping.logistic_type=fulfillment` },
-      { name: 'logistic_flex',           url: `${BASE}&shipping.logistic_type=not_specified` },
-      { name: 'ready_cross_docking',     url: `${BASE}&shipping.status=ready_to_ship&shipping.logistic_type=cross_docking` },
-      { name: 'ready_fulfillment',       url: `${BASE}&shipping.status=ready_to_ship&shipping.logistic_type=fulfillment` },
-    ];
+    // ── Busca todos os ready_to_ship e seus shipments em paralelo ────────
+    const nowBR     = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    const todayISO  = nowBR.toISOString().slice(0, 10);
+    const tomorrowISO = new Date(nowBR.getTime() + 86400000).toISOString().slice(0, 10);
 
-    const filterResults = await Promise.all(testQueries.map(async q => {
-      const r   = await fetchWithTimeout(q.url, { headers }, 10000).catch(() => null);
-      const raw = r?.ok ? await r.json().catch(() => null) : null;
+    // Pega todos os ready_to_ship (total=49, cabe em limit=100)
+    const rtsRes = await fetchWithTimeout(
+      `${ML_API_BASE}/orders/search?seller=${uid}&shipping.status=ready_to_ship&sort=date_desc&limit=100`,
+      { headers }, 15000
+    );
+    const rtsRaw  = await rtsRes.json();
+    const rtsOrders = rtsRaw.results || [];
+
+    // Busca todos os shipments em paralelo
+    const shipments = await Promise.all(rtsOrders.map(async o => {
+      if (!o.shipping?.id) return { orderId: o.id, error: 'no_shipping_id' };
+      const sr = await fetchWithTimeout(`${ML_API_BASE}/shipments/${o.shipping.id}`, { headers }, 8000).catch(() => null);
+      if (!sr?.ok) return { orderId: o.id, shipmentId: o.shipping.id, error: `http_${sr?.status}` };
+      const s = await sr.json().catch(() => null);
       return {
-        name:        q.name,
-        total:       raw?.paging?.total ?? 'ERROR',
-        fetched:     (raw?.results || []).length,
-        firstOrder:  raw?.results?.[0] ? {
-          id:          raw.results[0].id,
-          shippingId:  raw.results[0].shipping?.id,
-          shippingFields: Object.keys(raw.results[0].shipping || {}),
-        } : null,
-        error: raw?.error || null,
+        orderId:      o.id,
+        shipmentId:   o.shipping.id,
+        logisticType: s?.logistic_type || null,
+        shipStatus:   s?.status || null,
+        substatus:    s?.substatus || null,
+        deliveryFrom: s?.shipping_option?.desired_promised_delivery?.from || null,
+        cutoff:       s?.drop_off?.cutoff_time || null,
+        authCode:     s?.authorization_code || s?.drop_off?.code || null,
+        buyer:        o.buyer?.nickname,
+        total:        o.total_amount,
       };
     }));
 
+    // Agrupa para visualização rápida
+    const byLogistic = {};
+    const byDeliveryDate = {};
+    for (const s of shipments) {
+      const lt  = s.logisticType || 'unknown';
+      const dd  = s.deliveryFrom ? s.deliveryFrom.slice(0, 10) : 'unknown';
+      byLogistic[lt]     = (byLogistic[lt]     || 0) + 1;
+      byDeliveryDate[dd] = (byDeliveryDate[dd] || 0) + 1;
+    }
+
     res.json({
-      sellerId:     uid,
-      sellerNick:   me.nickname,
-      filterResults,   // ← ver quais filtros retornam quantos resultados
-      shipmentSample: null, // já temos do teste anterior
+      sellerId:       uid,
+      sellerNick:     me.nickname,
+      today:          todayISO,
+      tomorrow:       tomorrowISO,
+      totalReadyToShip: rtsOrders.length,
+      byLogisticType: byLogistic,   // ← quantos Agência vs Full
+      byDeliveryDate: byDeliveryDate, // ← agrupamento por data de entrega
+      shipments,                    // ← lista completa para inspeção
     });
   } catch (err) {
     console.error('[GET /api/ml/debug/orders]', err.message);
