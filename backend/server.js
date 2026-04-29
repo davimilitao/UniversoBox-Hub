@@ -6354,9 +6354,9 @@ app.get('/api/ml/debug/label/:orderId', async (req, res, next) => {
 
 // ════════════════════════════════════════════════════════════════════════════
 // GET /api/ml/debug/orders
-// Retorna campos brutos dos primeiros 3 pedidos cross_docking paid —
-// usado para mapear quais campos ML usa para agrupar "Amanhã" / "Próximos".
-// REMOVER após diagnóstico.
+// Mapeia TODOS os valores reais de shipping.status + logistic_type dos últimos
+// 45 dias — mostra contagem por combinação + 1 exemplo de cada grupo.
+// Fase 1 do plano: descobrir quais status correspondem a cada tab do ML.
 // ════════════════════════════════════════════════════════════════════════════
 app.get('/api/ml/debug/orders', async (req, res, next) => {
   try {
@@ -6367,50 +6367,71 @@ app.get('/api/ml/debug/orders', async (req, res, next) => {
     const me    = await meRes.json();
     const uid   = me.id;
 
-    // Busca pedidos cross_docking pagos — os que o ML chama de "Próximos dias"
-    const url = `${ML_API_BASE}/orders/search?seller=${uid}&order.status=paid&shipping.logistic_type=cross_docking&sort=date_desc&limit=5`;
-    const r   = await fetchWithTimeout(url, { headers }, 12000);
+    const desde = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
+
+    // Busca ampla — sem filtro de status — últimos 45 dias, pagos
+    const url = `${ML_API_BASE}/orders/search?seller=${uid}&order.status=paid&order.date_created.from=${desde}T00:00:00.000-03:00&sort=date_desc&limit=100`;
+    const r   = await fetchWithTimeout(url, { headers }, 15000);
     const raw = await r.json();
     const orders = raw.results || [];
 
-    // Para cada pedido, busca também o shipment completo
-    const detailed = await Promise.all(orders.slice(0, 3).map(async o => {
-      let shipment = null;
-      if (o.shipping?.id) {
-        const sr = await fetchWithTimeout(`${ML_API_BASE}/shipments/${o.shipping.id}`, { headers }, 8000).catch(() => null);
-        if (sr?.ok) shipment = await sr.json().catch(() => null);
+    // Agrupa por combinação shipping.status + logistic_type
+    const groups = {};
+    for (const o of orders) {
+      const ss  = o.shipping?.status          || 'null';
+      const sub = o.shipping?.substatus       || 'null';
+      const lt  = o.shipping?.logistic_type   || 'null';
+      const key = `${ss} | ${lt} | substatus:${sub}`;
+      if (!groups[key]) {
+        groups[key] = {
+          count:        0,
+          shippingStatus: ss,
+          logisticType:   lt,
+          substatus:      sub,
+          example: {
+            orderId:    o.id,
+            dateCreated: o.date_created,
+            shippingId: o.shipping?.id,
+            buyer:      o.buyer?.nickname,
+          },
+        };
       }
-      return {
-        orderId:          o.id,
-        orderStatus:      o.status,
-        dateCreated:      o.date_created,
-        lastUpdated:      o.last_updated,
-        shippingId:       o.shipping?.id,
-        shippingStatus:   o.shipping?.status,
-        shippingSubstatus: o.shipping?.substatus,
-        logisticType:     o.shipping?.logistic_type,
-        // campos que podem indicar prazo de envio
-        shippingDateCreated:  o.shipping?.date_created,
-        shippingDateUpdated:  o.shipping?.date_updated,
-        // dados brutos do shipment (campos chave para prazo)
-        shipment: shipment ? {
-          status:        shipment.status,
-          substatus:     shipment.substatus,
-          date_created:  shipment.date_created,
-          last_updated:  shipment.last_updated,
-          date_first_printed: shipment.date_first_printed,
-          lead_time:     shipment.lead_time,
-          drop_off:      shipment.drop_off,
-          shipping_option: shipment.shipping_option,
-          estimated_delivery_limit: shipment.estimated_delivery_limit,
-          declared_value: undefined, // omit noise
-          // todos os campos de nível raiz disponíveis
-          _allKeys: Object.keys(shipment),
-        } : null,
-      };
-    }));
+      groups[key].count++;
+    }
 
-    res.json({ sellerId: uid, sellerNick: me.nickname, total: raw.paging?.total, orders: detailed });
+    // Busca o shipment do primeiro pedido com shipping.id (para ver lead_time / drop_off)
+    const firstWithShipment = orders.find(o => o.shipping?.id);
+    let shipmentSample = null;
+    if (firstWithShipment?.shipping?.id) {
+      const sr = await fetchWithTimeout(
+        `${ML_API_BASE}/shipments/${firstWithShipment.shipping.id}`, { headers }, 8000
+      ).catch(() => null);
+      if (sr?.ok) {
+        const s = await sr.json().catch(() => null);
+        if (s) shipmentSample = {
+          _allKeys:       Object.keys(s),
+          status:         s.status,
+          substatus:      s.substatus,
+          logistic_type:  s.logistic_type,
+          lead_time:      s.lead_time,
+          drop_off:       s.drop_off,
+          date_created:   s.date_created,
+          last_updated:   s.last_updated,
+          shipping_option: s.shipping_option,
+        };
+      }
+    }
+
+    res.json({
+      sellerId:      uid,
+      sellerNick:    me.nickname,
+      totalFetched:  orders.length,
+      pagingTotal:   raw.paging?.total,
+      // grupos ordenados por count desc
+      statusGroups:  Object.values(groups).sort((a, b) => b.count - a.count),
+      // amostra de 1 shipment completo para ver campos disponíveis
+      shipmentSample,
+    });
   } catch (err) {
     console.error('[GET /api/ml/debug/orders]', err.message);
     next(err);
