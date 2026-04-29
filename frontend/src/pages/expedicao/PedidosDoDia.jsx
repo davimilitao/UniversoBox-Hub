@@ -49,7 +49,7 @@ async function api(path, opts = {}) {
     },
   });
   const d = await res.json().catch(() => ({}));
-  if (res.status === 401) { window.location.href = '/login'; return null; }
+  if (res.status === 401) { window.location.href = '/spa/login'; return null; }
   if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
   return d;
 }
