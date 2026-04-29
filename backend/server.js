@@ -6158,7 +6158,7 @@ app.get('/api/ml/orders/:orderId/label', (req, res) => {
 // Fluxo: orderId → numeroPedido → vendaId (GET /pedidos/vendas) →
 //        link etiqueta PDF (GET /logisticas/etiquetas)
 // ════════════════════════════════════════════════════════════════════════════
-app.get('/api/etiqueta-logistica/:orderId', requireFirebaseAuth, async (req, res, next) => {
+app.get('/api/etiqueta-logistica/:orderId', async (req, res, next) => {
   try {
     const orderId = safeTrim(req.params.orderId);
     const formato = (req.query.formato || 'PDF').toUpperCase(); // PDF | ZPL

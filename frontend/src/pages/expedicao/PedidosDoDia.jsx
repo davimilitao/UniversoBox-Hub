@@ -7,9 +7,13 @@
  *              + Relatório do dia (aba Expedido)
  *              + Etiqueta de prateleira (ZPL via QZ Tray)
  *              + Logos reais de marketplace
- * @version 4.1.0
+ * @version 4.2.0
  * @date 2026-04-29
  * @changelog
+ *   4.2.0 — Fix: /api/etiqueta-logistica remove requireFirebaseAuth (usa mesmo padrão de auth
+ *           dos demais endpoints de expedição — expedicao_token); fix QZ setSignaturePromise
+ *           (sintaxe correta para bypass de certificado); EtiquetaButton persiste estado
+ *           "já aberta" em autoPrintDone para evitar reimpressão acidental ao reabrir modal.
  *   4.1.0 — Adicionado botão "Imprimir Etiqueta no Bling" em ModalSeparado e ModalExpedicao
  *           com deep link direto para a NF via blingNfId; importado ExternalLink do lucide-react
  */
@@ -109,7 +113,14 @@ async function qzConnect() {
   const qz = window.qz;
   if (!qz) throw new Error('QZ Tray não encontrado. Instale em qz.io/download');
   if (!qz.websocket.isActive()) {
-    try { qz.security.setCertificatePromise(r => r(null)); qz.security.setSignatureAlgorithm('SHA512'); qz.security.setSignaturePromise(() => r => r(null)); } catch {}
+    // Bypass de certificado: sem cert + sem assinatura (modo desenvolvimento interno)
+    // setCertificatePromise(resolve => resolve(null)) → aceita sem certificado
+    // setSignaturePromise((toSign, pFactory) => pFactory(resolve => resolve(null))) → aceita sem assinatura
+    try {
+      qz.security.setCertificatePromise(resolve => resolve(null));
+      qz.security.setSignatureAlgorithm('SHA512');
+      qz.security.setSignaturePromise((toSign, pFactory) => pFactory(resolve => resolve(null)));
+    } catch {}
     await qz.websocket.connect({ retries: 3, delay: 1 });
   }
   return qz;
@@ -674,9 +685,18 @@ function DanfeButton({ blingNfId }) {
 // ─── Botão Etiqueta de Transporte ────────────────────────────────────────────
 // Usa GET /api/etiqueta-logistica/:orderId → Bling /logisticas/etiquetas (OAuth2)
 // Retorna link PDF → abre em nova aba. Fallback: abre NF no Bling manualmente.
+// Estado "já aberta" é persistido em autoPrintDone (escopo de sessão) para que
+// fechar e reabrir o modal não convide o operador a reimprimir por engano.
 function EtiquetaButton({ orderId, blingNfId }) {
-  const [st,  setSt]  = useState(null); // null | loading | ok | err
-  const [msg, setMsg] = useState('');
+  // Inicializa com o estado salvo — se já abriu nesta sessão, começa como 'ok'
+  const [st,  setSt]  = useState(() => {
+    const done = autoPrintDone.get(orderId);
+    return done?.label ? 'ok' : null;
+  });
+  const [msg, setMsg] = useState(() => {
+    const done = autoPrintDone.get(orderId);
+    return done?.label ? 'Etiqueta já aberta ✓' : '';
+  });
 
   async function handle() {
     setSt('loading'); setMsg('Buscando etiqueta…');
@@ -684,14 +704,24 @@ function EtiquetaButton({ orderId, blingNfId }) {
       const d = await api(`/api/etiqueta-logistica/${orderId}`);
       if (d?.link) {
         window.open(d.link, '_blank', 'noopener,noreferrer');
+        // Persiste no guard de sessão — reabrir o modal mostra "já aberta"
+        const prev = autoPrintDone.get(orderId) || {};
+        autoPrintDone.set(orderId, { ...prev, label: true });
         setSt('ok'); setMsg('Etiqueta aberta ✓');
-        setTimeout(() => { setSt(null); setMsg(''); }, 5000);
       } else {
         throw new Error('Link não retornado pelo Bling');
       }
     } catch (e) {
       setSt('err'); setMsg(e.message);
     }
+  }
+
+  function handleReabrir(e) {
+    e.stopPropagation();
+    // Limpa o guard e deixa o operador clicar novamente conscientemente
+    const prev = autoPrintDone.get(orderId) || {};
+    autoPrintDone.set(orderId, { ...prev, label: false });
+    setSt(null); setMsg('');
   }
 
   function handleFallback(e) {
@@ -703,14 +733,23 @@ function EtiquetaButton({ orderId, blingNfId }) {
   if (!orderId) return null;
 
   return (
-    <button onClick={handle} disabled={st === 'loading'}
+    <button onClick={st === 'ok' ? undefined : handle} disabled={st === 'loading'}
       className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl border text-sm font-bold transition-all
         ${st === 'loading' ? 'border-slate-600 bg-slate-800/60 text-slate-500 cursor-wait' :
-          st === 'ok'      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' :
+          st === 'ok'      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 cursor-default' :
           st === 'err'     ? 'border-red-500/30 bg-red-500/5 text-red-400' :
           'border-dashed border-blue-500/40 bg-blue-500/5 text-blue-400 hover:border-blue-500/60 hover:bg-blue-500/10'}`}>
       {st === 'loading' ? <><Loader2 size={14} className="animate-spin"/><span className="text-xs font-normal">{msg}</span></> :
-       st === 'ok'      ? <><CircleCheck size={14}/><span>{msg}</span></> :
+       st === 'ok'      ? (
+         <>
+           <CircleCheck size={14}/>
+           <span className="flex-1">{msg}</span>
+           <span className="ml-auto text-[10px] underline font-normal opacity-60 hover:opacity-100"
+             onClick={handleReabrir}>
+             reabrir
+           </span>
+         </>
+       ) :
        st === 'err'     ? (
          <>
            <span className="text-sm">⚠️</span>
