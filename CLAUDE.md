@@ -179,6 +179,6 @@ export function useCompras() {
 
 2. **Diagnosticar antes de codificar.** Antes de implementar qualquer integração com API externa (ML, Bling, etc.), primeiro testar o endpoint real via curl/Postman e ver o retorno exato. Nunca começar a codificar baseado em suposição de como a API funciona.
 
-4. **Railway NÃO faz auto-deploy.** Push para feature branch não sobe para produção. Para deploy em produção: fazer merge na branch `main` via PR, depois acionar deploy manual no painel Railway ou via `railway up`. Para testes rápidos de backend: rodar localmente com `cd backend && npm run dev` e testar em `localhost:8080`.
+4. **Railway faz auto-deploy ao mergear PR na `main`.** Push para feature branch não sobe para produção. Mas ao fazer merge de PR na branch `main`, o Railway detecta automaticamente e faz o deploy. Para testes rápidos de backend: rodar localmente com `cd backend && npm run dev` e testar em `localhost:8080`.
 
 3. **API do ML para pedidos é instável como filtro.** Os filtros `shipping.status=ready_to_ship` e `shipping.logistic_type=*` da API do ML retornam resultados inconsistentes. Para dados confiáveis de envio, usar o painel do próprio ML ou webhooks — não polling com filtros.
