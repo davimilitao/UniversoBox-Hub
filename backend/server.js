@@ -61,10 +61,16 @@ setupTenantProvisioningRoutes(app, db);
 // ---------------- Static (public) ----------------
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SPA_DIR = path.join(PUBLIC_DIR, 'spa');
-// SPA React — serve os assets buildados
-app.use('/spa', express.static(SPA_DIR));
+// SPA React — assets com hash no nome: cache longo. index.html: nunca cachear.
+app.use('/spa/assets', express.static(path.join(SPA_DIR, 'assets'), {
+  maxAge: '1y', immutable: true,
+}));
+app.use('/spa', express.static(SPA_DIR, { maxAge: 0 }));
 
-app.get('/spa/*', (req, res) => res.sendFile(path.join(SPA_DIR, 'index.html')));
+app.get('/spa/*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(path.join(SPA_DIR, 'index.html'));
+});
 
 // ❌ Removido: redirects de /login, /financeiro/*, /expedicao/* causavam erro em dev
 // Em produção: Vite já buildou com base '/spa/' — paths estão corretos
