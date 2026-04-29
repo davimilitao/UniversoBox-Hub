@@ -340,11 +340,15 @@ async function printShippingLabel(mlOrderId, onStatus) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    // Se o backend retornou mlWebUrl, abre no browser como último recurso
+    // API falhou — abre a página do pedido no ML para impressão manual.
+    // mlWebUrl aponta para mercadolivre.com.br/vendas/{orderId}/detalhe
+    // que SEMPRE existe e tem o botão "Imprimir etiqueta".
     if (data.mlWebUrl) {
-      onStatus?.('Abrindo impressão no ML…');
+      onStatus?.('API indisponível — abrindo pedido no ML para impressão manual…');
       window.open(data.mlWebUrl, '_blank');
-      return; // não lança erro — usuário verá a página do ML
+      // Se tiver também URL do envio, abre em segunda aba
+      if (data.mlShipUrl) window.open(data.mlShipUrl, '_blank');
+      return; // não lança erro — usuário vê a página do ML
     }
     throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta`);
   }
