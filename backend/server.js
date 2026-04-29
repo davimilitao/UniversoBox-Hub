@@ -6367,74 +6367,42 @@ app.get('/api/ml/debug/orders', async (req, res, next) => {
     const me    = await meRes.json();
     const uid   = me.id;
 
-    // Busca mais simples possível — sem filtros — só seller + limit
-    // Se retornar 0, o problema é autenticação ou seller ID
-    const url = `${ML_API_BASE}/orders/search?seller=${uid}&sort=date_desc&limit=50`;
-    const r   = await fetchWithTimeout(url, { headers }, 15000);
-    const raw = await r.json();
-    const orders = raw.results || [];
+    // ── Testa múltiplos filtros em paralelo para descobrir quais funcionam ──
+    const BASE = `${ML_API_BASE}/orders/search?seller=${uid}&sort=date_desc&limit=10`;
+    const testQueries = [
+      { name: 'sem_filtro',              url: `${BASE}` },
+      { name: 'status_paid',             url: `${BASE}&order.status=paid` },
+      { name: 'shipping_ready_to_ship',  url: `${BASE}&shipping.status=ready_to_ship` },
+      { name: 'shipping_shipped',        url: `${BASE}&shipping.status=shipped` },
+      { name: 'shipping_delivered',      url: `${BASE}&shipping.status=delivered` },
+      { name: 'logistic_cross_docking',  url: `${BASE}&shipping.logistic_type=cross_docking` },
+      { name: 'logistic_fulfillment',    url: `${BASE}&shipping.logistic_type=fulfillment` },
+      { name: 'logistic_flex',           url: `${BASE}&shipping.logistic_type=not_specified` },
+      { name: 'ready_cross_docking',     url: `${BASE}&shipping.status=ready_to_ship&shipping.logistic_type=cross_docking` },
+      { name: 'ready_fulfillment',       url: `${BASE}&shipping.status=ready_to_ship&shipping.logistic_type=fulfillment` },
+    ];
 
-    // Loga resposta bruta para diagnóstico no Railway
-    console.log('[debug/orders] paging:', JSON.stringify(raw.paging));
-    console.log('[debug/orders] raw keys:', Object.keys(raw));
-    if (raw.error) console.log('[debug/orders] ML error:', raw.error, raw.message);
-
-    // Agrupa por combinação shipping.status + logistic_type
-    const groups = {};
-    for (const o of orders) {
-      const ss  = o.shipping?.status          || 'null';
-      const sub = o.shipping?.substatus       || 'null';
-      const lt  = o.shipping?.logistic_type   || 'null';
-      const key = `${ss} | ${lt} | substatus:${sub}`;
-      if (!groups[key]) {
-        groups[key] = {
-          count:        0,
-          shippingStatus: ss,
-          logisticType:   lt,
-          substatus:      sub,
-          example: {
-            orderId:    o.id,
-            dateCreated: o.date_created,
-            shippingId: o.shipping?.id,
-            buyer:      o.buyer?.nickname,
-          },
-        };
-      }
-      groups[key].count++;
-    }
-
-    // Busca o shipment do primeiro pedido com shipping.id (para ver lead_time / drop_off)
-    const firstWithShipment = orders.find(o => o.shipping?.id);
-    let shipmentSample = null;
-    if (firstWithShipment?.shipping?.id) {
-      const sr = await fetchWithTimeout(
-        `${ML_API_BASE}/shipments/${firstWithShipment.shipping.id}`, { headers }, 8000
-      ).catch(() => null);
-      if (sr?.ok) {
-        const s = await sr.json().catch(() => null);
-        if (s) shipmentSample = {
-          _allKeys:       Object.keys(s),
-          status:         s.status,
-          substatus:      s.substatus,
-          logistic_type:  s.logistic_type,
-          lead_time:      s.lead_time,
-          drop_off:       s.drop_off,
-          date_created:   s.date_created,
-          last_updated:   s.last_updated,
-          shipping_option: s.shipping_option,
-        };
-      }
-    }
+    const filterResults = await Promise.all(testQueries.map(async q => {
+      const r   = await fetchWithTimeout(q.url, { headers }, 10000).catch(() => null);
+      const raw = r?.ok ? await r.json().catch(() => null) : null;
+      return {
+        name:        q.name,
+        total:       raw?.paging?.total ?? 'ERROR',
+        fetched:     (raw?.results || []).length,
+        firstOrder:  raw?.results?.[0] ? {
+          id:          raw.results[0].id,
+          shippingId:  raw.results[0].shipping?.id,
+          shippingFields: Object.keys(raw.results[0].shipping || {}),
+        } : null,
+        error: raw?.error || null,
+      };
+    }));
 
     res.json({
-      sellerId:      uid,
-      sellerNick:    me.nickname,
-      totalFetched:  orders.length,
-      pagingTotal:   raw.paging?.total,
-      // grupos ordenados por count desc
-      statusGroups:  Object.values(groups).sort((a, b) => b.count - a.count),
-      // amostra de 1 shipment completo para ver campos disponíveis
-      shipmentSample,
+      sellerId:     uid,
+      sellerNick:   me.nickname,
+      filterResults,   // ← ver quais filtros retornam quantos resultados
+      shipmentSample: null, // já temos do teste anterior
     });
   } catch (err) {
     console.error('[GET /api/ml/debug/orders]', err.message);
