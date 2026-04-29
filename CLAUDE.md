@@ -172,3 +172,11 @@ export function useCompras() {
 3. Never expose Bling tokens in API responses
 4. Validate all user inputs before saving to Firestore
 5. Never commit real `.env` files — only `.env.example`
+
+## Operational Rules (Learned from Production — Never Violate)
+
+1. **Etiqueta de transporte = Bling, sempre.** O Bling já imprime etiquetas de transporte para TODOS os marketplaces (ML, Shopee, etc.) nativamente pela sua interface. NUNCA tentar buscar etiqueta de transporte via API do Mercado Livre. Se o endpoint Bling de etiqueta falhar, o problema é na configuração do Bling — não na API do ML. Ir atrás da API do ML para etiqueta é o caminho errado e gera dias de trabalho perdido.
+
+2. **Diagnosticar antes de codificar.** Antes de implementar qualquer integração com API externa (ML, Bling, etc.), primeiro testar o endpoint real via curl/Postman e ver o retorno exato. Nunca começar a codificar baseado em suposição de como a API funciona.
+
+3. **API do ML para pedidos é instável como filtro.** Os filtros `shipping.status=ready_to_ship` e `shipping.logistic_type=*` da API do ML retornam resultados inconsistentes. Para dados confiáveis de envio, usar o painel do próprio ML ou webhooks — não polling com filtros.
