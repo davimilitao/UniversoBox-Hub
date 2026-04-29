@@ -499,9 +499,9 @@ function ColetaWidget() {
 // ─── PainelMLCard ─────────────────────────────────────────────────────────────
 
 function PainelMLCard() {
-  const [data,        setData]        = useState(null);
-  const [loading,     setLoading]     = useState(true);
-  const [openSection, setOpenSection] = useState('agenciaHoje');
+  const [data,    setData]    = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('hoje');
 
   async function load() {
     setLoading(true);
@@ -521,29 +521,97 @@ function PainelMLCard() {
   if (loading) return (
     <div className="rounded-2xl border border-slate-800/50 bg-slate-900/30 p-4">
       <div className="flex items-center gap-2 text-slate-500 text-sm">
-        <RefreshCw size={13} className="animate-spin" />
-        Carregando painel ML…
+        <RefreshCw size={13} className="animate-spin" /> Carregando painel ML…
       </div>
     </div>
   );
 
   if (!data?.ok) return null;
 
-  const { agenciaHoje = [], agenciaProximos = [], emTransito = [], fullCentro = [], summary = {}, authCode, cutoffTime, sellerNick } = data;
+  const {
+    agenciaHoje = [], flexHoje = [],
+    agenciaAmanha = [], agenciaProximos = [],
+    fullCentro = [], emTransito = [], finalizadas = [],
+    summary = {}, authCode, cutoffTime, sellerNick,
+  } = data;
 
-  const sections = [
-    { key: 'agenciaHoje',     label: 'Agência — Hoje',         count: summary.agenciaHoje     || 0, orders: agenciaHoje,    tone: 'blue',   sub: 'prontos para despachar (etiqueta disponível)' },
-    { key: 'agenciaProximos', label: 'Agência — Próximos dias', count: summary.agenciaProximos || 0, orders: agenciaProximos, tone: 'indigo', sub: 'pendentes de etiqueta' },
-    { key: 'fullCentro',      label: 'Full — Centro ML',       count: summary.fullCentro      || 0, orders: fullCentro,     tone: 'teal',   sub: 'ML despacha — só conferência' },
-    { key: 'emTransito',      label: 'Em trânsito',            count: summary.emTransito      || 0, orders: emTransito,     tone: 'slate',  sub: 'já despachados' },
+  // Abas — idênticas ao painel ML
+  const tabs = [
+    { key: 'hoje',      label: 'Envios de hoje',  count: summary.enviosHoje    || 0 },
+    { key: 'proximos',  label: 'Próximos dias',   count: (summary.agenciaAmanha || 0) + (summary.agenciaProximos || 0) },
+    { key: 'transito',  label: 'Em trânsito',     count: summary.emTransito    || 0 },
+    { key: 'finalizadas', label: 'Finalizadas',   count: summary.finalizadas   || 0 },
   ];
 
-  const toneCls = {
-    blue:   { badge: 'bg-blue-500/15 text-blue-300',    ring: '' },
-    indigo: { badge: 'bg-indigo-500/15 text-indigo-300', ring: 'ring-1 ring-indigo-500/30' },
-    teal:   { badge: 'bg-teal-500/15 text-teal-300',    ring: '' },
-    slate:  { badge: 'bg-slate-700/40 text-slate-400',  ring: '' },
-  };
+  // Agrupa próximos por data de entrega
+  const proximosPorData = {};
+  for (const o of [...agenciaAmanha, ...agenciaProximos]) {
+    const key = o.deliveryDate || 'sem data';
+    if (!proximosPorData[key]) proximosPorData[key] = [];
+    proximosPorData[key].push(o);
+  }
+  const datasOrdenadas = Object.keys(proximosPorData).sort();
+
+  function formatData(iso) {
+    if (!iso || iso === 'sem data') return 'Sem data definida';
+    const d = new Date(iso + 'T12:00:00');
+    return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
+  }
+
+  function OrderRow({ o }) {
+    return (
+      <div className="rounded-xl border border-slate-800/50 bg-slate-800/20 px-3 py-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-slate-300 text-xs font-medium truncate">{o.buyerName || '—'}</p>
+            {(o.items || []).slice(0, 2).map((it, i) => (
+              <p key={i} className="text-slate-500 text-[11px] truncate mt-0.5">
+                {it.qty}× {it.title}
+                {it.sku ? <span className="text-slate-700 ml-1">· {it.sku}</span> : null}
+              </p>
+            ))}
+            {(o.items || []).length > 2 && <p className="text-slate-700 text-[11px]">+{o.items.length - 2} item(ns)</p>}
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-slate-300 text-xs font-semibold tabular-nums">{BRL.format(o.total || 0)}</p>
+            {o.deliveryDate && (
+              <p className="text-slate-600 text-[10px]">
+                {new Date(o.deliveryDate + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function SectionCard({ label, sub, count, tone, orders, badge }) {
+    const tones = {
+      blue:  'border-blue-500/20 bg-blue-500/5',
+      teal:  'border-teal-500/20 bg-teal-500/5',
+      purple:'border-purple-500/20 bg-purple-500/5',
+      slate: 'border-slate-700/40 bg-slate-800/10',
+    };
+    return (
+      <div className={`rounded-2xl border p-4 space-y-3 ${tones[tone] || tones.slate}`}>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            {badge && <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-0.5">{badge}</p>}
+            <p className="text-slate-100 font-semibold text-sm">{label}</p>
+            {sub && <p className="text-slate-500 text-xs">{sub}</p>}
+          </div>
+          <span className="text-2xl font-black tabular-nums text-slate-300">{count}</span>
+        </div>
+        {orders.length > 0 && (
+          <div className="space-y-1.5">
+            {orders.slice(0, 20).map(o => <OrderRow key={o.id} o={o} />)}
+            {orders.length > 20 && <p className="text-slate-600 text-xs text-center">+{orders.length - 20} mais</p>}
+          </div>
+        )}
+        {orders.length === 0 && <p className="text-slate-600 text-xs text-center py-2">Nenhum pedido</p>}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-slate-700/40 bg-slate-900/40 overflow-hidden">
@@ -554,91 +622,97 @@ function PainelMLCard() {
           <p className="text-slate-200 font-semibold text-sm">Painel Mercado Livre</p>
           {sellerNick && <span className="text-slate-600 text-xs">{sellerNick}</span>}
         </div>
-        <button onClick={load} disabled={loading} className="text-slate-600 hover:text-slate-400 transition-colors">
-          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-        </button>
-      </div>
-
-      {/* Seções colapsáveis */}
-      {sections.map(s => {
-        const t = toneCls[s.tone];
-        const isOpen = openSection === s.key;
-        return (
-          <div key={s.key} className="border-b border-slate-800/40 last:border-0">
-            <button
-              onClick={() => setOpenSection(prev => prev === s.key ? null : s.key)}
-              className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-800/30 transition-colors text-left"
-            >
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold tabular-nums shrink-0 ${t.badge} ${t.ring}`}>
-                {s.count}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-slate-200 text-sm font-medium">{s.label}</p>
-                <p className="text-slate-600 text-xs">{s.sub}</p>
-              </div>
-              <ChevronDown size={14} className={`text-slate-600 transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            {isOpen && (
-              <div className="px-4 pb-3 space-y-2">
-                {s.orders.length === 0 ? (
-                  <p className="text-slate-600 text-xs text-center py-3">Nenhum pedido nesta categoria</p>
-                ) : (
-                  <>
-                    {s.orders.slice(0, 25).map(o => (
-                      <div key={o.id} className="rounded-xl border border-slate-800/50 bg-slate-800/20 px-3 py-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-slate-300 text-xs font-medium truncate">{o.buyerName || '—'}</p>
-                            {(o.items || []).slice(0, 2).map((it, i) => (
-                              <p key={i} className="text-slate-500 text-[11px] truncate mt-0.5">
-                                {it.qty}× {it.title}
-                                {it.sku ? <span className="text-slate-700 ml-1">· {it.sku}</span> : null}
-                              </p>
-                            ))}
-                            {(o.items || []).length > 2 && (
-                              <p className="text-slate-700 text-[11px]">+{o.items.length - 2} item(ns)</p>
-                            )}
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-slate-300 text-xs font-semibold tabular-nums">{BRL.format(o.total || 0)}</p>
-                            <p className="text-slate-600 text-[10px] tabular-nums">
-                              {o.dateCreated
-                                ? new Date(o.dateCreated).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
-                                : '—'}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    {s.orders.length > 25 && (
-                      <p className="text-slate-600 text-xs text-center">+{s.orders.length - 25} mais</p>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      {/* Rodapé: código de autorização + horário de corte */}
-      {(authCode || cutoffTime) && (
-        <div className="px-4 py-2.5 border-t border-slate-800/60 flex items-center gap-4 flex-wrap bg-slate-900/30">
+        <div className="flex items-center gap-2">
           {authCode && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-600 text-[10px] uppercase tracking-wide">Código:</span>
-              <span className="text-blue-300 font-bold text-xs tabular-nums tracking-wider">{authCode}</span>
-            </div>
+            <span className="text-blue-300 font-bold text-xs tabular-nums tracking-wider bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-lg">
+              {authCode}
+            </span>
           )}
           {cutoffTime && (
-            <div className="flex items-center gap-1.5">
-              <Timer size={10} className="text-slate-600" />
-              <span className="text-slate-400 text-xs">Corte: {cutoffTime}</span>
-            </div>
+            <span className="flex items-center gap-1 text-slate-400 text-xs">
+              <Timer size={10} /> {cutoffTime}
+            </span>
           )}
+          <button onClick={load} disabled={loading} className="text-slate-600 hover:text-slate-400 transition-colors ml-1">
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+          </button>
         </div>
-      )}
+      </div>
+
+      {/* Abas */}
+      <div className="flex border-b border-slate-800/60 overflow-x-auto scrollbar-none">
+        {tabs.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium whitespace-nowrap transition-colors shrink-0 border-b-2 ${
+              activeTab === t.key
+                ? 'text-blue-300 border-blue-400 bg-blue-500/5'
+                : 'text-slate-500 border-transparent hover:text-slate-300'
+            }`}
+          >
+            {t.label}
+            <span className={`rounded-full text-[10px] font-bold px-1.5 py-0.5 ${
+              activeTab === t.key ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-400'
+            }`}>{t.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Conteúdo da aba */}
+      <div className="p-4 space-y-3">
+
+        {/* Aba: Envios de hoje */}
+        {activeTab === 'hoje' && (
+          <>
+            <SectionCard
+              badge="Próximo do envio"
+              label={cutoffTime ? `Agência Mercado Livre | Até as ${cutoffTime}` : 'Agência Mercado Livre'}
+              sub="cross_docking — etiqueta disponível"
+              count={agenciaHoje.length}
+              tone="blue"
+              orders={agenciaHoje}
+            />
+            {flexHoje.length > 0 && (
+              <SectionCard label="Flex" sub="entrega pelo vendedor" count={flexHoje.length} tone="purple" orders={flexHoje} />
+            )}
+            <SectionCard
+              badge="Em andamento"
+              label="Full"
+              sub="No centro de distribuição"
+              count={fullCentro.length}
+              tone="teal"
+              orders={[]}
+            />
+          </>
+        )}
+
+        {/* Aba: Próximos dias — agrupado por data de entrega */}
+        {activeTab === 'proximos' && (
+          datasOrdenadas.length === 0
+            ? <p className="text-slate-600 text-sm text-center py-6">Nenhum pedido nos próximos dias</p>
+            : datasOrdenadas.map(date => (
+                <SectionCard
+                  key={date}
+                  badge="Agência Mercado Livre"
+                  label={`A partir de ${formatData(date)}`}
+                  count={proximosPorData[date].length}
+                  tone="blue"
+                  orders={proximosPorData[date]}
+                />
+              ))
+        )}
+
+        {/* Aba: Em trânsito */}
+        {activeTab === 'transito' && (
+          <SectionCard label="Em trânsito" sub="pedidos já despachados" count={emTransito.length} tone="slate" orders={emTransito} />
+        )}
+
+        {/* Aba: Finalizadas */}
+        {activeTab === 'finalizadas' && (
+          <SectionCard label="Finalizadas recentes" sub="últimas entregas" count={finalizadas.length} tone="slate" orders={finalizadas} />
+        )}
+      </div>
     </div>
   );
 }
