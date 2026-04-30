@@ -6153,6 +6153,46 @@ app.get('/api/ml/orders/:orderId/label', (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// POST /api/expedicao/ajuda
+// Operador trava → aciona ajuda → envia alerta no Telegram para todos os chats
+// configurados. Sem auth (expedição usa token legado).
+// ════════════════════════════════════════════════════════════════════════════
+app.post('/api/expedicao/ajuda', async (req, res, next) => {
+  try {
+    const orderId  = safeTrim(req.body.orderId)  || 'não informado';
+    const motivo   = safeTrim(req.body.motivo)   || 'Operador solicitou ajuda';
+    const terminal = safeTrim(req.body.terminal) || '—';
+
+    const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    // Lê todos os chatIds configurados (multi-tenant seguro — expedição é interna)
+    const snap = await db.collection('telegram_config').get();
+    const chats = snap.docs
+      .filter(d => d.data().ativo !== false)
+      .map(d => d.data().chatId)
+      .filter(Boolean);
+
+    const msg =
+      `🆘 <b>Ajuda solicitada na Expedição</b>\n\n` +
+      `📦 Pedido: <code>${orderId}</code>\n` +
+      `❓ Motivo: ${motivo}\n` +
+      `🖥️ Terminal: ${terminal}\n` +
+      `🕐 Horário: ${hora}\n\n` +
+      `<i>Verifique o sistema de expedição.</i>`;
+
+    if (chats.length) {
+      await Promise.all(chats.map(chatId => _sendTg(chatId, msg)));
+    }
+
+    console.log(`[expedicao/ajuda] orderId=${orderId} terminal=${terminal} chats=${chats.length}`);
+    res.json({ ok: true, enviado: chats.length, sem_telegram: chats.length === 0 });
+  } catch (err) {
+    console.error('[/api/expedicao/ajuda]', err.message);
+    next(err);
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // GET /api/etiqueta-logistica/:orderId
 // Busca etiqueta de transporte via API oficial Bling OAuth2.
 // Fluxo: orderId → numeroPedido → vendaId (GET /pedidos/vendas) →

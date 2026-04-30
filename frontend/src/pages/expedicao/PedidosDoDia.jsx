@@ -7,9 +7,12 @@
  *              + Relatório do dia (aba Expedido)
  *              + Etiqueta de prateleira (ZPL via QZ Tray)
  *              + Logos reais de marketplace
- * @version 4.2.0
+ * @version 4.3.0
  * @date 2026-04-29
  * @changelog
+ *   4.3.0 — Performance: remove refreshAll() do onScan; Expedir single-scan; auto-advance
+ *           modal após confirmar; beepListaClear/beepAlerta/beepNovoPedido; botão Ajuda Telegram;
+ *           ModalExpedicao: etiqueta como ação principal.
  *   4.2.0 — Fix: /api/etiqueta-logistica remove requireFirebaseAuth (usa mesmo padrão de auth
  *           dos demais endpoints de expedição — expedicao_token); fix QZ setSignaturePromise
  *           (sintaxe correta para bypass de certificado); EtiquetaButton persiste estado
@@ -88,6 +91,12 @@ function matchOrderByScan(code, orders) {
   }) || null;
 }
 
+// ─── Beeps ────────────────────────────────────────────────────────────────────
+// beep(true)      → 2 notas subindo   — item conferido OK
+// beep(false)     → buzzer descendente — erro / item errado
+// beepListaClear  → 3 notas celebratórias — fila zerada
+// beepAlerta      → 2 pulsos urgentes — pedido prioritário / flex
+// beepNovoPedido  → 1 nota suave     — chegou novo pedido (sem assustar)
 function beep(ok = true) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -105,6 +114,46 @@ function beep(ok = true) {
       o.start(); o.stop(ctx.currentTime + 0.22);
     }
     setTimeout(() => ctx.close().catch(() => {}), 700);
+  } catch {}
+}
+
+function beepListaClear() {
+  // 3 notas ascendentes rápidas — celebra o fim da fila
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1108, 1318].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f; g.gain.value = 0.07;
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime + i * 0.13); o.stop(ctx.currentTime + i * 0.13 + 0.11);
+    });
+    setTimeout(() => ctx.close().catch(() => {}), 700);
+  } catch {}
+}
+
+function beepAlerta() {
+  // 2 pulsos rápidos — pedido prioritário / flex / atenção
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [660, 660].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'triangle'; o.frequency.value = f; g.gain.value = 0.09;
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime + i * 0.22); o.stop(ctx.currentTime + i * 0.22 + 0.14);
+    });
+    setTimeout(() => ctx.close().catch(() => {}), 700);
+  } catch {}
+}
+
+function beepNovoPedido() {
+  // 1 nota suave — novo pedido chegou (não assusta)
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.value = 660; g.gain.value = 0.05;
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.18);
+    setTimeout(() => ctx.close().catch(() => {}), 500);
   } catch {}
 }
 
@@ -766,6 +815,45 @@ function EtiquetaButton({ orderId, blingNfId }) {
   );
 }
 
+// ─── Botão Ajuda → Telegram ──────────────────────────────────────────────────
+// Operador trava → clica → alerta vai pro Telegram com orderId e terminal.
+function AjudaButton({ orderId }) {
+  const [st, setSt] = useState(null); // null | loading | ok | err
+
+  async function handle(e) {
+    e.stopPropagation();
+    setSt('loading');
+    try {
+      const terminal = localStorage.getItem('expedicao_pro_terminal_id') || '—';
+      const d = await api('/api/expedicao/ajuda', {
+        method: 'POST',
+        body: JSON.stringify({ orderId, motivo: 'Operador solicitou ajuda', terminal }),
+      });
+      setSt(d?.sem_telegram ? 'sem_tg' : 'ok');
+      setTimeout(() => setSt(null), 5000);
+    } catch {
+      setSt('err');
+      setTimeout(() => setSt(null), 4000);
+    }
+  }
+
+  return (
+    <button onClick={handle} disabled={st === 'loading'}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all
+        ${st === 'loading' ? 'border-slate-600 text-slate-500 cursor-wait' :
+          st === 'ok'      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' :
+          st === 'sem_tg'  ? 'border-amber-500/30 bg-amber-500/8 text-amber-400' :
+          st === 'err'     ? 'border-red-500/30 text-red-400' :
+          'border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/10'}`}>
+      {st === 'loading' ? <Loader2 size={12} className="animate-spin"/> :
+       st === 'ok'      ? <>✓ Ajuda enviada</> :
+       st === 'sem_tg'  ? <>⚠️ Telegram não configurado</> :
+       st === 'err'     ? <>Erro ao enviar</> :
+       <>🆘 Ajuda</>}
+    </button>
+  );
+}
+
 // ─── Modal Separação ──────────────────────────────────────────────────────────
 function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
   // 'idle' | 'printing' | 'ok' | 'err'
@@ -876,6 +964,7 @@ function ModalSeparado({ order, proximo, onConfirmar, onFechar, confirmando }) {
             <p className="font-mono text-xs text-slate-500">{order.id}</p>
           </div>
           <div className="flex items-center gap-2">
+            <AjudaButton orderId={order.id} />
             <MktLogo mkt={order.marketplace} />
             <button onClick={onFechar} className="text-slate-500 hover:text-slate-300"><X size={18}/></button>
           </div>
@@ -981,9 +1070,23 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
             <div className="flex items-center gap-2 mb-1"><Truck size={20} className="text-emerald-400"/><p className="font-black text-base text-slate-100">Confirmar Expedição</p></div>
             <p className="font-mono text-xs text-slate-500">{order.id}</p>
           </div>
-          <div className="flex items-center gap-2"><MktLogo mkt={order.marketplace}/><button onClick={onFechar} className="text-slate-500 hover:text-slate-300"><X size={18}/></button></div>
+          <div className="flex items-center gap-2">
+            <AjudaButton orderId={order.id} />
+            <MktLogo mkt={order.marketplace}/>
+            <button onClick={onFechar} className="text-slate-500 hover:text-slate-300"><X size={18}/></button>
+          </div>
         </div>
-        <div className="px-4 pt-4"><EtiquetaDestaque o={order} large /></div>
+
+        {/* ── Ação principal: ETIQUETA DE TRANSPORTE ── */}
+        <div className="px-4 pt-4 pb-2">
+          <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider px-1 mb-2">
+            Ação principal
+          </p>
+          <EtiquetaButton orderId={order.id} blingNfId={order.blingNfId} />
+        </div>
+
+        <div className="px-4 pt-1"><EtiquetaDestaque o={order} large /></div>
+
         <div className="p-4 space-y-0">
           {its.map((it, i) => {
             const foto = it.stockPhotos?.[0] || it.image || '/assets/placeholder.png';
@@ -1002,6 +1105,7 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
             );
           })}
         </div>
+
         {proximo && (
           <div className="px-4 pb-3">
             <div className="p-3.5 rounded-2xl bg-blue-500/8 border border-blue-500/20 flex items-center gap-3">
@@ -1014,13 +1118,13 @@ function ModalExpedicao({ order, proximo, onConfirmar, onFechar, confirmando }) 
             </div>
           </div>
         )}
-        <div className="px-4 pb-1 space-y-2">
-          <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider px-1">Impressões</p>
-          <div className="flex items-center gap-2">
-            <div className="flex-1"><DanfeButton blingNfId={order.blingNfId} /></div>
-          </div>
-          <EtiquetaButton orderId={order.id} blingNfId={order.blingNfId} />
+
+        {/* DANFE como ação secundária */}
+        <div className="px-4 pb-3">
+          <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider px-1 mb-1.5">Reimprimir DANFE</p>
+          <DanfeButton blingNfId={order.blingNfId} />
         </div>
+
         <div className="flex gap-2 p-4 border-t border-white/5">
           <button onClick={onFechar} className="flex-1 py-2.5 rounded-xl text-sm border border-white/10 text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors">Cancelar</button>
           <button onClick={() => onConfirmar(proximo?.id || '')} disabled={confirmando}
@@ -1179,6 +1283,7 @@ export default function PedidosDoDia() {
     enabled: notifEnabled,
     intervalMs: 30_000,
     onNewOrders: (diff) => {
+      beepNovoPedido();
       showToast(`📦 ${diff} novo(s) pedido(s) chegaram!`, 'new');
       setNewBadge(v => v + diff);
     },
@@ -1219,6 +1324,8 @@ export default function PedidosDoDia() {
 
   async function selectOrder(o) {
     setSelOrder(o);
+    // Alerta sonoro especial para pedidos flex/prioritários
+    if (o.logistica === 'flex' || o.isPriority || o.isDelayed) beepAlerta();
     try { await api(`/orders/${encodeURIComponent(o.id)}/lock`, { method:'POST', body:'{}' }); } catch {}
     setTimeout(() => scanInputRef.current?.focus(), 100);
   }
@@ -1240,10 +1347,15 @@ export default function PedidosDoDia() {
           const items = prev.items.map(it => it.sku === r.sku ? { ...it, checkedQty: Number(r.checkedQty) } : it);
           const total   = items.reduce((a, i) => a + Number(i.qty||0), 0);
           const checked = items.reduce((a, i) => a + Number(i.checkedQty||0), 0);
-          if (total > 0 && checked >= total) setTimeout(() => setModalSep(true), 600);
+          // Quando todos conferidos: beep celebratório + modal após 600ms
+          if (total > 0 && checked >= total) {
+            beepListaClear();
+            setTimeout(() => setModalSep(true), 600);
+          }
           return { ...prev, items };
         });
-        refreshAll().catch(()=>{});
+        // ⚡ Performance: NÃO chama refreshAll() por scan — só atualiza estado local.
+        // refreshAll() só ocorre após mudança de status (confirmarSeparado/Expedicao).
       } else if (r) {
         beep(false); doFlash(false);
         const msgs = { item_not_found:`Código não encontrado: ${code}`, already_fully_checked:'Item já conferido', locked_by_other_terminal:'Pedido em uso em outro terminal' };
@@ -1260,14 +1372,10 @@ export default function PedidosDoDia() {
     try {
       const match = matchOrderByScan(code, orders.picked);
       if (!match) { beep(false); doFlash(false); showToast(`Código não encontrado nos pedidos para expedir`, 'err'); return; }
-      if (selOrder && selOrder.id === match.id) {
-        beep(true); doFlash(true);
-        setModalExp(true);
-      } else {
-        beep(true); doFlash(true);
-        setSelOrder(match);
-        showToast(`✓ Pedido identificado — bipe novamente para expedir`, 'ok');
-      }
+      // ⚡ Single-scan: 1 bipe → modal abre direto (sem "bipe novamente")
+      beep(true); doFlash(true);
+      setSelOrder(match);
+      setTimeout(() => setModalExp(true), 150);
     } finally { setScanStatus('ready'); scanInputRef.current?.focus(); }
   }
 
@@ -1298,9 +1406,19 @@ export default function PedidosDoDia() {
     try {
       const r = await api(`/orders/${encodeURIComponent(selOrder.id)}/status`, { method:'POST', body: JSON.stringify({ status:'picked' }) });
       if (r?.ok) {
-        beep(true); setModalSep(false); await refreshAll();
-        if (proximoId) { const prox = orders.pending.find(x => x.id === proximoId); if (prox) { selectOrder(prox); showToast(`✓ Separado! Próximo: ${proximoId}`, 'ok'); } else showToast('Pedido separado ✓', 'ok'); }
-        else { setSelOrder(null); showToast('🎉 Todos separados!', 'ok'); }
+        setModalSep(false);
+        await refreshAll();
+        if (proximoId) {
+          // Auto-seleciona próximo pedido dinamicamente
+          const prox = orders.pending.find(x => x.id === proximoId);
+          if (prox) { beep(true); selectOrder(prox); showToast(`✓ Separado! Próximo: ${proximoId}`, 'ok'); }
+          else { beep(true); showToast('Pedido separado ✓', 'ok'); }
+        } else {
+          // Fila zerada — beep celebratório
+          beepListaClear();
+          setSelOrder(null);
+          showToast('🎉 Todos separados! Vá para Expedir.', 'ok');
+        }
       } else if (r) showToast(r.error || 'Falha', 'err');
     } catch(e) { showToast(e.message, 'err'); }
     finally { setConfirmando(null); }
@@ -1312,9 +1430,23 @@ export default function PedidosDoDia() {
     try {
       const r = await api(`/orders/${encodeURIComponent(selOrder.id)}/status`, { method:'POST', body: JSON.stringify({ status:'packed' }) });
       if (r?.ok) {
-        beep(true); setModalExp(false); await refreshAll();
-        if (proximoId) { const prox = orders.picked.find(x => x.id === proximoId); if (prox) { selectOrder(prox); showToast(`✓ Expedido! Próximo: ${proximoId}`, 'ok'); } else { setSelOrder(null); showToast('Pedido EXPEDIDO ✅', 'ok'); } }
-        else { setSelOrder(null); showToast('🎉 Todos expedidos!', 'ok'); }
+        setModalExp(false);
+        await refreshAll();
+        if (proximoId) {
+          // Auto-abre próximo modal de expedição dinamicamente
+          const prox = orders.picked.find(x => x.id === proximoId);
+          if (prox) {
+            beep(true);
+            selectOrder(prox);
+            setTimeout(() => setModalExp(true), 400);
+            showToast(`✓ Expedido! Próximo: ${proximoId}`, 'ok');
+          } else { beep(true); setSelOrder(null); showToast('Pedido EXPEDIDO ✅', 'ok'); }
+        } else {
+          // Fila zerada — beep celebratório
+          beepListaClear();
+          setSelOrder(null);
+          showToast('🎉 Todos expedidos!', 'ok');
+        }
       } else if (r) showToast(r.error || 'Falha ao expedir', 'err');
     } catch(e) { showToast(e.message, 'err'); }
     finally { setConfirmando(null); }
