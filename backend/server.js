@@ -3690,6 +3690,42 @@ async function blingFetch(path, retryCount = 0) {
   return JSON.parse(text);
 }
 
+// ── HELPER: busca vendaId + logística via /pedidos/vendas ────────────────────
+// Retorna { vendaId: number|null, logistica: 'flex'|'fulfillment'|'agency'|null }
+// Falha silenciosa — nunca lança para o caller
+async function fetchVendaInfo(numeroPedido) {
+  if (!numeroPedido) return { vendaId: null, logistica: null };
+  try {
+    const enc = encodeURIComponent(numeroPedido);
+    const r   = await blingFetch(`/pedidos/vendas?numerosLojas[]=${enc}&pagina=1&limite=5`);
+    if (!r?.data?.length) return { vendaId: null, logistica: null };
+
+    const vendaObj   = r.data[0];
+    const vendaId    = vendaObj.id || null;
+    const transporte = vendaObj.transporte || {};
+    const modalidade = transporte.modalidade ?? vendaObj.modalidade ?? null;
+    const nomeFrete  = (transporte.transportadora?.descricao || transporte.nome || '').toLowerCase();
+    const canalRaw   = typeof vendaObj.canal === 'string'
+      ? vendaObj.canal
+      : (vendaObj.canal?.descricao || vendaObj.canal?.nome || '');
+    const canal = canalRaw.toLowerCase();
+
+    // Log raw para diagnosticar mapeamento em produção
+    console.log('[fetchVendaInfo] raw:', JSON.stringify({ vendaId, modalidade, nomeFrete, canal }));
+
+    let logistica = null;
+    if      (modalidade === 2 || nomeFrete.includes('flex')        || canal.includes('flex'))        logistica = 'flex';
+    else if (modalidade === 3 || nomeFrete.includes('fulfillment') || nomeFrete.includes('full')
+                               || canal.includes('fulfillment'))                                      logistica = 'fulfillment';
+    else if (nomeFrete.includes('shopee') || canal.includes('shopee'))                               logistica = 'agency';
+
+    return { vendaId, logistica };
+  } catch (e) {
+    console.warn('[fetchVendaInfo] falhou para numeroPedido:', numeroPedido, e.message);
+    return { vendaId: null, logistica: null };
+  }
+}
+
 // ================================================================
 // ROTA — Cadastro de produto via Bling API
 // Cole em server.js após as rotas do Bling existentes
@@ -4368,6 +4404,20 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
   }
 });
 
+
+// ── VENDA INFO — sem Firebase auth (terminal de expedição não tem token) ──────
+// GET /bling/venda-info/:numeroPedido  →  { vendaId, logistica }
+// Usado pelo BlingPedidos.jsx para identificar Flex/Full sem depender de /api/ml/dashboard
+app.get('/bling/venda-info/:numeroPedido', async (req, res, next) => {
+  try {
+    const info = await fetchVendaInfo(req.params.numeroPedido);
+    res.json(info);
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    console.error('[GET /bling/venda-info]', err);
+    next(err);
+  }
+});
 
 // ── DANFE PDF (proxy → QZ Tray) ──────────────────────────────────
 // GET /bling/danfe/:id  → { ok, pdf: base64 } ou { ok, pdfUrl }
@@ -5182,6 +5232,12 @@ app.post('/bling/clonar', async (req, res, next) => {
       skusFaltando,
     });
 
+    // Busca vendaId + logística diretamente do Bling (falha silenciosa — não bloqueia clonagem)
+    // Frontend já envia logistica no body; usamos o da Bling como fonte mais confiável quando disponível
+    const vendaInfo = await fetchVendaInfo(numeroPedido);
+    const logisticaFinal = vendaInfo.logistica || logistica || 'agency';
+    console.log('[POST /bling/clonar] vendaInfo:', vendaInfo, '| logistica body:', logistica, '| final:', logisticaFinal);
+
     // Criar pedido
     const terminalId  = safeTrim(req.header('x-terminal-id')) || `bling_clone`;
     const createdAtMs = nowMs();
@@ -5196,9 +5252,12 @@ app.post('/bling/clonar', async (req, res, next) => {
       tx.set(db.collection('orders').doc(orderId), {
         docType:       'order',
         source:        'bling',
-        blingNfId:     blingNfId   || null,
+        blingNfId:     blingNfId    || null,
         numeroPedido:  numeroPedido || null,
-        marketplace:   marketplace || 'OUTROS',
+        marketplace:   marketplace  || 'OUTROS',
+        mlOrderId:     mlOrderId    || null,
+        vendaId:       vendaInfo.vendaId,       // ID do pedido de venda Bling (para etiqueta direta)
+        logistica:     logisticaFinal,          // 'flex'|'fulfillment'|'agency' — fonte: Bling > body
         status:        'pending',
         clienteNome:   safeTrim(clienteNome) || '',
         isPriority:    false,
@@ -5207,8 +5266,6 @@ app.post('/bling/clonar', async (req, res, next) => {
         createdAtMs,
         updatedAtMs:   createdAtMs,
         lockedBy:      terminalId,
-        mlOrderId:  mlOrderId  || null,
-        logistica:  logistica  || 'agency',
         lockedAt:      createdAtMs,
         skusFaltando:  skusFaltando.length ? skusFaltando : null,
       });
@@ -5222,7 +5279,7 @@ app.post('/bling/clonar', async (req, res, next) => {
       clienteNome: safeTrim(clienteNome),
       marketplace: marketplace || 'Bling/ML',
       qtdItens:    cart.length,
-      logistica:   logistica || 'agency',
+      logistica:   logisticaFinal,
       isPriority:  false,
     }).catch(() => {});
   } catch(err) {
@@ -5230,7 +5287,6 @@ app.post('/bling/clonar', async (req, res, next) => {
     next(err);
   }
 });
-
 
 
 // ═══════════════════════════════════════════════════════════════════
@@ -6195,19 +6251,19 @@ app.post('/api/expedicao/ajuda', async (req, res, next) => {
 // ════════════════════════════════════════════════════════════════════════════
 // GET /api/etiqueta-logistica/:orderId
 // Busca etiqueta de transporte via API oficial Bling OAuth2.
-// Fluxo: orderId → numeroPedido → vendaId (GET /pedidos/vendas) →
-//        link etiqueta PDF (GET /logisticas/etiquetas)
+// Fluxo v2.2: vendaId do Firestore (se disponível) → fallback /pedidos/vendas →
+//             link etiqueta PDF (GET /logisticas/etiquetas)
 // ════════════════════════════════════════════════════════════════════════════
 app.get('/api/etiqueta-logistica/:orderId', async (req, res, next) => {
   try {
     const orderId = safeTrim(req.params.orderId);
     const formato = (req.query.formato || 'PDF').toUpperCase(); // PDF | ZPL
 
-    // 1. Busca o pedido no Firestore para obter numeroPedido
+    // 1. Busca o pedido no Firestore
     const snap = await db.collection('orders').doc(orderId).get();
     if (!snap.exists) return res.status(404).json({ error: 'Pedido não encontrado', orderId });
 
-    const order = snap.data();
+    const order        = snap.data();
     const numeroPedido = order.numeroPedido;
     const blingNfId    = order.blingNfId;
 
@@ -6215,19 +6271,18 @@ app.get('/api/etiqueta-logistica/:orderId', async (req, res, next) => {
       return res.status(422).json({ error: 'Pedido sem numeroPedido e sem blingNfId — não é possível localizar etiqueta.' });
     }
 
-    // 2. Busca pedido de venda no Bling pelo número do pedido da loja
-    //    Tenta com numeroPedido primeiro; fallback: busca por data de hoje
-    let vendaId = null;
-    const diagnostico = {};
+    // 2. Resolve vendaId — prioriza campo salvo no Firestore (evita chamada extra ao Bling)
+    //    Pedidos clonados após v2.1.0 já têm order.vendaId preenchido por /bling/clonar.
+    //    Pedidos antigos fazem o lookup normal via /pedidos/vendas.
+    let vendaId = order.vendaId || null;
+    const diagnostico = { vendaId_source: vendaId ? 'firestore' : 'bling_lookup' };
 
-    if (numeroPedido) {
+    if (!vendaId && numeroPedido) {
       try {
         const enc = encodeURIComponent(numeroPedido);
         const r = await blingFetch(`/pedidos/vendas?numerosLojas[]=${enc}&pagina=1&limite=10`);
         diagnostico.pedidosVendas_numerosLojas = { count: r?.data?.length, primeiro: r?.data?.[0]?.id };
-        if (r?.data?.length > 0) {
-          vendaId = r.data[0].id;
-        }
+        if (r?.data?.length > 0) vendaId = r.data[0].id;
       } catch (e) {
         diagnostico.pedidosVendas_err = e.message;
       }
@@ -7128,96 +7183,7 @@ app.get('/bling/debug/nfe/:id', async (req, res, next) => {
   }
 });
 
-// ── CLONAR NF → CRIAR PEDIDO ─────────────────────────────────────
-app.post('/bling/clonar', async (req, res, next) => {
-  try {
-    const { marketplace, itens, clienteNome, numeroPedido, mlOrderId, logistica } = req.body;
-    // Sanitiza blingNfId: mantém apenas dígitos (remove traços, letras, etc.)
-    const blingNfId = String(req.body.blingNfId || '').replace(/\D/g, '') || null;
-
-    if (!itens || !itens.length) return res.status(400).json({ error: 'Nenhum item enviado. Abra os itens da NF antes de clonar.' });
-
-    // Separar itens com e sem SKU
-    const itensComSku = itens.filter(it => safeTrim(it.sku));
-    const itensSemSku = itens.filter(it => !safeTrim(it.sku));
-
-    if (!itensComSku.length) return res.status(400).json({
-      error: 'Nenhum item com SKU encontrado. Verifique se os produtos têm código cadastrado no Bling.',
-      itensSemSku: itensSemSku.map(it => it.nome),
-    });
-
-    // Buscar produtos no Firestore
-    const skus      = itensComSku.map(it => safeTrim(it.sku));
-    const prodRefs  = skus.map(sku => db.collection('products').doc(sku));
-    const prodSnaps = await db.getAll(...prodRefs);
-    const prodMap   = new Map();
-    for (const s of prodSnaps) if (s.exists) prodMap.set(s.id, s.data());
-
-    const cart         = [];
-    const skusFaltando = [];
-
-    for (const it of itensComSku) {
-      const sku = safeTrim(it.sku);
-      const p   = prodMap.get(sku);
-      if (!p) { skusFaltando.push(sku); continue; }
-      cart.push({
-        sku,
-        nameShort:  (p.name || it.nome || sku).slice(0, 48),
-        qty:        Number(it.qty || 1),
-        ean:        p.ean    || '',
-        eanBox:     p.eanBox || '',
-        bin:        p.bin    || '',
-        image:      './assets/placeholder.png',
-        images:     p.images || [],
-        checkedQty: 0,
-      });
-    }
-
-    if (!cart.length) return res.status(400).json({
-      error: 'Nenhum produto encontrado no sistema para os SKUs desta NF.',
-      skusFaltando,
-    });
-
-    // Criar pedido
-    const terminalId  = safeTrim(req.header('x-terminal-id')) || `bling_clone`;
-    const createdAtMs = nowMs();
-    const day         = yyyymmdd();
-    const counterRef  = db.collection('meta').doc(`counters_${day}`);
-
-    const result = await db.runTransaction(async tx => {
-      const cSnap   = await tx.get(counterRef);
-      const seq     = (cSnap.exists ? Number(cSnap.data().seq || 0) : 0) + 1;
-      const orderId = `ORD_${day}_${padSeq(seq, ORDER_SEQ_PAD)}`;
-      tx.set(counterRef, { docType: 'counter', day, seq, updatedAtMs: createdAtMs }, { merge: true });
-      tx.set(db.collection('orders').doc(orderId), {
-        docType:       'order',
-        source:        'bling',
-        blingNfId:     blingNfId   || null,
-        numeroPedido:  numeroPedido || null,
-        mlOrderId:     mlOrderId   || null,
-        logistica:     logistica   || 'agency',
-        marketplace:   marketplace || 'OUTROS',
-        status:        'pending',
-        clienteNome:   safeTrim(clienteNome) || '',
-        isPriority:    false,
-        items:         cart,
-        allowConfirmOnlyIfAllChecked: true,
-        createdAtMs,
-        updatedAtMs:   createdAtMs,
-        lockedBy:      terminalId,
-        lockedAt:      createdAtMs,
-        skusFaltando:  skusFaltando.length ? skusFaltando : null,
-      });
-      return { orderId };
-    });
-
-    res.json({ ok: true, orderId: result.orderId, skusFaltando, itensSemSku: itensSemSku.map(it=>it.nome), cartCount: cart.length });
-  } catch(err) {
-    console.error('[POST /bling/clonar]', err);
-    next(err);
-  }
-});
-
+// (POST /bling/clonar duplicado removido — endpoint ativo está na linha ~5186)
 
 // ════════════════════════════════════════════════════════════════════════════
 // FIM — Enriquecer Produtos

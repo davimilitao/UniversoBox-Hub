@@ -1,5 +1,9 @@
 // ================================================================
 // BLING MODULE — colar no server.js ANTES de "// ---------------- Errors"
+// v2.1.0 — 2026-05-03
+// @changelog
+//   2.1.0 — fetchVendaInfo helper: salva vendaId+logistica no Firestore ao clonar NF;
+//           novo GET /bling/venda-info/:numeroPedido (sem Firebase auth) para o frontend
 // ================================================================
 
 const BLING_CLIENT_ID     = process.env.BLING_CLIENT_ID     || '';
@@ -310,6 +314,59 @@ app.get('/bling/debug/etiqueta-logistica/:nfId', async (req, res, next) => {
   }
 });
 
+// ── HELPER: busca vendaId + logística via /pedidos/vendas ────────
+// Reutilizado em /bling/clonar e em /bling/venda-info/:numeroPedido
+// Retorna { vendaId: number|null, logistica: 'flex'|'fulfillment'|'agency'|null }
+async function fetchVendaInfo(numeroPedido) {
+  if (!numeroPedido) return { vendaId: null, logistica: null };
+
+  let vendaObj = null;
+  try {
+    const enc = encodeURIComponent(numeroPedido);
+    const r   = await blingFetch(`/pedidos/vendas?numerosLojas[]=${enc}&pagina=1&limite=5`);
+    if (r?.data?.length > 0) vendaObj = r.data[0];
+  } catch (e) {
+    console.warn('[fetchVendaInfo] falhou para numeroPedido:', numeroPedido, e.message);
+    return { vendaId: null, logistica: null };
+  }
+
+  if (!vendaObj) return { vendaId: null, logistica: null };
+
+  const vendaId    = vendaObj.id || null;
+  const transporte = vendaObj.transporte || {};
+  const modalidade = transporte.modalidade ?? vendaObj.modalidade ?? null;
+  const nomeFrete  = (transporte.transportadora?.descricao || transporte.nome || '').toLowerCase();
+  // canal pode ser string, objeto com descricao/nome, ou indefinido
+  const canalRaw   = typeof vendaObj.canal === 'string'
+    ? vendaObj.canal
+    : (vendaObj.canal?.descricao || vendaObj.canal?.nome || '');
+  const canal      = canalRaw.toLowerCase();
+
+  // Log raw para diagnosticar mapeamento em produção (remover após confirmado)
+  console.log('[fetchVendaInfo] raw:', JSON.stringify({ vendaId, modalidade, nomeFrete, canal }));
+
+  let logistica = null;
+  if      (modalidade === 2 || nomeFrete.includes('flex')        || canal.includes('flex'))        logistica = 'flex';
+  else if (modalidade === 3 || nomeFrete.includes('fulfillment') || nomeFrete.includes('full')
+                             || canal.includes('fulfillment'))                                      logistica = 'fulfillment';
+  else if (nomeFrete.includes('shopee') || canal.includes('shopee'))                               logistica = 'agency';
+
+  return { vendaId, logistica };
+}
+
+// ── VENDA INFO — sem Firebase auth (terminal de expedição não tem token) ──────
+// GET /bling/venda-info/:numeroPedido  →  { vendaId, logistica }
+app.get('/bling/venda-info/:numeroPedido', async (req, res, next) => {
+  try {
+    const info = await fetchVendaInfo(req.params.numeroPedido);
+    res.json(info);
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    console.error('[GET /bling/venda-info]', err);
+    next(err);
+  }
+});
+
 // ── CLONAR NF → CRIAR PEDIDO ─────────────────────────────────────
 app.post('/bling/clonar', async (req, res, next) => {
   try {
@@ -358,6 +415,10 @@ app.post('/bling/clonar', async (req, res, next) => {
       skusFaltando,
     });
 
+    // Enriquece com vendaId + logística via Bling (falha silenciosa — não bloqueia clonagem)
+    const vendaInfo = await fetchVendaInfo(numeroPedido).catch(() => ({ vendaId: null, logistica: null }));
+    console.log('[POST /bling/clonar] vendaInfo:', vendaInfo, '| numeroPedido:', numeroPedido);
+
     // Criar pedido
     const terminalId  = safeTrim(req.header('x-terminal-id')) || `bling_clone`;
     const createdAtMs = nowMs();
@@ -372,9 +433,11 @@ app.post('/bling/clonar', async (req, res, next) => {
       tx.set(db.collection('orders').doc(orderId), {
         docType:       'order',
         source:        'bling',
-        blingNfId:     blingNfId   || null,
+        blingNfId:     blingNfId    || null,
         numeroPedido:  numeroPedido || null,
-        marketplace:   marketplace || 'OUTROS',
+        marketplace:   marketplace  || 'OUTROS',
+        vendaId:       vendaInfo.vendaId,      // ID do pedido de venda no Bling (para etiqueta)
+        logistica:     vendaInfo.logistica,    // 'flex'|'fulfillment'|'agency'|null
         status:        'pending',
         clienteNome:   safeTrim(clienteNome) || '',
         isPriority:    false,
