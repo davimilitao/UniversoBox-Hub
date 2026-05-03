@@ -23,7 +23,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  RefreshCw, Plus, Loader2, ChevronRight, User, MapPin, X,
+  RefreshCw, Plus, Loader2, ChevronLeft, ChevronRight, User, MapPin, X,
   ScanLine, Printer, PackageCheck, SendHorizonal, CircleCheck,
   BoxesIcon, Truck, ClipboardCheck, Camera, CameraOff,
   BarChart2, Tag, Bell, BellOff, ChevronDown, ChevronUp, Images,
@@ -1525,10 +1525,11 @@ export default function PedidosDoDia() {
       </div>
 
       {/* ── Layout ── */}
-      <div className="flex-1 min-h-0 grid overflow-hidden" style={{ gridTemplateColumns: '300px 1fr' }}>
+      <div className="flex-1 min-h-0 flex overflow-hidden lg:grid" style={{ gridTemplateColumns: '300px 1fr' }}>
 
-        {/* ── Coluna esquerda ── */}
-        <div className="border-r border-white/5 flex flex-col overflow-hidden bg-slate-900/30">
+        {/* ── Coluna esquerda (lista) — oculta no mobile quando pedido selecionado ── */}
+        <div className={`border-r border-white/5 flex flex-col overflow-hidden bg-slate-900/30 w-full lg:w-auto flex-shrink-0
+          ${selOrder ? 'hidden lg:flex' : 'flex'}`}>
           {/* Tabs */}
           <div className="grid grid-cols-3 gap-1.5 p-3 border-b border-white/5 flex-shrink-0">
             {TABS.map(t => {
@@ -1573,14 +1574,21 @@ export default function PedidosDoDia() {
           </div>
         </div>
 
-        {/* ── Coluna direita ── */}
-        <div className="flex flex-col overflow-hidden">
+        {/* ── Coluna direita — oculta no mobile quando sem pedido ── */}
+        <div className={`flex flex-col overflow-hidden w-full
+          ${!selOrder && tab !== 'packed' ? 'hidden lg:flex' : 'flex'}`}>
 
           {/* ════ SEPARAR ════ */}
           {tab === 'pending' && (selOrder ? (
             <div className="flex flex-col min-h-0 overflow-hidden">
               <div className="flex items-center justify-between gap-4 px-5 py-3 border-b border-white/5 bg-slate-900/60 flex-shrink-0">
-                <div className="min-w-0">
+                <div className="min-w-0 flex items-center gap-3">
+                  {/* Botão voltar — só mobile */}
+                  <button onClick={() => setSelOrder(null)}
+                    className="lg:hidden p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-400 hover:text-slate-200 shrink-0">
+                    <ChevronLeft size={16}/>
+                  </button>
+                  <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <MktLogo mkt={selOrder.marketplace} />
                     <span className="font-mono font-black text-sm text-slate-300">{selOrder.id}</span>
@@ -1593,7 +1601,8 @@ export default function PedidosDoDia() {
                     </span>
                   ); })()}
                   {selOrder.clienteNome && <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1"><User size={10}/>{selOrder.clienteNome}</p>}
-                </div>
+                  </div>{/* /min-w-0 inner */}
+                </div>{/* /min-w-0 outer */}
                 <div className="flex items-center gap-2 shrink-0">
                   <ProgressRing pct={progress.pct} size={46} stroke={4} />
                   <button onClick={() => setModalSep(true)} disabled={!progress.allOk || selOrder.status !== 'pending'}
@@ -1643,13 +1652,19 @@ export default function PedidosDoDia() {
           {tab === 'picked' && (selOrder ? (
             <div className="flex flex-col min-h-0 overflow-hidden">
               <div className="flex items-center justify-between gap-4 px-5 py-3 border-b border-white/5 bg-slate-900/60 flex-shrink-0">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <MktLogo mkt={selOrder.marketplace} />
-                    <span className="font-mono font-black text-sm text-slate-300">{selOrder.id}</span>
-                    {(selOrder.logistica==='flex'||selOrder.isPriority) && <FlexBadge />}
+                <div className="min-w-0 flex items-center gap-3">
+                  <button onClick={() => setSelOrder(null)}
+                    className="lg:hidden p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-400 hover:text-slate-200 shrink-0">
+                    <ChevronLeft size={16}/>
+                  </button>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <MktLogo mkt={selOrder.marketplace} />
+                      <span className="font-mono font-black text-sm text-slate-300">{selOrder.id}</span>
+                      {(selOrder.logistica==='flex'||selOrder.isPriority) && <FlexBadge />}
+                    </div>
+                    {selOrder.clienteNome && <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1"><User size={10}/>{selOrder.clienteNome}</p>}
                   </div>
-                  {selOrder.clienteNome && <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1"><User size={10}/>{selOrder.clienteNome}</p>}
                 </div>
                 <button onClick={() => setModalExp(true)}
                   className="px-4 py-2 rounded-xl text-sm font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white transition-all hover:scale-105 active:scale-95 shadow-lg shadow-emerald-900/30">

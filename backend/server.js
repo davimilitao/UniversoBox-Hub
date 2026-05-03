@@ -5476,8 +5476,8 @@ app.post('/bling/clonar', async (req, res, next) => {
 
 // Perfis padrão caso o Firestore não tenha
 const PERFIS_DEFAULT = {
-  admin:      { nome: 'Super Admin', avatar: 'DA', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','tarefas','importar','index','config'] },
-  operacao:   { nome: 'Operação',    avatar: 'SU', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','embalagens','coletas','index'] },
+  admin:      { nome: 'Super Admin', avatar: 'DA', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','reposicao','admin','catalogo','embalagens','cadastrar','enriquecer-xml','financas','compras','coletas','tarefas','importar','index','config','design-system'] },
+  operacao:   { nome: 'Operação',    avatar: 'SU', tema: 'dark',  modulos: ['pedidos','manual','bling','ml-dashboard','insumos','reposicao','embalagens','coletas','index'] },
   financeiro: { nome: 'Financeiro',  avatar: 'JE', tema: 'dark',  modulos: ['financas','compras','index'] },
   catalogo:   { nome: 'Catálogo',    avatar: 'DN', tema: 'dark',  modulos: ['admin','catalogo','embalagens','cadastrar','enriquecer-xml','compras','importar','index'] },
   vendas:     { nome: 'Vendas',      avatar: 'VE', tema: 'light', modulos: ['catalogo','index'] },
@@ -5512,7 +5512,12 @@ app.get('/api/perfis/:id', async (req, res, next) => {
     if (!doc.exists) {
       return res.json({ id, ...def });
     }
-    res.json({ id, ...def, ...doc.data() });
+    const stored = doc.data();
+    // Union de módulos: garante que novos moduleIds do default nunca se percam
+    const modulos = stored.modulos
+      ? [...new Set([...def.modulos, ...stored.modulos])]
+      : def.modulos;
+    res.json({ id, ...def, ...stored, modulos });
   } catch(err) {
     next(err);
   }

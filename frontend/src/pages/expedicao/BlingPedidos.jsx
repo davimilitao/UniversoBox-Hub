@@ -18,6 +18,7 @@ import {
   AlertTriangle, Clock, XCircle, Loader2, Inbox,
   Tag, Hash, ChevronLeft, ChevronRight, Flame, ExternalLink,
   Package, ShoppingBag, CheckSquare, Square, Truck, Warehouse,
+  BarChart2, TrendingUp, TrendingDown,
 } from 'lucide-react';
 
 // ─── helpers de data ──────────────────────────────────────────────────────────
@@ -577,6 +578,113 @@ function NFRow({
   );
 }
 
+// ─── Relatório comparativo de períodos ────────────────────────────────────────
+function RelatorioPanel({ atual, anterior, rangeIni, rangeFim, onClose }) {
+  function calcStats(lista) {
+    const porMkt = {};
+    let semDanfe = 0;
+    for (const nf of lista) {
+      const m = nf.marketplace || 'Outros';
+      porMkt[m] = (porMkt[m] || 0) + 1;
+      if (isSemDanfe(nf.situacao)) semDanfe++;
+    }
+    return { total: lista.length, porMkt, semDanfe };
+  }
+
+  const s1 = calcStats(atual);
+  const s2 = calcStats(anterior);
+
+  const [y1,m1,d1] = rangeIni.split('-').map(Number);
+  const [y2,m2,d2] = rangeFim.split('-').map(Number);
+  const dur     = Math.round((new Date(y2,m2-1,d2) - new Date(y1,m1-1,d1)) / 86400000);
+  const prevFim = addDias(rangeIni, -1);
+  const prevIni = addDias(prevFim, -dur);
+
+  function Delta({ a, b }) {
+    if (!b) return null;
+    const pct = Math.round((a - b) / b * 100);
+    const up = pct >= 0;
+    return (
+      <span className={`inline-flex items-center gap-0.5 text-[11px] font-bold ${up ? 'text-emerald-400' : 'text-red-400'}`}>
+        {up ? <TrendingUp size={10}/> : <TrendingDown size={10}/>}
+        {up ? '+' : ''}{pct}%
+      </span>
+    );
+  }
+
+  const allMkts = [...new Set([...Object.keys(s1.porMkt), ...Object.keys(s2.porMkt)])];
+
+  return (
+    <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5 mb-5">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <BarChart2 size={16} className="text-blue-400"/>
+          <h3 className="font-bold text-slate-200">Relatório Comparativo</h3>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex gap-3 text-[11px] text-slate-500 flex-wrap">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"/>Atual: {fmtBR(rangeIni)} → {fmtBR(rangeFim)}</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500 inline-block"/>Anterior: {fmtBR(prevIni)} → {fmtBR(prevFim)}</span>
+          </div>
+          <button onClick={onClose} className="text-slate-600 hover:text-slate-300 transition-colors"><XCircle size={16}/></button>
+        </div>
+      </div>
+
+      {/* Cards de resumo */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+        <div className="rounded-xl bg-slate-900/60 border border-white/5 p-3">
+          <p className="text-[11px] text-slate-500 mb-1">Total pedidos</p>
+          <p className="text-2xl font-black text-slate-100 tabular-nums">{s1.total}</p>
+          {s2.total > 0 && <Delta a={s1.total} b={s2.total}/>}
+          {s2.total > 0 && <span className="text-[10px] text-slate-600 ml-1">vs {s2.total}</span>}
+        </div>
+        <div className="rounded-xl bg-slate-900/60 border border-white/5 p-3">
+          <p className="text-[11px] text-slate-500 mb-1">Sem DANFE</p>
+          <p className="text-2xl font-black text-amber-400 tabular-nums">{s1.semDanfe}</p>
+          {s2.total > 0 && <span className="text-[10px] text-slate-600">Anterior: {s2.semDanfe}</span>}
+        </div>
+        <div className="rounded-xl bg-slate-900/60 border border-white/5 p-3 col-span-2 sm:col-span-1">
+          <p className="text-[11px] text-slate-500 mb-1">Período</p>
+          <p className="text-sm font-bold text-slate-300">{dur + 1} dia{dur !== 0 ? 's' : ''}</p>
+          <p className="text-[10px] text-slate-600">{dur > 0 ? `Média: ${(s1.total / (dur + 1)).toFixed(1)}/dia` : 'Dia único'}</p>
+        </div>
+      </div>
+
+      {/* Tabela por marketplace */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[10px] text-slate-600 uppercase tracking-wider border-b border-white/5">
+              <th className="text-left py-2 pr-4">Marketplace</th>
+              <th className="text-right py-2 px-3 text-emerald-400">Atual</th>
+              <th className="text-right py-2 px-3 text-slate-500">Anterior</th>
+              <th className="text-right py-2 pl-3">Variação</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.04]">
+            {allMkts.sort((a,b) => (s1.porMkt[b]||0)-(s1.porMkt[a]||0)).map(mkt => {
+              const c1 = s1.porMkt[mkt] || 0;
+              const c2 = s2.porMkt[mkt] || 0;
+              return (
+                <tr key={mkt} className="text-slate-300 hover:bg-white/[0.02]">
+                  <td className="py-2 pr-4">
+                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${canalCor(mkt)}`}>{mkt}</span>
+                  </td>
+                  <td className="text-right py-2 px-3 font-bold tabular-nums">{c1}</td>
+                  <td className="text-right py-2 px-3 text-slate-500 tabular-nums">{c2}</td>
+                  <td className="text-right py-2 pl-3">
+                    {c2 > 0 ? <Delta a={c1} b={c2}/> : <span className="text-[11px] text-slate-600">—</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Página principal ──────────────────────────────────────────────────────────
 export function BlingPedidos() {
   const defaultRange = calcPreset('3dias');
@@ -599,8 +707,11 @@ export function BlingPedidos() {
   // Modalidade resolvida por NF — preenchido via /bling/venda-info (sem Firebase auth)
   const [nfLogistica, setNfLogistica] = useState({});
   // Seleção em lote — Set de blingNfId
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
-  const [lotePronto,  setLotePronto]  = useState(null); // { fila: [ids], concluidos, erros }
+  const [selectedIds,       setSelectedIds]       = useState(() => new Set());
+  const [lotePronto,        setLotePronto]        = useState(null);
+  const [showRelatorio,     setShowRelatorio]     = useState(false);
+  const [relatorioAnterior, setRelatorioAnterior] = useState(null);
+  const [loadingRelatorio,  setLoadingRelatorio]  = useState(false);
   const pollingRef = useRef(null);
   const pickerRef  = useRef(null);
 
@@ -808,6 +919,99 @@ export function BlingPedidos() {
     ? fmtBR(rangeIni)
     : `${fmtBR(rangeIni)} → ${fmtBR(rangeFim)}`;
 
+  // Agrupa NFs filtradas por marketplace, subdivide em flex/agency/full
+  const nfsGrupadas = useMemo(() => {
+    const mapa = {};
+    for (const nf of nfsFiltradas) {
+      const raw = nf.marketplace || 'Outros';
+      const m = raw.toLowerCase();
+      let nome;
+      if (m.includes('full'))                          nome = 'ML Full';
+      else if (m.includes('mercado') || m.includes('ml')) nome = 'Mercado Livre';
+      else if (m.includes('shopee'))                   nome = 'Shopee';
+      else if (m.includes('magalu'))                   nome = 'Magalu';
+      else if (m.includes('tiktok'))                   nome = 'TikTok';
+      else                                             nome = raw;
+      if (!mapa[nome]) mapa[nome] = { nome, flex: [], agency: [], full: [], all: [], rawMkt: raw };
+      const log = nfLogistica[nf.id];
+      mapa[nome].all.push(nf);
+      if      (log === 'fulfillment')                     mapa[nome].full.push(nf);
+      else if (log === 'flex' || flexFlags[nf.id])        mapa[nome].flex.push(nf);
+      else                                                mapa[nome].agency.push(nf);
+    }
+    return Object.values(mapa).sort((a, b) => {
+      if (a.nome.includes('Mercado') && !b.nome.includes('Mercado')) return -1;
+      if (!a.nome.includes('Mercado') && b.nome.includes('Mercado')) return 1;
+      return b.all.length - a.all.length;
+    });
+  }, [nfsFiltradas, nfLogistica, flexFlags]);
+
+  // Batch paralelo para um grupo de NF IDs
+  async function handleClonarGrupo(ids) {
+    const pendentes = ids.filter(id => !clonados.has(String(id)));
+    if (!pendentes.length) return;
+    setLotePronto({ total: pendentes.length, concluidos: 0, erros: 0 });
+
+    // 1. Busca todos os detalhes em paralelo
+    const resultados = await Promise.allSettled(
+      pendentes.map(async id => {
+        const det = expandidos[id];
+        if (det) return { id, det };
+        const res  = await fetch(`/bling/pedidos/${id}`);
+        const data = await res.json();
+        return { id, det: data.item };
+      })
+    );
+    // Atualiza expandidos de uma vez
+    const novos = {};
+    for (const r of resultados) {
+      if (r.status === 'fulfilled' && r.value?.det) novos[r.value.id] = r.value.det;
+    }
+    if (Object.keys(novos).length) setExpandidos(p => ({ ...p, ...novos }));
+
+    // 2. Clona em série (rate limit da API)
+    for (const r of resultados) {
+      if (r.status !== 'fulfilled') {
+        setLotePronto(p => ({ ...p, erros: p.erros + 1, concluidos: p.concluidos + 1 }));
+        continue;
+      }
+      const { id, det } = r.value;
+      const nf = nfs.find(n => n.id === id);
+      if (!nf || !det?.itens?.length || nfLogistica[id] === 'fulfillment') {
+        setLotePronto(p => ({ ...p, concluidos: p.concluidos + 1 }));
+        continue;
+      }
+      try {
+        await handleClonar(nf, det);
+      } catch {
+        setLotePronto(p => ({ ...p, erros: p.erros + 1 }));
+      }
+      setLotePronto(p => ({ ...p, concluidos: p.concluidos + 1 }));
+    }
+    setTimeout(() => setLotePronto(null), 2500);
+  }
+
+  // Carrega período anterior para comparativo
+  async function loadRelatorio() {
+    setLoadingRelatorio(true);
+    try {
+      const [y1,m1,d1] = rangeIni.split('-').map(Number);
+      const [y2,m2,d2] = rangeFim.split('-').map(Number);
+      const dur     = Math.round((new Date(y2,m2-1,d2) - new Date(y1,m1-1,d1)) / 86400000);
+      const prevFim = addDias(rangeIni, -1);
+      const prevIni = addDias(prevFim, -dur);
+      const params  = new URLSearchParams({ dataInicio: prevIni, dataFim: prevFim, loja: 'all' });
+      const res  = await fetch(`/bling/pedidos?${params}`);
+      const data = await res.json();
+      setRelatorioAnterior(data.items || []);
+    } catch {
+      setRelatorioAnterior([]);
+    } finally {
+      setLoadingRelatorio(false);
+      setShowRelatorio(true);
+    }
+  }
+
   return (
     <div className="text-slate-100 px-4 py-8 max-w-6xl mx-auto overflow-y-auto flex-1">
 
@@ -865,52 +1069,36 @@ export function BlingPedidos() {
       </div>
 
       {/* ── Filtros ── */}
-      <div className="flex flex-col gap-3 mb-5">
-
-        {/* Range + refresh */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative" ref={pickerRef}>
-            <button
-              onClick={() => setShowPicker(v => !v)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border transition-colors
-                ${showPicker ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-white/10 text-slate-300 hover:border-white/20'}`}
-            >
-              <CalendarDays size={14} className="text-emerald-400"/>
-              {labelRange}
-              <ChevronDown size={13} className="text-slate-500"/>
-            </button>
-            {showPicker && (
-              <div className="absolute left-0 top-full mt-2 z-50">
-                <RangePicker ini={rangeIni} fim={rangeFim} onConfirm={handleRangeConfirm}/>
-              </div>
-            )}
-          </div>
-          <button onClick={fetchNFs} disabled={loadingNfs} title="Atualizar"
-            className="p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors">
-            <RefreshCw size={14} className={loadingNfs ? 'animate-spin' : ''}/>
+      <div className="flex items-center gap-2 flex-wrap mb-5">
+        <div className="relative" ref={pickerRef}>
+          <button
+            onClick={() => setShowPicker(v => !v)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border transition-colors
+              ${showPicker ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-white/10 text-slate-300 hover:border-white/20'}`}
+          >
+            <CalendarDays size={14} className="text-emerald-400"/>
+            {labelRange}
+            <ChevronDown size={13} className="text-slate-500"/>
           </button>
+          {showPicker && (
+            <div className="absolute left-0 top-full mt-2 z-50">
+              <RangePicker ini={rangeIni} fim={rangeFim} onConfirm={handleRangeConfirm}/>
+            </div>
+          )}
         </div>
-
-        {/* Canais + DANFE */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {CANAIS.map(c => (
-            <button key={c.id} onClick={() => setCanalSel(c.id)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
-                ${canalSel === c.id
-                  ? c.id === 'all' ? 'bg-slate-600 border-slate-500 text-white' : COR_CANAL[c.cor]
-                  : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
-              {c.label}
-            </button>
-          ))}
-          <span className="w-px h-4 bg-white/10 mx-1"/>
-          {[{id:'all',label:'Todas'},{id:'sem_danfe',label:'Sem DANFE'},{id:'danfe',label:'Com DANFE'}].map(s => (
-            <button key={s.id} onClick={() => setSituacaoSel(s.id)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
-                ${situacaoSel === s.id ? 'bg-slate-600 border-slate-500 text-white' : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
-              {s.label}
-            </button>
-          ))}
-        </div>
+        <button onClick={fetchNFs} disabled={loadingNfs} title="Atualizar"
+          className="p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors">
+          <RefreshCw size={14} className={loadingNfs ? 'animate-spin' : ''}/>
+        </button>
+        <button
+          onClick={() => showRelatorio ? setShowRelatorio(false) : loadRelatorio()}
+          disabled={loadingRelatorio || nfs.length === 0}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border transition-colors
+            ${showRelatorio ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-slate-800 border-white/10 text-slate-400 hover:text-slate-200'}`}
+        >
+          {loadingRelatorio ? <Loader2 size={13} className="animate-spin"/> : <BarChart2 size={13}/>}
+          Relatório
+        </button>
       </div>
 
       {/* ── Resumo ── */}
@@ -937,9 +1125,20 @@ export function BlingPedidos() {
         </div>
       )}
 
-      {/* ── Lista ── */}
+      {/* ── Relatório comparativo ── */}
+      {showRelatorio && relatorioAnterior !== null && (
+        <RelatorioPanel
+          atual={nfs}
+          anterior={relatorioAnterior}
+          rangeIni={rangeIni}
+          rangeFim={rangeFim}
+          onClose={() => setShowRelatorio(false)}
+        />
+      )}
+
+      {/* ── Lista agrupada por marketplace ── */}
       {!loadingNfs && !erro && (
-        nfsFiltradas.length === 0 ? (
+        nfsGrupadas.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <Inbox size={36} className="text-slate-700"/>
             <p className="text-slate-500 text-sm">
@@ -949,30 +1148,103 @@ export function BlingPedidos() {
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {/* Header da lista */}
-            <div className="hidden sm:grid grid-cols-[4rem_6rem_1fr_7rem_6rem_8rem_2rem] gap-3 px-4 py-1.5 text-[11px] font-medium text-slate-600 uppercase tracking-wider">
-              <span>NF</span><span>Canal</span><span>Cliente</span>
-              <span className="text-right">Valor</span><span className="text-right">Data</span>
-              <span>Situação</span><span/>
-            </div>
+          <div className="space-y-4 pb-24">
+            {nfsGrupadas.map(grupo => {
+              const criadosNoGrupo  = grupo.all.filter(n => clonados.has(String(n.id))).length;
+              const pendentesGrupo  = grupo.all.filter(n => !clonados.has(String(n.id)) && nfLogistica[n.id] !== 'fulfillment');
+              const pendentesFlex   = grupo.flex.filter(n => !clonados.has(String(n.id)));
+              const pendentesAgency = grupo.agency.filter(n => !clonados.has(String(n.id)));
+              const cor = canalCor(grupo.rawMkt);
 
-            {nfsFiltradas.map(nf => (
-              <NFRow key={nf.id} nf={nf} clonados={clonados}
-                onClonar={handleClonar} onExpand={handleExpand}
-                expandido={!!expandidos[nf.id]} detalhe={expandidos[nf.id] || null}
-                expandindo={expandindo === nf.id}
-                isFlex={!!flexFlags[nf.id]} onFlexToggle={handleFlexToggle}
-                clonando={clonando}
-                mlLogistica={nfLogistica[nf.id] || null}
-                isSelected={selectedIds.has(nf.id)}
-                onToggleSelect={handleToggleSelect}
-              />
-            ))}
+              return (
+                <div key={grupo.nome} className="rounded-2xl border border-white/8 overflow-hidden">
+                  {/* ── Cabeçalho do grupo ── */}
+                  <div className="flex items-center justify-between px-4 py-3 bg-slate-800/80 border-b border-white/5 flex-wrap gap-2">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${cor}`}>
+                        {grupo.nome}
+                      </span>
+                      <span className="text-sm font-semibold text-slate-300">
+                        {grupo.all.length} pedido{grupo.all.length !== 1 ? 's' : ''}
+                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {grupo.flex.length > 0 && (
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/30 text-amber-400 font-semibold">
+                            ⚡ {grupo.flex.length} flex
+                          </span>
+                        )}
+                        {grupo.agency.length > 0 && (
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-300 font-semibold">
+                            🚚 {grupo.agency.length} agência
+                          </span>
+                        )}
+                        {grupo.full.length > 0 && (
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 font-semibold">
+                            🏬 {grupo.full.length} full
+                          </span>
+                        )}
+                        {criadosNoGrupo > 0 && (
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-semibold">
+                            ✓ {criadosNoGrupo} criado{criadosNoGrupo !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {pendentesGrupo.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        {pendentesFlex.length > 0 && (
+                          <button
+                            onClick={() => handleClonarGrupo(pendentesFlex.map(n => n.id))}
+                            disabled={!!lotePronto}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition-colors"
+                          >
+                            <Flame size={11}/> Criar {pendentesFlex.length} Flex
+                          </button>
+                        )}
+                        {pendentesAgency.length > 0 && (
+                          <button
+                            onClick={() => handleClonarGrupo(pendentesAgency.map(n => n.id))}
+                            disabled={!!lotePronto}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-500/15 border border-blue-500/30 text-blue-300 hover:bg-blue-500/25 disabled:opacity-50 transition-colors"
+                          >
+                            <Truck size={11}/> Criar {pendentesAgency.length} Agência
+                          </button>
+                        )}
+                        {pendentesGrupo.length > 1 && (
+                          <button
+                            onClick={() => handleClonarGrupo(pendentesGrupo.map(n => n.id))}
+                            disabled={!!lotePronto}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600/80 hover:bg-emerald-600 text-white disabled:opacity-50 transition-colors shadow-sm"
+                          >
+                            {lotePronto ? <Loader2 size={11} className="animate-spin"/> : <PackagePlus size={11}/>}
+                            Criar todos ({pendentesGrupo.length})
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
-            <p className="text-xs text-slate-700 text-center pt-2">
-              {nfsFiltradas.length} NF{nfsFiltradas.length !== 1 ? 's' : ''} exibida{nfsFiltradas.length !== 1 ? 's' : ''}
-              {nfsFiltradas.length !== nfs.length ? ` de ${nfs.length}` : ''}
+                  {/* ── NFs do grupo ── */}
+                  <div className="divide-y divide-white/[0.04]">
+                    {grupo.all.map(nf => (
+                      <NFRow key={nf.id} nf={nf} clonados={clonados}
+                        onClonar={handleClonar} onExpand={handleExpand}
+                        expandido={!!expandidos[nf.id]} detalhe={expandidos[nf.id] || null}
+                        expandindo={expandindo === nf.id}
+                        isFlex={!!flexFlags[nf.id]} onFlexToggle={handleFlexToggle}
+                        clonando={clonando}
+                        mlLogistica={nfLogistica[nf.id] || null}
+                        isSelected={selectedIds.has(nf.id)}
+                        onToggleSelect={handleToggleSelect}
+                        selectionMode={selectedIds.size > 0}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            <p className="text-xs text-slate-700 text-center pt-1">
+              {nfsFiltradas.length} NF{nfsFiltradas.length !== 1 ? 's' : ''} em {nfsGrupadas.length} canal{nfsGrupadas.length !== 1 ? 'is' : ''}
             </p>
           </div>
         )

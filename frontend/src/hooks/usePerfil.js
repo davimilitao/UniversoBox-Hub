@@ -9,12 +9,12 @@ import { useState, useEffect } from 'react';
 import { onAuthStateChanged }  from 'firebase/auth';
 import { auth }                from '../firebase';
 
-// Módulos válidos (espelha server.js — inclui 'insumos')
+// Módulos válidos (espelha AppShell ROTAS — moduleId de cada rota)
 const DEFAULT_MODULOS = {
-  admin:      ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo',
-               'embalagens','financas','compras','importar','index','config',
-               'cadastrar','enriquecer-xml'],
-  operacao:   ['pedidos','manual','bling','ml-dashboard','insumos','embalagens','index'],
+  admin:      ['pedidos','manual','bling','ml-dashboard','insumos','reposicao','admin','catalogo',
+               'embalagens','financas','compras','coletas','importar','index','config',
+               'cadastrar','enriquecer-xml','tarefas','design-system'],
+  operacao:   ['pedidos','manual','bling','ml-dashboard','insumos','reposicao','embalagens','coletas','index'],
   financeiro: ['financas','compras','index'],
   catalogo:   ['admin','catalogo','embalagens','cadastrar','enriquecer-xml','compras','importar','index'],
   vendas:     ['catalogo','index'],
