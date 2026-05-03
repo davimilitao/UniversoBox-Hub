@@ -4,8 +4,11 @@
  * @description Pedidos do Bling — NFs de saída autorizadas.
  *              Range picker com presets, filtros por canal e DANFE,
  *              fotos de produto lazy-load, toggle Flex, fluxo para expedição.
- * @version 2.3.0
- * @date 2026-04-03
+ * @version 2.4.0
+ * @date 2026-05-03
+ * @changelog
+ *   2.4.0 — Substitui /api/ml/dashboard (Firebase auth) por /bling/venda-info (sem auth);
+ *           Flex/logística detectados via Bling diretamente — funciona no terminal de expedição.
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -593,9 +596,7 @@ export function BlingPedidos() {
   const [clonando,    setClonando]    = useState(null);
   const [flexFlags,   setFlexFlags]   = useState({});
   const [toast,       setToast]       = useState(null);
-  // Mapa { mlOrderId -> 'flex'|'fulfillment'|'agency' } alimentado por /api/ml/dashboard
-  const [mlByOrderId, setMlByOrderId] = useState({});
-  // Modalidade resolvida por NF (após expand cruzar com mlByOrderId)
+  // Modalidade resolvida por NF — preenchido via /bling/venda-info (sem Firebase auth)
   const [nfLogistica, setNfLogistica] = useState({});
   // Seleção em lote — Set de blingNfId
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -617,29 +618,7 @@ export function BlingPedidos() {
     try { const r = await fetch('/bling/status'); setStatus(await r.json()); } catch {}
   }, []);
 
-  // Carrega mapa de modalidade ML (uma vez ao abrir a tela)
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-      try {
-        // apiFetch não está importado aqui — usa fetch direto, endpoint já aceita cookie/firebase
-        const { getAuthToken } = await import('../../utils/getAuthToken');
-        const token = await getAuthToken();
-        const res = await fetch('/api/ml/dashboard', {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        if (!res.ok) return;
-        const j = await res.json();
-        if (cancel || !j.orders) return;
-        const map = {};
-        for (const o of j.orders) {
-          if (o.id && o.logistica) map[String(o.id)] = o.logistica;
-        }
-        setMlByOrderId(map);
-      } catch {}
-    })();
-    return () => { cancel = true; };
-  }, []);
+  // Nenhuma chamada ao /api/ml/dashboard — logística vem direto do Bling via /bling/venda-info
 
   useEffect(() => {
     fetchStatus();
@@ -668,20 +647,41 @@ export function BlingPedidos() {
 
   useEffect(() => { fetchNFs(); }, [fetchNFs]);
 
-  // Auto-detecta Flex para NFs que já têm numeroPedido na lista (sem precisar expandir)
+  // Busca logística direto do Bling para cada NF da lista (sem Firebase auth — funciona no terminal)
   useEffect(() => {
-    if (!nfs.length || !Object.keys(mlByOrderId).length) return;
-    const autoFlags = {};
-    for (const nf of nfs) {
-      if (!nf.numeroPedido) continue;
-      const tipo = mlByOrderId[String(nf.numeroPedido)];
-      if (tipo === 'flex') autoFlags[nf.id] = true;
-      if (tipo) setNfLogistica(prev => ({ ...prev, [nf.id]: tipo }));
-    }
-    if (Object.keys(autoFlags).length) {
-      setFlexFlags(prev => ({ ...prev, ...autoFlags }));
-    }
-  }, [nfs, mlByOrderId]);
+    if (!nfs.length) return;
+    let cancel = false;
+
+    const nfsComPedido = nfs.filter(nf => nf.numeroPedido);
+    if (!nfsComPedido.length) return;
+
+    Promise.allSettled(
+      nfsComPedido.map(nf =>
+        fetch(`/bling/venda-info/${encodeURIComponent(nf.numeroPedido)}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => (data ? { nfId: nf.id, ...data } : null))
+          .catch(() => null)
+      )
+    ).then(results => {
+      if (cancel) return;
+      const logisticaMap = {};
+      const flexMap      = {};
+      for (const r of results) {
+        const val = r.status === 'fulfilled' ? r.value : null;
+        if (!val?.nfId || !val.logistica) continue;
+        logisticaMap[val.nfId] = val.logistica;
+        if (val.logistica === 'flex') flexMap[val.nfId] = true;
+      }
+      if (Object.keys(logisticaMap).length) {
+        setNfLogistica(prev => ({ ...prev, ...logisticaMap }));
+      }
+      if (Object.keys(flexMap).length) {
+        setFlexFlags(prev => ({ ...prev, ...flexMap }));
+      }
+    });
+
+    return () => { cancel = true; };
+  }, [nfs]);
 
   function handleRangeConfirm(ini, fim) {
     setRangeIni(ini); setRangeFim(fim); setShowPicker(false);
@@ -694,14 +694,7 @@ export function BlingPedidos() {
       const res  = await fetch(`/bling/pedidos/${id}`);
       const data = await res.json();
       setExpandidos(p => ({ ...p, [id]: data.item }));
-      // Resolve modalidade via cruzamento com ML (mlOrderId === ML order.id)
-      const mlId = data.item?.mlOrderId ? String(data.item.mlOrderId) : null;
-      if (mlId && mlByOrderId[mlId]) {
-        const tipo = mlByOrderId[mlId];
-        setNfLogistica(prev => ({ ...prev, [id]: tipo }));
-        // Auto-detecção de Flex: marca a flag sem sobrescrever escolha manual
-        if (tipo === 'flex') setFlexFlags(prev => ({ ...prev, [id]: true }));
-      }
+      // Logística já resolvida pelo useEffect via /bling/venda-info — sem ação extra aqui
     } catch (e) { showToast(`Erro ao carregar itens: ${e.message}`, 'err'); }
     finally { setExpandindo(null); }
   }
@@ -737,9 +730,8 @@ export function BlingPedidos() {
           continue;
         }
       }
-      // Pula Full (não clona)
-      const mlId = detalhe?.mlOrderId ? String(detalhe.mlOrderId) : null;
-      if (mlId && mlByOrderId[mlId] === 'fulfillment') {
+      // Pula Fulfillment (não clona — estoque já está no CD do marketplace)
+      if (nfLogistica[id] === 'fulfillment') {
         setLotePronto(p => ({ ...p, concluidos: p.concluidos + 1 }));
         continue;
       }
