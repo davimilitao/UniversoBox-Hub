@@ -33,6 +33,7 @@ const ROTAS = [
   { key: 'pedidos',        moduleId: 'pedidos',        label: 'Entregas do Dia',   secao: 'Expedição',  Icon: Package,           react: true,  href: '/expedicao/pedidos'    },
   { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,               react: true,  href: '/expedicao/bling'      },
   { key: 'exp-insumos',    moduleId: 'insumos',        label: 'Gestão Insumos',    secao: 'Expedição',  Icon: FlaskConical,      react: true,  href: '/expedicao/insumos'    },
+  { key: 'reposicao',      moduleId: 'reposicao',      label: 'Reposição',         secao: 'Expedição',  Icon: ClipboardList,     react: true,  href: '/expedicao/reposicao'  },
   { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Expedição',  Icon: ShoppingBag,       react: true,  href: '/expedicao/compras'    },
   { key: 'coletas',        moduleId: 'coletas',        label: 'Gestão de Coletas', secao: 'Expedição',  Icon: Truck,             react: true,  href: '/expedicao/coletas'    },
   // Catálogo
