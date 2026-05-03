@@ -2,11 +2,13 @@
  * @file server.js
  * @module app
  * @description Servidor Express principal (rotas, estáticos, integrações).
- * @version 0.4.0
- * @date 2026-04-12
+ * @version 0.5.0
+ * @date 2026-05-03
  * @author UniversoLab
  *
  * @changelog
+ *   0.5.0 — 2026-05-03 — Módulo Reposição: CRUD /api/reposicoes + converter reposição em compra;
+ *             fechar pedido propaga conclusão da reposição vinculada.
  *   0.4.0 — 2026-04-12 — NF-e: parse-xml, fechar pedido (atualiza stock), patch metadados;
  *             GET purchase-orders suporta filtro ?status=.
  *   0.3.0 — 2026-03-31 — Rotas sensíveis: requireAuth JWT → requireFirebaseAuth + requireFirebaseRole;
@@ -1653,6 +1655,18 @@ app.post('/api/compras/:id/fechar', async (req, res, next) => {
       });
     }
 
+    const pedidoData = pedidoSnap.data();
+    if (pedidoData.reposicaoId) {
+      const reposRef  = db.collection('reposicoes').doc(pedidoData.reposicaoId);
+      const reposSnap = await reposRef.get();
+      if (reposSnap.exists && reposSnap.data().status === 'em_compra') {
+        batch.update(reposRef, {
+          status:    'concluida',
+          updatedAt: admin.firestore.Timestamp.now(),
+        });
+      }
+    }
+
     await batch.commit();
     res.json({ ok: true });
   } catch (err) {
@@ -1786,6 +1800,172 @@ app.get('/api/compras/bi', async (req, res, next) => {
     });
   } catch (err) {
     console.error('[GET /api/compras/bi]', err);
+    next(err);
+  }
+});
+
+// ================================================================
+// REPOSIÇÃO
+// ================================================================
+
+// GET /api/reposicoes — lista reposições do tenant, filtro opcional por status
+app.get('/api/reposicoes', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const statusFilter = req.query.status
+      ? req.query.status.split(',').map(s => s.trim()).filter(Boolean)
+      : null;
+
+    const snap = await db.collection('reposicoes')
+      .where('tenantId', '==', tenantId)
+      .orderBy('createdAt', 'desc')
+      .limit(200)
+      .get();
+
+    let items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (statusFilter && statusFilter.length) {
+      items = items.filter(it => statusFilter.includes(it.status));
+    }
+
+    res.json({ items });
+  } catch (err) {
+    console.error('[GET /api/reposicoes]', err);
+    next(err);
+  }
+});
+
+// POST /api/reposicoes — cria nova reposição
+app.post('/api/reposicoes', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId, uid } = req.auth;
+    const { itens, notas } = req.body;
+
+    if (!Array.isArray(itens) || itens.length === 0) {
+      return res.status(400).json({ error: 'Pelo menos um item é obrigatório' });
+    }
+
+    const id  = `REPOS_${Date.now()}_${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    const now = admin.firestore.Timestamp.now();
+
+    await db.collection('reposicoes').doc(id).set({
+      tenantId,
+      uid,
+      itens,
+      notas:     safeTrim(notas || ''),
+      status:    'pendente',
+      compraId:  null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    res.json({ ok: true, id });
+  } catch (err) {
+    console.error('[POST /api/reposicoes]', err);
+    next(err);
+  }
+});
+
+// PATCH /api/reposicoes/:id — atualiza itens, notas ou cancela
+app.patch('/api/reposicoes/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const id  = safeTrim(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID obrigatório' });
+
+    const ref  = db.collection('reposicoes').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: 'Reposição não encontrada' });
+    if (snap.data().tenantId !== tenantId) return res.status(403).json({ error: 'Acesso negado' });
+
+    const patch = { updatedAt: admin.firestore.Timestamp.now() };
+    if (req.body.itens !== undefined) patch.itens = req.body.itens;
+    if (req.body.notas !== undefined) patch.notas = safeTrim(req.body.notas);
+    if (req.body.status === 'cancelada') patch.status = 'cancelada';
+
+    await ref.set(patch, { merge: true });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[PATCH /api/reposicoes/:id]', err);
+    next(err);
+  }
+});
+
+// DELETE /api/reposicoes/:id — exclusão física (admin only)
+app.delete('/api/reposicoes/:id', requireFirebaseAuth, requireFirebaseRole(['admin']), async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const id  = safeTrim(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID obrigatório' });
+
+    const ref  = db.collection('reposicoes').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: 'Reposição não encontrada' });
+    if (snap.data().tenantId !== tenantId) return res.status(403).json({ error: 'Acesso negado' });
+
+    await ref.delete();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/reposicoes/:id]', err);
+    next(err);
+  }
+});
+
+// POST /api/reposicoes/:id/converter — transforma reposição pendente em purchase_order
+app.post('/api/reposicoes/:id/converter', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId, uid } = req.auth;
+    const reposicaoId = safeTrim(req.params.id);
+    if (!reposicaoId) return res.status(400).json({ error: 'ID obrigatório' });
+
+    const reposRef  = db.collection('reposicoes').doc(reposicaoId);
+    const reposSnap = await reposRef.get();
+    if (!reposSnap.exists) return res.status(404).json({ error: 'Reposição não encontrada' });
+
+    const reposicao = reposSnap.data();
+    if (reposicao.tenantId !== tenantId) return res.status(403).json({ error: 'Acesso negado' });
+    if (reposicao.status !== 'pendente') {
+      return res.status(409).json({ error: `Reposição já está com status "${reposicao.status}"` });
+    }
+
+    const ts    = Date.now();
+    const day   = yyyymmdd(new Date(ts));
+    const compraId = `COMP_${day}_${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+
+    const items    = (reposicao.itens || []).map(i => ({ sku: safeTrim(i.sku), qty: Number(i.qtdSugerida || 0), marca: safeTrim(i.marca || '') }));
+    const totalQty = items.reduce((s, i) => s + i.qty, 0);
+    const marcas   = [...new Set(items.map(i => i.marca).filter(m => m && m !== 'N/A'))];
+    const notasPedido = `Originado de reposição: ${reposicaoId}` + (reposicao.notas ? `\n${reposicao.notas}` : '');
+
+    const now   = admin.firestore.Timestamp.now();
+    const batch = db.batch();
+
+    batch.set(db.collection('purchase_orders').doc(compraId), {
+      id:          compraId,
+      items,
+      notas:       notasPedido,
+      modalidade:  'FLEX',
+      status:      'pending',
+      reposicaoId,
+      tenantId,
+      uid,
+      totalQty,
+      totalSkus:   items.length,
+      marcas,
+      mesAno:      day.slice(0, 6),
+      createdAtMs: ts,
+      updatedAtMs: ts,
+    });
+
+    batch.update(reposRef, {
+      status:    'em_compra',
+      compraId,
+      updatedAt: now,
+    });
+
+    await batch.commit();
+    res.json({ ok: true, compraId });
+  } catch (err) {
+    console.error('[POST /api/reposicoes/:id/converter]', err);
     next(err);
   }
 });

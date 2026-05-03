@@ -2,9 +2,10 @@
  * @file App.jsx
  * @description Rotas principais. Rotas dentro do AppShell têm sidebar React.
  *   A rota raiz "/" é o DashboardPage — painel operacional do dia.
- * @version 2.6.0
- * @date 2026-04-25
+ * @version 2.7.0
+ * @date 2026-05-03
  * @changelog
+ *   2.7.0 — 2026-05-03 — Adiciona rota /expedicao/reposicao → GestaoReposicao.
  *   2.6.0 — 2026-04-25 — Fase 3: GestaoMargem, PainelFinanceiro, PainelDRE → redirects.
  *   2.5.0 — 2026-04-24 — Adiciona CalculadoraMarketplace em /financeiro/calculadora.
  *   2.4.0 — 2026-04-21 — SaudeFinanceira como nova home do módulo financeiro.
@@ -30,6 +31,7 @@ import ImageStudio            from './pages/catalogo/ImageStudio';
 import ConfiguracoesSistema   from './pages/sistema/ConfiguracoesSistema';
 import TaskBoard              from './pages/sistema/TaskBoard';
 import Compras                from './pages/expedicao/Compras';
+import GestaoReposicao        from './pages/expedicao/GestaoReposicao';
 import GestaoColetas          from './pages/expedicao/GestaoColetas';
 import DesignSystem           from './pages/admin/DesignSystem';
 import CalculadoraMarketplace from './pages/financeiro/CalculadoraMarketplace';
@@ -50,6 +52,7 @@ export default function App() {
         <Route path="/expedicao/bling"     element={<BlingPedidos />} />
         <Route path="/expedicao/pedidos"   element={<PedidosDoDia />} />
         <Route path="/expedicao/insumos"   element={<GestaoInsumos />} />
+        <Route path="/expedicao/reposicao" element={<GestaoReposicao />} />
         <Route path="/expedicao/compras"   element={<Compras />} />
         <Route path="/expedicao/coletas"   element={<GestaoColetas />} />
         {/* Catálogo */}
