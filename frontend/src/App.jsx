@@ -33,6 +33,8 @@ import TaskBoard              from './pages/sistema/TaskBoard';
 import Compras                from './pages/expedicao/Compras';
 import GestaoReposicao        from './pages/expedicao/GestaoReposicao';
 import GestaoColetas          from './pages/expedicao/GestaoColetas';
+import ExpedicaoV2Scanner     from './pages/expedicao/v2/ExpedicaoV2Scanner';
+import TorreControle          from './pages/expedicao/v2/TorreControle';
 import DesignSystem           from './pages/admin/DesignSystem';
 import CalculadoraMarketplace from './pages/financeiro/CalculadoraMarketplace';
 
@@ -54,7 +56,9 @@ export default function App() {
         <Route path="/expedicao/insumos"   element={<GestaoInsumos />} />
         <Route path="/expedicao/reposicao" element={<GestaoReposicao />} />
         <Route path="/expedicao/compras"   element={<Compras />} />
-        <Route path="/expedicao/coletas"   element={<GestaoColetas />} />
+        <Route path="/expedicao/coletas"      element={<GestaoColetas />} />
+        <Route path="/expedicao/v2/scanner"  element={<ExpedicaoV2Scanner />} />
+        <Route path="/expedicao/v2/torre"    element={<TorreControle />} />
         {/* Catálogo */}
         <Route path="/catalogo/produtos"   element={<CatalogoPro />} />
         <Route path="/catalogo/admin"      element={<AdminProdutos />} />

@@ -24,6 +24,7 @@ import {
   Menu, X, LogOut, Boxes,
   FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
   Heart, PackageCheck, Banknote, KanbanSquare, Palette, Calculator,
+  ScanLine, Radio,
 } from 'lucide-react';
 
 // ─── Mapa de módulos ──────────────────────────────────────────────────────────
@@ -36,6 +37,8 @@ const ROTAS = [
   { key: 'reposicao',      moduleId: 'reposicao',      label: 'Reposição',         secao: 'Expedição',  Icon: ClipboardList,     react: true,  href: '/expedicao/reposicao'  },
   { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Expedição',  Icon: ShoppingBag,       react: true,  href: '/expedicao/compras'    },
   { key: 'coletas',        moduleId: 'coletas',        label: 'Gestão de Coletas', secao: 'Expedição',  Icon: Truck,             react: true,  href: '/expedicao/coletas'    },
+  { key: 'v2-scanner',    moduleId: 'v2-scanner',    label: 'Scanner V2',        secao: 'Expedição V2', Icon: ScanLine,         react: true,  href: '/expedicao/v2/scanner' },
+  { key: 'v2-torre',      moduleId: 'v2-torre',      label: 'Torre de Controle', secao: 'Expedição V2', Icon: Radio,            react: true,  href: '/expedicao/v2/torre'   },
   // Catálogo
   { key: 'catalogo-pro',   moduleId: 'catalogo',       label: 'Catálogo Pro',      secao: 'Catálogo',   Icon: LayoutGrid,        react: true,  href: '/catalogo/produtos'    },
   { key: 'busca-produto',  moduleId: 'catalogo',       label: 'Busca SKU / EAN',   secao: 'Catálogo',   Icon: Search,            react: true,  href: '/catalogo/automacao'   },

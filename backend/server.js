@@ -116,6 +116,30 @@ function padSeq(n, size) {
   return String(n).padStart(size, '0');
 }
 
+// ─── Expedição V2 helpers ─────────────────────────────────────────────────────
+function isoDate(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function v2Prioridade(marketplace) {
+  if (marketplace === 'MERCADO_LIVRE') return 1;
+  if (marketplace === 'SHOPEE') return 2;
+  return 3;
+}
+function v2DataExpedicao(marketplace) {
+  const d = new Date();
+  if (marketplace !== 'OUTROS') return isoDate(d);
+  d.setDate(d.getDate() + 1);
+  return isoDate(d);
+}
+function v2PodeExpedir(o) {
+  return (
+    o.nota_fiscal === true &&
+    o.bloqueado === false &&
+    o.data_expedicao <= isoDate() &&
+    o.status !== 'EXPEDIDO'
+  );
+}
+
 function normalizeText(v) {
   return safeTrim(v).toLowerCase();
 }
@@ -5429,12 +5453,13 @@ app.post('/bling/clonar', async (req, res, next) => {
       const seq     = (cSnap.exists ? Number(cSnap.data().seq || 0) : 0) + 1;
       const orderId = `ORD_${day}_${padSeq(seq, ORDER_SEQ_PAD)}`;
       tx.set(counterRef, { docType: 'counter', day, seq, updatedAtMs: createdAtMs }, { merge: true });
+      const mkt = marketplace || 'OUTROS';
       tx.set(db.collection('orders').doc(orderId), {
         docType:       'order',
         source:        'bling',
         blingNfId:     blingNfId    || null,
         numeroPedido:  numeroPedido || null,
-        marketplace:   marketplace  || 'OUTROS',
+        marketplace:   mkt,
         mlOrderId:     mlOrderId    || null,
         vendaId:       vendaInfo.vendaId,       // ID do pedido de venda Bling (para etiqueta direta)
         logistica:     logisticaFinal,          // 'flex'|'fulfillment'|'agency' — fonte: Bling > body
@@ -5448,6 +5473,30 @@ app.post('/bling/clonar', async (req, res, next) => {
         lockedBy:      terminalId,
         lockedAt:      createdAtMs,
         skusFaltando:  skusFaltando.length ? skusFaltando : null,
+      });
+      // Expedição V2 — espelha o pedido em orders_v2 com campos de controle V2
+      tx.set(db.collection('orders_v2').doc(orderId), {
+        blingNfId:         blingNfId    || null,
+        numeroPedido:      numeroPedido || null,
+        marketplace:       mkt,
+        mlOrderId:         mlOrderId    || null,
+        vendaId:           vendaInfo.vendaId,
+        logistica:         logisticaFinal,
+        clienteNome:       safeTrim(clienteNome) || '',
+        items:             cart.map(it => ({ sku: it.sku, nameShort: it.nameShort, qty: it.qty })),
+        status:            'NA_FILA',
+        nota_fiscal:       true,
+        prioridade:        v2Prioridade(mkt),
+        data_expedicao:    v2DataExpedicao(mkt),
+        bloqueado:         false,
+        motivo_bloqueio:   null,
+        etiqueta_impressa: false,
+        danfe_impressa:    false,
+        createdAtMs,
+        updatedAtMs:       createdAtMs,
+        expedidoAtMs:      null,
+        operadorId:        null,
+        erroMsg:           null,
       });
       return { orderId };
     });
@@ -8005,6 +8054,275 @@ app.get('/api/telegram/chatid-helper', requireFirebaseAuth, async (req, res, nex
     ).values()];
     res.json({ chatIds });
   } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPEDIÇÃO V2 — fluxo paralelo (não toca em orders/)
+// Collection: orders_v2
+// Auth: expedicao_token no header Authorization (mesmo padrão do módulo atual)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v2/expedicao/queue — fila ordenada por prioridade
+app.get('/api/v2/expedicao/queue', async (req, res, next) => {
+  try {
+    const hoje = isoDate();
+    const amanha = isoDate(new Date(Date.now() + 864e5));
+    // Janela de 7 dias para trás — evita acumulação infinita de pedidos velhos com ERRO/NA_FILA
+    const seteDiasAtras = isoDate(new Date(Date.now() - 7 * 864e5));
+
+    const snap = await db.collection('orders_v2')
+      .where('status', 'in', ['NA_FILA', 'EM_PROCESSO', 'ERRO'])
+      .orderBy('createdAtMs', 'desc')
+      .limit(200)
+      .get();
+
+    const items = snap.docs
+      .map(d => {
+        const o = { id: d.id, ...d.data() };
+        o.pode_expedir = v2PodeExpedir(o);
+        return o;
+      })
+      // Filtra fora pedidos com data_expedicao > amanhã ou mais antigos que 7 dias
+      .filter(o => o.data_expedicao >= seteDiasAtras && o.data_expedicao <= amanha);
+
+    // Ordena: bloqueado↑, pode_expedir↓, prioridade↑, data_expedicao↑, createdAtMs↑
+    items.sort((a, b) => {
+      if (a.bloqueado !== b.bloqueado) return a.bloqueado ? 1 : -1;
+      if (a.pode_expedir !== b.pode_expedir) return a.pode_expedir ? -1 : 1;
+      if (a.prioridade !== b.prioridade) return a.prioridade - b.prioridade;
+      if (a.data_expedicao !== b.data_expedicao) return a.data_expedicao < b.data_expedicao ? -1 : 1;
+      return Number(a.createdAtMs || 0) - Number(b.createdAtMs || 0);
+    });
+
+    res.json({ items, hoje, amanha });
+  } catch (err) {
+    console.error('[GET /api/v2/expedicao/queue]', err);
+    next(err);
+  }
+});
+
+// POST /api/v2/expedicao/scan — valida pedido e inicia processamento
+app.post('/api/v2/expedicao/scan', async (req, res, next) => {
+  try {
+    const codigo = safeTrim(req.body.codigo);
+    if (!codigo) return res.status(400).json({ error: 'Código não informado' });
+
+    const operadorId = safeTrim(req.body.operadorId) || 'scanner';
+
+    // Busca por ID direto ou por numeroPedido
+    let snap = await db.collection('orders_v2').doc(codigo).get();
+    if (!snap.exists) {
+      const q = await db.collection('orders_v2')
+        .where('numeroPedido', '==', codigo)
+        .limit(1)
+        .get();
+      if (!q.empty) snap = q.docs[0];
+    }
+
+    if (!snap || !snap.exists) {
+      return res.status(404).json({ error: 'Pedido não encontrado', codigo });
+    }
+
+    const order = { id: snap.id, ...snap.data() };
+
+    if (order.status === 'EXPEDIDO') {
+      return res.status(409).json({ error: 'Pedido já foi expedido', order });
+    }
+    if (order.bloqueado) {
+      return res.status(403).json({ error: `Pedido bloqueado: ${order.motivo_bloqueio || 'sem motivo'}`, order });
+    }
+    if (!order.nota_fiscal) {
+      return res.status(422).json({ error: 'Nota fiscal não autorizada', order });
+    }
+
+    const hoje = isoDate();
+    const warning = order.data_expedicao > hoje
+      ? `Pedido programado para ${order.data_expedicao} — expedir mesmo assim?`
+      : null;
+
+    // Marca como em processo
+    await db.collection('orders_v2').doc(order.id).update({
+      status:      'EM_PROCESSO',
+      operadorId,
+      updatedAtMs: Date.now(),
+    });
+
+    res.json({
+      ok:      true,
+      order:   { ...order, status: 'EM_PROCESSO' },
+      warning,
+      pode_expedir: v2PodeExpedir({ ...order, status: 'EM_PROCESSO' }),
+    });
+  } catch (err) {
+    console.error('[POST /api/v2/expedicao/scan]', err);
+    next(err);
+  }
+});
+
+// PATCH /api/v2/expedicao/:id/expedido — confirma impressão e marca expedido
+app.patch('/api/v2/expedicao/:id/expedido', async (req, res, next) => {
+  try {
+    const id = safeTrim(req.params.id);
+    const { etiqueta_impressa = true, danfe_impressa = true } = req.body;
+
+    await db.collection('orders_v2').doc(id).update({
+      status:            'EXPEDIDO',
+      etiqueta_impressa: Boolean(etiqueta_impressa),
+      danfe_impressa:    Boolean(danfe_impressa),
+      expedidoAtMs:      Date.now(),
+      updatedAtMs:       Date.now(),
+      erroMsg:           null,
+    });
+
+    res.json({ ok: true, id });
+  } catch (err) {
+    console.error('[PATCH /api/v2/expedicao/:id/expedido]', err);
+    next(err);
+  }
+});
+
+// PATCH /api/v2/expedicao/:id/erro — registra falha de impressão
+app.patch('/api/v2/expedicao/:id/erro', async (req, res, next) => {
+  try {
+    const id     = safeTrim(req.params.id);
+    const erroMsg = safeTrim(req.body.erroMsg) || 'Erro de impressão';
+
+    await db.collection('orders_v2').doc(id).update({
+      status:      'ERRO',
+      erroMsg,
+      updatedAtMs: Date.now(),
+    });
+
+    res.json({ ok: true, id });
+  } catch (err) {
+    console.error('[PATCH /api/v2/expedicao/:id/erro]', err);
+    next(err);
+  }
+});
+
+// PATCH /api/v2/expedicao/:id/bloquear — bloqueia ou desbloqueia pedido
+app.patch('/api/v2/expedicao/:id/bloquear', async (req, res, next) => {
+  try {
+    const id      = safeTrim(req.params.id);
+    const bloquear = req.body.bloquear !== false;
+    const motivo   = safeTrim(req.body.motivo) || null;
+
+    await db.collection('orders_v2').doc(id).update({
+      bloqueado:       bloquear,
+      motivo_bloqueio: bloquear ? motivo : null,
+      updatedAtMs:     Date.now(),
+    });
+
+    res.json({ ok: true, id, bloqueado: bloquear });
+  } catch (err) {
+    console.error('[PATCH /api/v2/expedicao/:id/bloquear]', err);
+    next(err);
+  }
+});
+
+// PATCH /api/v2/expedicao/:id/data — altera data de expedição (Torre de Controle)
+app.patch('/api/v2/expedicao/:id/data', async (req, res, next) => {
+  try {
+    const id   = safeTrim(req.params.id);
+    const data = safeTrim(req.body.data_expedicao);
+    if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+      return res.status(400).json({ error: 'data_expedicao deve estar no formato YYYY-MM-DD' });
+    }
+
+    await db.collection('orders_v2').doc(id).update({
+      data_expedicao: data,
+      updatedAtMs:    Date.now(),
+    });
+
+    res.json({ ok: true, id, data_expedicao: data });
+  } catch (err) {
+    console.error('[PATCH /api/v2/expedicao/:id/data]', err);
+    next(err);
+  }
+});
+
+// GET /api/v2/expedicao/torre — KPIs e alertas para Torre de Controle
+app.get('/api/v2/expedicao/torre', async (req, res, next) => {
+  try {
+    const hoje = isoDate();
+    // Início do dia em ms — para filtrar expedidos pelo momento real da expedição
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStartMs = todayStart.getTime();
+
+    // Busca pedidos ativos (não expedidos) + expedidos de hoje (por expedidoAtMs, não data_expedicao)
+    // Filtro por expedidoAtMs feito em memória para evitar índice composto adicional
+    const [activoSnap, expedidoSnap] = await Promise.all([
+      db.collection('orders_v2')
+        .where('status', 'in', ['NA_FILA', 'EM_PROCESSO', 'ERRO'])
+        .limit(500)
+        .get(),
+      db.collection('orders_v2')
+        .where('status', '==', 'EXPEDIDO')
+        .limit(500)
+        .get(),
+    ]);
+
+    const ativos    = activoSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Expedidos hoje = expedidoAtMs dentro do dia corrente (cobre OUTROS com data_expedicao != hoje)
+    const expedidos = expedidoSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(o => Number(o.expedidoAtMs || 0) >= todayStartMs);
+
+    const prontos    = ativos.filter(o => v2PodeExpedir(o) && !o.bloqueado);
+    const bloqueados = ativos.filter(o => o.bloqueado);
+    const comErro    = ativos.filter(o => o.status === 'ERRO');
+    const emProcesso = ativos.filter(o => o.status === 'EM_PROCESSO');
+
+    // Contagem por marketplace (pedidos prontos de hoje)
+    const porMkt = { MERCADO_LIVRE: 0, SHOPEE: 0, OUTROS: 0 };
+    for (const o of ativos) {
+      if (o.data_expedicao === hoje) {
+        const k = o.marketplace === 'MERCADO_LIVRE' ? 'MERCADO_LIVRE'
+                : o.marketplace === 'SHOPEE'        ? 'SHOPEE'
+                : 'OUTROS';
+        porMkt[k]++;
+      }
+    }
+
+    // Alertas
+    const alertas = [
+      ...comErro.map(o => ({
+        tipo: 'erro',
+        msg:  `Pedido ${o.id} com erro: ${o.erroMsg || 'falha de impressão'}`,
+        orderId: o.id,
+      })),
+      ...bloqueados.map(o => ({
+        tipo: 'bloqueio',
+        msg:  `Pedido ${o.id} bloqueado: ${o.motivo_bloqueio || 'sem motivo'}`,
+        orderId: o.id,
+      })),
+    ];
+
+    res.json({
+      hoje,
+      kpis: {
+        prontos:      prontos.length,
+        emProcesso:   emProcesso.length,
+        expedidos:    expedidos.length,
+        comErro:      comErro.length,
+        bloqueados:   bloqueados.length,
+        totalHoje:    ativos.filter(o => o.data_expedicao === hoje).length + expedidos.length,
+      },
+      porMarketplace: porMkt,
+      alertas,
+      proximosDaFila: prontos.slice(0, 8).map(o => ({
+        id:            o.id,
+        marketplace:   o.marketplace,
+        clienteNome:   o.clienteNome,
+        prioridade:    o.prioridade,
+        data_expedicao: o.data_expedicao,
+        qtdItens:      (o.items || []).reduce((s, it) => s + Number(it.qty || 0), 0),
+      })),
+    });
+  } catch (err) {
+    console.error('[GET /api/v2/expedicao/torre]', err);
+    next(err);
+  }
 });
 
 // ---------------- Errors ----------------
