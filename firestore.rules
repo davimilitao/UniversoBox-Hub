@@ -102,7 +102,13 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
-    // ── 8) Catch-all: nega tudo que não foi explicitamente permitido ───────────
+    // ── 8) Expedição V2 — coleção orders_v2 (acesso autenticado) ────────────────
+    // Leitura pelo client SDK (onSnapshot na Torre de Controle); escrita pelo backend via Admin SDK.
+    match /orders_v2/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ── 9) Catch-all: nega tudo que não foi explicitamente permitido ───────────
     // Por que: reduz superfície de ataque (coleções legadas em /root ficam bloqueadas).
     match /{document=**} {
       allow read, write: if false;

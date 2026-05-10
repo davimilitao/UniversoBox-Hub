@@ -8070,9 +8070,9 @@ app.get('/api/v2/expedicao/queue', async (req, res, next) => {
     // Janela de 7 dias para trás — evita acumulação infinita de pedidos velhos com ERRO/NA_FILA
     const seteDiasAtras = isoDate(new Date(Date.now() - 7 * 864e5));
 
+    // Sem orderBy para evitar exigir índice composto no Firestore — sort feito em memória abaixo
     const snap = await db.collection('orders_v2')
       .where('status', 'in', ['NA_FILA', 'EM_PROCESSO', 'ERRO'])
-      .orderBy('createdAtMs', 'desc')
       .limit(200)
       .get();
 
