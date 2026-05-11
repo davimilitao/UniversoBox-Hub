@@ -6491,7 +6491,7 @@ app.post('/api/expedicao/ajuda', async (req, res, next) => {
 app.get('/api/etiqueta-logistica/:orderId', async (req, res, next) => {
   try {
     const orderId = safeTrim(req.params.orderId);
-    const formato = (req.query.formato || 'PDF').toUpperCase(); // PDF | ZPL
+    const formato = (req.query.formato || 'ZPL').toUpperCase(); // ZPL | PDF
 
     // 1. Busca o pedido no Firestore
     const snap = await db.collection('orders').doc(orderId).get();
@@ -6561,7 +6561,18 @@ app.get('/api/etiqueta-logistica/:orderId', async (req, res, next) => {
       return res.status(404).json({ error: 'Etiqueta sem link', vendaId, data: etiquetas, diagnostico });
     }
 
-    res.json({ ok: true, link, formato, vendaId, orderId, diagnostico });
+    // Fetch ZPL content server-side (frontend não pode por CORS)
+    let zplContent = null;
+    try {
+      const resp = await fetch(link);
+      const text = await resp.text();
+      const trimmed = text.trimStart();
+      if (trimmed.startsWith('^XA') || trimmed.startsWith('^xa')) {
+        zplContent = text;
+      }
+    } catch (_) {}
+
+    res.json({ ok: true, link, formato, zpl: zplContent, vendaId, orderId, diagnostico });
   } catch (err) {
     next(err);
   }
