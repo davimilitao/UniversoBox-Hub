@@ -8325,6 +8325,58 @@ app.get('/api/v2/expedicao/torre', async (req, res, next) => {
   }
 });
 
+// POST /api/v2/expedicao/backfill — migração única de orders → orders_v2
+// Idempotente: pula docs que já existem em orders_v2. Sem auth — remover após uso.
+app.post('/api/v2/expedicao/backfill', async (req, res, next) => {
+  try {
+
+    const snap = await db.collection('orders').where('status', '==', 'pending').get();
+
+    const batch = db.batch();
+    let migrated = 0;
+    let skipped = 0;
+
+    for (const doc of snap.docs) {
+      const o = doc.data();
+      const v2Ref = db.collection('orders_v2').doc(doc.id);
+      const v2Snap = await v2Ref.get();
+      if (v2Snap.exists) { skipped++; continue; }
+
+      const mkt = o.marketplace || 'OUTROS';
+      batch.set(v2Ref, {
+        blingNfId:         o.blingNfId    || null,
+        numeroPedido:      o.numeroPedido || null,
+        marketplace:       mkt,
+        mlOrderId:         o.mlOrderId    || null,
+        vendaId:           o.vendaId      || null,
+        logistica:         o.logistica    || 'agency',
+        clienteNome:       o.clienteNome  || '',
+        items:             (o.items || []).map(it => ({ sku: it.sku, nameShort: it.nameShort, qty: it.qty })),
+        status:            'NA_FILA',
+        nota_fiscal:       true,
+        prioridade:        v2Prioridade(mkt),
+        data_expedicao:    isoDate(),
+        bloqueado:         false,
+        motivo_bloqueio:   null,
+        etiqueta_impressa: false,
+        danfe_impressa:    false,
+        createdAtMs:       o.createdAtMs || Date.now(),
+        updatedAtMs:       Date.now(),
+        expedidoAtMs:      null,
+        operadorId:        null,
+        erroMsg:           null,
+      });
+      migrated++;
+    }
+
+    await batch.commit();
+    res.json({ ok: true, migrated, skipped });
+  } catch (err) {
+    console.error('[POST /api/v2/expedicao/backfill]', err);
+    next(err);
+  }
+});
+
 // ---------------- Errors ----------------
 app.use((err, req, res, next) => {
   const status = err.statusCode || 500;
