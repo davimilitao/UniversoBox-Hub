@@ -12,8 +12,6 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getDoc, doc } from 'firebase/firestore';
-import { db } from '../../../firebase';
 import {
   ScanLine, CheckCircle2, XCircle, AlertTriangle, Package,
   Clock, Wifi, WifiOff, Pause, Play, List, CalendarDays,
@@ -407,8 +405,8 @@ export default function ExpedicaoV2Scanner() {
     setExpedirResult(null);
     setLoadingDetail(true);
     try {
-      const snap = await getDoc(doc(db, 'orders', orderId));
-      setOrderDetail(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+      const r = await api(`/api/v2/expedicao/order/${encodeURIComponent(orderId)}`);
+      setOrderDetail(r?.ok ? r.data.order : null);
     } catch {
       setOrderDetail(null);
     } finally {
