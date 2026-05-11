@@ -37,6 +37,7 @@ const ROTAS = [
   { key: 'reposicao',      moduleId: 'reposicao',      label: 'Reposição',         secao: 'Expedição',  Icon: ClipboardList,     react: true,  href: '/expedicao/reposicao'  },
   { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Expedição',  Icon: ShoppingBag,       react: true,  href: '/expedicao/compras'    },
   { key: 'coletas',        moduleId: 'coletas',        label: 'Gestão de Coletas', secao: 'Expedição',  Icon: Truck,             react: true,  href: '/expedicao/coletas'    },
+  { key: 'pedidos-v2',    moduleId: 'pedidos-v2',    label: 'Entregas V2',       secao: 'Expedição',  Icon: Package,           react: true,  href: '/expedicao/pedidos-v2' },
 
   // Catálogo
   { key: 'catalogo-pro',   moduleId: 'catalogo',       label: 'Catálogo Pro',      secao: 'Catálogo',   Icon: LayoutGrid,        react: true,  href: '/catalogo/produtos'    },

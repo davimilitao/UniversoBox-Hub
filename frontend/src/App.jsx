@@ -33,6 +33,7 @@ import TaskBoard              from './pages/sistema/TaskBoard';
 import Compras                from './pages/expedicao/Compras';
 import GestaoReposicao        from './pages/expedicao/GestaoReposicao';
 import GestaoColetas          from './pages/expedicao/GestaoColetas';
+import PedidosDoDiaV2        from './pages/expedicao/PedidosDoDiaV2';
 
 import DesignSystem           from './pages/admin/DesignSystem';
 import CalculadoraMarketplace from './pages/financeiro/CalculadoraMarketplace';
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="/expedicao/reposicao" element={<GestaoReposicao />} />
         <Route path="/expedicao/compras"   element={<Compras />} />
         <Route path="/expedicao/coletas"      element={<GestaoColetas />} />
+        <Route path="/expedicao/pedidos-v2"  element={<PedidosDoDiaV2 />} />
 
         {/* Catálogo */}
         <Route path="/catalogo/produtos"   element={<CatalogoPro />} />
