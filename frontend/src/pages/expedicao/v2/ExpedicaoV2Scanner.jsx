@@ -1,19 +1,23 @@
 /**
  * @file ExpedicaoV2Scanner.jsx
  * @module expedicao/v2
- * @description Tela de scanner do fluxo Expedição V2.
- *   Layout completo: sidebar própria + zona de scan + painel direito com fila e alertas.
- *   Operação física: bipa → imprime etiqueta + DANFE → próximo pedido. Zero clique.
- * @version 2.0.0
+ * @description Tela operacional de expedição V2.
+ *   Layout 3 colunas: sidebar nav | fila clicável de pedidos | detalhe + expedir.
+ *   Fluxo: operador clica no pedido → vê itens/foto/bin → clica Expedir Agora.
+ *   Scan de ORD_ como atalho rápido opcional (abaixo da fila).
+ * @version 2.1.0
  * @date 2026-05-10
+ * @changelog 2.1.0 - Redesign: fila clicável + painel detalhe com itens/foto/bin
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { getDoc, doc } from 'firebase/firestore';
+import { db } from '../../../firebase';
 import {
-  ScanLine, CheckCircle2, XCircle, AlertTriangle, Printer,
-  Package, Clock, ChevronRight, Wifi, WifiOff, Pause, Play,
-  List, CalendarDays, History, AlertCircle, Settings, User,
-  LayoutDashboard, Maximize2, Minimize2,
+  ScanLine, CheckCircle2, XCircle, AlertTriangle, Package,
+  Clock, Wifi, WifiOff, Pause, Play, List, CalendarDays,
+  History, AlertCircle, Settings, LayoutDashboard,
+  Maximize2, Minimize2, MapPin, Loader2, Zap, X,
 } from 'lucide-react';
 
 // ─── Terminal & Auth ──────────────────────────────────────────────────────────
@@ -161,38 +165,45 @@ function MktBadge({ mkt, size = 'sm' }) {
   return <span className={`${cls} bg-slate-600 text-slate-200`}>OUT</span>;
 }
 
-function StatusBadge({ status }) {
-  const map = {
-    SUCESSO: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40',
-    ERRO:    'bg-red-500/20 text-red-400 border border-red-500/40',
-    AVISO:   'bg-amber-500/20 text-amber-400 border border-amber-500/40',
-  };
-  return <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${map[status] || map.AVISO}`}>{status}</span>;
+function PrioridadeDot({ prioridade }) {
+  if (prioridade === 1) return <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" title="Alta — Mercado Livre" />;
+  if (prioridade === 2) return <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" title="Média — Shopee" />;
+  return <span className="w-2 h-2 rounded-full bg-slate-600 shrink-0" title="Baixa — Outros" />;
 }
 
-function fmtTime(ms) {
-  if (!ms) return '—';
-  return new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+function StatusFilaBadge({ order }) {
+  if (order.bloqueado)
+    return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/20 text-red-400 uppercase">BLOQUEADO</span>;
+  if (order.status === 'ERRO')
+    return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/20 text-red-400 uppercase">ERRO</span>;
+  if (order.status === 'EM_PROCESSO')
+    return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/20 text-blue-400 uppercase">EM PROCESSO</span>;
+  if (order.pode_expedir === false)
+    return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-400 uppercase">AGENDADO</span>;
+  return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 uppercase">PRONTO</span>;
 }
 
-function now() { return Date.now(); }
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const [, m, d] = iso.split('-');
+  return `${d}/${m}`;
+}
 
-// ─── Sidebar interna ──────────────────────────────────────────────────────────
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
 function Sidebar({ counts, activeSection, onSection }) {
   const items = [
-    { id: 'scanner',  icon: ScanLine,        label: 'Scanner',           sub: 'Modo Operacional' },
-    { id: 'fila',     icon: List,            label: 'Fila de Pedidos',   count: counts.hoje },
-    { id: 'amanha',   icon: CalendarDays,    label: 'Amanhã',            count: counts.amanha },
-    { id: 'historico',icon: History,         label: 'Histórico',         sub: 'Expedidos' },
-    { id: 'pendencias',icon: AlertCircle,    label: 'Pendências',        count: counts.erros, countColor: 'text-red-400' },
-    null, // divider
-    { id: 'torre',    icon: LayoutDashboard, label: 'Torre de Controle', sub: 'Dashboard', href: '/spa/expedicao/v2/torre' },
-    { id: 'config',   icon: Settings,        label: 'Configurações',     sub: 'Impressão' },
+    { id: 'scanner',    icon: ScanLine,        label: 'Scanner',           sub: 'Operacional' },
+    { id: 'fila',       icon: List,            label: 'Fila de Pedidos',   count: counts.hoje },
+    { id: 'amanha',     icon: CalendarDays,    label: 'Amanhã',            count: counts.amanha },
+    { id: 'historico',  icon: History,         label: 'Histórico',         sub: 'Expedidos' },
+    { id: 'pendencias', icon: AlertCircle,     label: 'Pendências',        count: counts.erros, countColor: 'text-red-400' },
+    null,
+    { id: 'torre',      icon: LayoutDashboard, label: 'Torre de Controle', sub: 'Dashboard', href: '/spa/expedicao/v2/torre' },
+    { id: 'config',     icon: Settings,        label: 'Configurações',     sub: 'Impressão' },
   ];
 
   return (
     <aside className="w-44 shrink-0 flex flex-col border-r border-slate-800" style={{ background: '#020617' }}>
-      {/* Logo */}
       <div className="flex items-center gap-2 px-3 py-3 border-b border-slate-800">
         <div className="w-7 h-7 rounded bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
           <ScanLine size={14} className="text-emerald-400" />
@@ -200,7 +211,6 @@ function Sidebar({ counts, activeSection, onSection }) {
         <span className="text-xs font-bold text-white leading-tight">UniversoBox</span>
       </div>
 
-      {/* Nav items */}
       <nav className="flex-1 py-2 overflow-y-auto">
         {items.map((item, i) => {
           if (!item) return <div key={i} className="my-2 mx-3 border-t border-slate-800" />;
@@ -231,7 +241,6 @@ function Sidebar({ counts, activeSection, onSection }) {
         })}
       </nav>
 
-      {/* Operador */}
       <div className="border-t border-slate-800 px-3 py-2.5">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-full bg-emerald-600 flex items-center justify-center text-[10px] font-bold text-white shrink-0">
@@ -247,24 +256,86 @@ function Sidebar({ counts, activeSection, onSection }) {
   );
 }
 
+// ─── OrderCard (card clicável na fila) ───────────────────────────────────────
+function OrderCard({ order, selected, onClick }) {
+  const totalItens = (order.items || []).reduce((s, it) => s + Number(it.qty || 0), 0);
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left rounded-xl border p-3 transition-all mb-2 ${
+        selected
+          ? 'border-emerald-500/60 bg-emerald-900/15 ring-1 ring-emerald-500/20'
+          : order.bloqueado || order.status === 'ERRO'
+            ? 'border-red-800/40 bg-red-950/10 hover:border-red-700/50'
+            : 'border-slate-700/50 bg-slate-900/30 hover:border-slate-600 hover:bg-slate-800/40'
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-1.5">
+        <PrioridadeDot prioridade={order.prioridade} />
+        <span className="font-mono text-xs font-bold text-white flex-1 truncate">{order.id}</span>
+        <MktBadge mkt={order.marketplace} />
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-slate-400 flex-1 truncate">{order.clienteNome || '—'}</span>
+        <StatusFilaBadge order={order} />
+      </div>
+      <div className="flex items-center gap-3 mt-1.5 text-[10px] text-slate-600">
+        <span className="flex items-center gap-1"><Package size={9} /> {totalItens} {totalItens === 1 ? 'item' : 'itens'}</span>
+        <span className="flex items-center gap-1"><CalendarDays size={9} /> {fmtDate(order.data_expedicao)}</span>
+      </div>
+    </button>
+  );
+}
+
+// ─── ItemDetail (linha de item no painel de detalhe) ─────────────────────────
+function ItemDetail({ item }) {
+  const foto = item.stockPhotos?.[0] || item.image || null;
+  const bin  = item.customBin || item.bin || '';
+  const nome = item.nameShort || item.name || item.sku || '—';
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-xl border border-slate-800/60 bg-slate-900/30">
+      <div className="w-16 h-16 shrink-0 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/40">
+        {foto
+          ? <img src={foto} onError={e => { e.target.src = '/assets/placeholder.png'; }} className="w-full h-full object-cover" alt="" />
+          : <div className="w-full h-full flex items-center justify-center"><Package size={20} className="text-slate-600" /></div>
+        }
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-slate-200 font-medium leading-tight">{nome}</p>
+        <p className="text-[11px] text-slate-500 font-mono mt-0.5">{item.sku}</p>
+        {bin && (
+          <div className="flex items-center gap-1 mt-1.5">
+            <MapPin size={10} className="text-amber-400 shrink-0" />
+            <span className="text-xs font-bold text-amber-400">{bin}</span>
+          </div>
+        )}
+      </div>
+      <div className="shrink-0 text-right">
+        <span className="text-2xl font-bold text-white leading-none">{item.qty}</span>
+        <p className="text-[10px] text-slate-600">und</p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function ExpedicaoV2Scanner() {
-  const [codigo, setCodigo]           = useState('');
-  const [processing, setProcessing]   = useState(false);
-  const [paused, setPaused]           = useState(false);
-  const [fullscreen, setFullscreen]   = useState(false);
-  const [lastResult, setLastResult]   = useState(null);
-  const [printStatus, setPrintStatus] = useState('');
-  const [scanStart, setScanStart]     = useState(null);
-  const [queue, setQueue]             = useState([]);
-  const [alertas, setAlertas]         = useState([]);
-  const [counts, setCounts]           = useState({ hoje: 0, amanha: 0, erros: 0 });
-  const [qzOnline, setQzOnline]       = useState(false);
-  const [activeSection, setActiveSection] = useState('scanner');
-  const [hora, setHora]               = useState('');
-  const inputRef                      = useRef(null);
-
-  const focusInput = useCallback(() => { if (!paused) inputRef.current?.focus(); }, [paused]);
+  const [queue, setQueue]                   = useState([]);
+  const [counts, setCounts]                 = useState({ hoje: 0, amanha: 0, erros: 0 });
+  const [selectedId, setSelectedId]         = useState(null);
+  const [orderDetail, setOrderDetail]       = useState(null);
+  const [loadingDetail, setLoadingDetail]   = useState(false);
+  const [expedindo, setExpedindo]           = useState(false);
+  const [expedirResult, setExpedirResult]   = useState(null);
+  const [printStatus, setPrintStatus]       = useState('');
+  const [codigo, setCodigo]                 = useState('');
+  const [scanErro, setScanErro]             = useState('');
+  const [paused, setPaused]                 = useState(false);
+  const [fullscreen, setFullscreen]         = useState(false);
+  const [qzOnline, setQzOnline]             = useState(false);
+  const [activeSection, setActiveSection]   = useState('scanner');
+  const [hora, setHora]                     = useState('');
+  const scanRef                             = useRef(null);
 
   // Relógio
   useEffect(() => {
@@ -274,41 +345,12 @@ export default function ExpedicaoV2Scanner() {
     return () => clearInterval(id);
   }, []);
 
-  // Auto-foco
-  useEffect(() => {
-    focusInput();
-    const id = setInterval(focusInput, 2000);
-    return () => clearInterval(id);
-  }, [focusInput]);
-
-  // QZ
+  // QZ Tray
   useEffect(() => {
     qzConnect().then(() => setQzOnline(true)).catch(() => setQzOnline(false));
   }, []);
 
-  // Carrega fila
-  const loadQueue = useCallback(async () => {
-    const r = await api('/api/v2/expedicao/queue');
-    if (r?.ok) {
-      const items = r.data.items || [];
-      setQueue(items.slice(0, 8));
-      const hoje = r.data.hoje || '';
-      const amanha = r.data.amanha || '';
-      const erros = items.filter(o => o.status === 'ERRO').length;
-      const hj = items.filter(o => o.data_expedicao === hoje).length;
-      const am = items.filter(o => o.data_expedicao === amanha).length;
-      setCounts({ hoje: hj, amanha: am, erros });
-      setAlertas(items.filter(o => o.status === 'ERRO').slice(0, 5));
-    }
-  }, []);
-
-  useEffect(() => {
-    loadQueue();
-    const id = setInterval(loadQueue, 30000);
-    return () => clearInterval(id);
-  }, [loadQueue]);
-
-  // Fullscreen
+  // Fullscreen listener
   useEffect(() => {
     const handler = () => setFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
@@ -320,35 +362,92 @@ export default function ExpedicaoV2Scanner() {
     else document.exitFullscreen?.();
   };
 
-  const handleScan = useCallback(async (e) => {
+  // Carrega fila de orders_v2
+  const loadQueue = useCallback(async () => {
+    const r = await api('/api/v2/expedicao/queue');
+    if (r?.ok) {
+      const items  = r.data.items  || [];
+      const hoje   = r.data.hoje   || '';
+      const amanha = r.data.amanha || '';
+      setQueue(items);
+      setCounts({
+        hoje:   items.filter(o => o.data_expedicao === hoje).length,
+        amanha: items.filter(o => o.data_expedicao === amanha).length,
+        erros:  items.filter(o => o.status === 'ERRO' || o.bloqueado).length,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    loadQueue();
+    const id = setInterval(loadQueue, 30_000);
+    return () => clearInterval(id);
+  }, [loadQueue]);
+
+  // Seleciona pedido e busca detalhes ricos de orders/{id}
+  const selectOrder = useCallback(async (orderId) => {
+    if (selectedId === orderId) {
+      setSelectedId(null);
+      setOrderDetail(null);
+      setExpedirResult(null);
+      return;
+    }
+    setSelectedId(orderId);
+    setOrderDetail(null);
+    setExpedirResult(null);
+    setLoadingDetail(true);
+    try {
+      const snap = await getDoc(doc(db, 'orders', orderId));
+      setOrderDetail(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    } catch {
+      setOrderDetail(null);
+    } finally {
+      setLoadingDetail(false);
+    }
+  }, [selectedId]);
+
+  // Campo de scan — busca ORD_ na fila e seleciona
+  const handleScanSubmit = useCallback((e) => {
     e.preventDefault();
     const cod = codigo.trim();
-    if (!cod || processing || paused) return;
+    if (!cod) return;
+    const found = queue.find(o => o.id === cod || o.numeroPedido === cod);
+    if (found) {
+      setScanErro('');
+      setCodigo('');
+      selectOrder(found.id);
+    } else {
+      beep(false);
+      setScanErro(`"${cod}" não encontrado na fila`);
+      setTimeout(() => setScanErro(''), 3000);
+    }
+  }, [codigo, queue, selectOrder]);
 
-    const t0 = now();
-    setScanStart(t0);
-    setProcessing(true);
-    setPrintStatus('Validando pedido…');
+  // Expedir pedido selecionado
+  const handleExpedir = useCallback(async () => {
+    if (!selectedId || expedindo || paused) return;
+
+    setExpedindo(true);
+    setExpedirResult(null);
+    const t0 = Date.now();
 
     try {
+      setPrintStatus('Validando pedido…');
       const scanRes = await api('/api/v2/expedicao/scan', {
         method: 'POST',
-        body: JSON.stringify({ codigo: cod, operadorId: TERMINAL_ID }),
+        body: JSON.stringify({ codigo: selectedId, operadorId: TERMINAL_ID }),
       });
 
       if (!scanRes?.ok) {
         beep(false);
-        setLastResult({ status: 'ERRO', msg: scanRes?.data?.error || 'Erro ao processar', order: scanRes?.data?.order, elapsed: now() - t0 });
-        setCodigo('');
+        setExpedirResult({ ok: false, msg: scanRes?.data?.error || 'Erro ao processar' });
         return;
       }
 
       const { order, warning } = scanRes.data;
       if (warning) beepAlerta();
 
-      let etiquetaOk = false;
-      let danfeOk = false;
-      let erroMsg = null;
+      let etiquetaOk = false, danfeOk = false, erroMsg = null;
 
       try {
         setPrintStatus('Imprimindo etiqueta de envio…');
@@ -361,10 +460,12 @@ export default function ExpedicaoV2Scanner() {
           setPrintStatus('Imprimindo DANFE…');
           await printDanfe(order.blingNfId);
           danfeOk = true;
-        } else { danfeOk = true; }
-      } catch (err) { erroMsg = erroMsg ? `${erroMsg} | DANFE: ${err.message}` : `DANFE: ${err.message}`; }
-
-      const elapsed = now() - t0;
+        } else {
+          danfeOk = true;
+        }
+      } catch (err) {
+        erroMsg = erroMsg ? `${erroMsg} | DANFE: ${err.message}` : `DANFE: ${err.message}`;
+      }
 
       if (etiquetaOk || danfeOk) {
         await api(`/api/v2/expedicao/${order.id}/expedido`, {
@@ -372,7 +473,9 @@ export default function ExpedicaoV2Scanner() {
           body: JSON.stringify({ etiqueta_impressa: etiquetaOk, danfe_impressa: danfeOk }),
         });
         beep(true);
-        setLastResult({ status: 'SUCESSO', order: { ...order, etiqueta_impressa: etiquetaOk, danfe_impressa: danfeOk }, warning, elapsed });
+        setExpedirResult({ ok: true, order, warning, elapsed: Date.now() - t0 });
+        setSelectedId(null);
+        setOrderDetail(null);
         loadQueue();
       } else {
         await api(`/api/v2/expedicao/${order.id}/erro`, {
@@ -380,29 +483,21 @@ export default function ExpedicaoV2Scanner() {
           body: JSON.stringify({ erroMsg }),
         });
         beep(false);
-        setLastResult({ status: 'ERRO', msg: erroMsg, order, elapsed });
+        setExpedirResult({ ok: false, msg: erroMsg, order });
       }
     } catch (err) {
       beep(false);
-      setLastResult({ status: 'ERRO', msg: err.message, elapsed: now() - (scanStart || t0) });
+      setExpedirResult({ ok: false, msg: err.message });
     } finally {
-      setProcessing(false);
+      setExpedindo(false);
       setPrintStatus('');
-      setCodigo('');
-      setTimeout(focusInput, 100);
     }
-  }, [codigo, processing, paused, focusInput, loadQueue, scanStart]);
+  }, [selectedId, expedindo, paused, loadQueue]);
 
-  const StatusDot = ({ ok, label }) => (
-    <div className="flex items-center gap-1.5">
-      <div className={`w-1.5 h-1.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
-      <span className="text-xs text-slate-300">{label}</span>
-      <span className={`text-xs font-semibold ${ok ? 'text-emerald-400' : 'text-red-400'}`}>{ok ? 'ONLINE' : 'OFFLINE'}</span>
-    </div>
-  );
+  const selectedQueueItem = queue.find(o => o.id === selectedId);
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: '#020617', color: '#e2e8f0' }} onClick={focusInput}>
+    <div className="flex h-screen overflow-hidden" style={{ background: '#020617', color: '#e2e8f0' }}>
 
       {/* Sidebar */}
       <Sidebar counts={counts} activeSection={activeSection} onSection={setActiveSection} />
@@ -413,24 +508,19 @@ export default function ExpedicaoV2Scanner() {
         {/* Header */}
         <header className="shrink-0 flex items-center gap-3 px-4 h-12 border-b border-slate-800 bg-slate-950/80">
           <ScanLine size={16} className="text-emerald-400 shrink-0" />
-          <span className="font-bold text-white text-sm tracking-wide">EXPEDIÇÃO V2 – SCANNER</span>
+          <span className="font-bold text-white text-sm tracking-wide">EXPEDIÇÃO V2</span>
           <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold uppercase">
             {paused ? 'Pausado' : 'Modo Operacional'}
           </span>
 
-          <div className="flex items-center gap-4 ml-2">
-            <StatusDot ok={qzOnline} label="Impressora Etiqueta" />
-            <StatusDot ok={qzOnline} label="Impressora DANFE" />
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span className="text-xs text-slate-300">Sistema</span>
-              <span className="text-xs font-semibold text-emerald-400">OK</span>
-            </div>
-          </div>
+          <span className={`flex items-center gap-1.5 text-xs ml-1 ${qzOnline ? 'text-emerald-400' : 'text-slate-600'}`}>
+            {qzOnline ? <Wifi size={11} /> : <WifiOff size={11} />}
+            Impressora {qzOnline ? 'ONLINE' : 'OFFLINE'}
+          </span>
 
           <div className="ml-auto flex items-center gap-2">
             <button
-              onClick={() => { setPaused(p => !p); focusInput(); }}
+              onClick={() => setPaused(p => !p)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
                 paused
                   ? 'bg-emerald-600/20 border-emerald-600/40 text-emerald-400 hover:bg-emerald-600/30'
@@ -442,212 +532,215 @@ export default function ExpedicaoV2Scanner() {
             <button onClick={toggleFullscreen} className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 transition-colors">
               {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             </button>
-            <div className="text-xs text-slate-500 pl-2 border-l border-slate-800">
+            <div className="text-xs text-slate-500 pl-2 border-l border-slate-800 text-right">
               <div className="text-white font-bold">{hora}</div>
               <div>{new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}</div>
             </div>
           </div>
         </header>
 
-        {/* Body */}
-        <div className="flex-1 flex gap-0 overflow-hidden">
+        {/* Body — painel fila + painel detalhe */}
+        <div className="flex-1 flex overflow-hidden">
 
-          {/* Zona central */}
-          <div className="flex-1 flex flex-col gap-4 p-4 overflow-y-auto">
+          {/* Painel central: fila clicável */}
+          <div className="flex-1 flex flex-col min-w-0 border-r border-slate-800">
 
-            {/* Zona de scan */}
-            <div className={`rounded-xl border p-6 flex flex-col items-center gap-4 transition-colors ${
-              paused ? 'border-amber-600/30 bg-amber-900/10' : 'border-slate-700 bg-slate-900/40'
-            }`}>
-              <div className="flex flex-col items-center gap-1">
-                <div className={`transition-transform ${processing ? 'scale-110' : 'scale-100'}`}>
-                  <ScanLine size={44} className={processing ? 'text-blue-400 animate-pulse' : paused ? 'text-amber-400' : 'text-emerald-400'} strokeWidth={1.5} />
-                </div>
-                <p className="text-base font-semibold text-white mt-1">
-                  {paused ? 'IMPRESSÕES PAUSADAS' : 'LEIA O CÓDIGO DO PEDIDO'}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {paused ? 'Clique em Retomar para continuar' : 'Aproxime o scanner ou digite o código'}
-                </p>
-              </div>
-
-              <form onSubmit={handleScan} className="w-full max-w-lg">
-                <div className="flex gap-2">
-                  <input
-                    ref={inputRef}
-                    value={codigo}
-                    onChange={e => setCodigo(e.target.value)}
-                    disabled={processing || paused}
-                    placeholder="ESCANEIE AQUI"
-                    autoComplete="off"
-                    className="flex-1 bg-slate-800 border border-slate-600 rounded-xl px-5 py-3.5 text-center text-xl font-mono tracking-widest text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 disabled:opacity-40 transition-all"
-                  />
-                  <button type="button" className="px-3 rounded-xl bg-slate-700 border border-slate-600 text-slate-400 hover:text-slate-200">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="4" height="18"/><rect x="7" y="3" width="2" height="18"/><rect x="10" y="3" width="4" height="18"/><rect x="15" y="3" width="1" height="18"/><rect x="17" y="3" width="3" height="18"/></svg>
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={processing || paused || !codigo.trim()}
-                    className="px-5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold transition-colors"
-                  >
-                    <ChevronRight size={20} />
-                  </button>
-                </div>
-              </form>
-
-              <p className={`text-sm transition-all ${processing ? 'text-blue-400 animate-pulse' : 'text-slate-600'}`}>
-                {processing ? (printStatus || 'Processando…') : 'Aguardando leitura...'}
-              </p>
+            <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-slate-800/60">
+              <List size={14} className="text-slate-500" />
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Fila de Expedição</span>
+              <span className="ml-1 text-xs font-bold text-slate-600">{queue.length} pedidos</span>
+              {counts.erros > 0 && (
+                <span className="ml-auto text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded">
+                  {counts.erros} com erro
+                </span>
+              )}
             </div>
 
-            {/* Último pedido processado */}
-            {lastResult && (
-              <div className={`rounded-xl border p-5 transition-all ${
-                lastResult.status === 'SUCESSO'
-                  ? 'border-emerald-600/40 bg-emerald-900/10'
-                  : 'border-red-600/40 bg-red-900/10'
-              }`}>
-                <div className="flex items-center gap-3 mb-4">
-                  {lastResult.status === 'SUCESSO'
-                    ? <CheckCircle2 size={18} className="text-emerald-400" />
-                    : <XCircle size={18} className="text-red-400" />
-                  }
-                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Último pedido processado</span>
-                  <StatusBadge status={lastResult.status} />
-                  {lastResult.elapsed != null && (
-                    <span className="ml-auto text-xs text-slate-500">
-                      Tempo total <span className="text-slate-300 font-semibold">{(lastResult.elapsed / 1000).toFixed(1)}s</span>
-                    </span>
+            {/* Lista de cards */}
+            <div className="flex-1 overflow-y-auto p-3">
+              {queue.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center py-12">
+                  <CheckCircle2 size={40} className="text-emerald-600/30 mb-3" />
+                  <p className="text-slate-500 font-medium">Fila vazia</p>
+                  <p className="text-slate-700 text-xs mt-1">Todos os pedidos foram expedidos</p>
+                </div>
+              ) : (
+                queue.map(order => (
+                  <OrderCard
+                    key={order.id}
+                    order={order}
+                    selected={selectedId === order.id}
+                    onClick={() => selectOrder(order.id)}
+                  />
+                ))
+              )}
+            </div>
+
+            {/* Campo scan — atalho opcional */}
+            <div className="shrink-0 border-t border-slate-800 p-3 bg-slate-950/40">
+              <form onSubmit={handleScanSubmit}>
+                <div className="flex gap-2 items-center">
+                  <ScanLine size={13} className="text-slate-600 shrink-0" />
+                  <input
+                    ref={scanRef}
+                    value={codigo}
+                    onChange={e => { setCodigo(e.target.value); setScanErro(''); }}
+                    placeholder="Bipe ou digite o ORD_ para selecionar…"
+                    autoComplete="off"
+                    className="flex-1 bg-slate-800/60 border border-slate-700/60 rounded-lg px-3 py-2 text-sm font-mono text-slate-300 placeholder-slate-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all"
+                  />
+                  <button type="submit" className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-slate-400 hover:text-slate-200 text-xs font-medium transition-colors shrink-0">
+                    OK
+                  </button>
+                </div>
+                {scanErro && (
+                  <p className="text-xs text-red-400 mt-1.5 flex items-center gap-1">
+                    <AlertCircle size={10} /> {scanErro}
+                  </p>
+                )}
+              </form>
+            </div>
+          </div>
+
+          {/* Painel direito: detalhe do pedido */}
+          <div className="w-96 shrink-0 flex flex-col overflow-hidden">
+
+            {!selectedId ? (
+              /* Estado vazio — resumo da fila */
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4">
+                  <Package size={28} className="text-emerald-600/50" />
+                </div>
+                <p className="text-slate-400 font-medium mb-1">Selecione um pedido</p>
+                <p className="text-slate-600 text-xs">Clique num card da fila ao lado</p>
+
+                <div className="mt-6 w-full grid grid-cols-2 gap-2">
+                  {[
+                    { label: 'Prontos hoje',  value: counts.hoje,   color: 'text-emerald-400' },
+                    { label: 'Para amanhã',   value: counts.amanha, color: 'text-blue-400' },
+                    { label: 'Com erro',      value: counts.erros,  color: 'text-red-400' },
+                    { label: 'Total na fila', value: queue.length,  color: 'text-slate-300' },
+                  ].map(s => (
+                    <div key={s.label} className="rounded-xl bg-slate-900/40 border border-slate-800 p-3 text-center">
+                      <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+                      <p className="text-[10px] text-slate-600 uppercase mt-0.5">{s.label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              /* Detalhe do pedido selecionado */
+              <div className="flex flex-col h-full overflow-hidden">
+
+                {/* Header do detalhe */}
+                <div className="shrink-0 p-4 border-b border-slate-800">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="font-mono font-bold text-white text-sm">{selectedId}</span>
+                        {selectedQueueItem && <MktBadge mkt={selectedQueueItem.marketplace} size="lg" />}
+                      </div>
+                      <p className="text-sm text-slate-400 truncate">{selectedQueueItem?.clienteNome || '—'}</p>
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        {selectedQueueItem && <StatusFilaBadge order={selectedQueueItem} />}
+                        {selectedQueueItem?.data_expedicao && (
+                          <span className="text-[10px] text-slate-600 flex items-center gap-1">
+                            <CalendarDays size={9} /> {fmtDate(selectedQueueItem.data_expedicao)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => { setSelectedId(null); setOrderDetail(null); setExpedirResult(null); }}
+                      className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-500 hover:text-slate-300 shrink-0"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Itens */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                  {loadingDetail ? (
+                    <div className="flex flex-col items-center justify-center py-10 gap-2">
+                      <Loader2 size={22} className="text-emerald-400 animate-spin" />
+                      <span className="text-xs text-slate-500">Carregando itens…</span>
+                    </div>
+                  ) : orderDetail ? (
+                    <>
+                      <p className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">
+                        {(orderDetail.items || []).reduce((s, it) => s + Number(it.qty || 0), 0)} unidades · {(orderDetail.items || []).length} SKU
+                      </p>
+                      {(orderDetail.items || []).map((item, i) => (
+                        <ItemDetail key={i} item={item} />
+                      ))}
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-10 text-center">
+                      <AlertTriangle size={22} className="text-amber-400 mb-2" />
+                      <p className="text-sm text-slate-500">Detalhes não encontrados</p>
+                      <p className="text-xs text-slate-600 mt-1">Pedido sem espelho em <code className="text-slate-500">orders/</code></p>
+                    </div>
+                  )}
+
+                  {/* Resultado da expedição */}
+                  {expedirResult && (
+                    <div className={`p-3 rounded-xl border ${expedirResult.ok ? 'border-emerald-600/40 bg-emerald-900/10' : 'border-red-600/40 bg-red-900/10'}`}>
+                      <div className="flex items-center gap-2">
+                        {expedirResult.ok
+                          ? <CheckCircle2 size={14} className="text-emerald-400" />
+                          : <XCircle size={14} className="text-red-400" />
+                        }
+                        <span className={`text-xs font-semibold ${expedirResult.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {expedirResult.ok ? 'Expedido com sucesso!' : 'Erro na expedição'}
+                        </span>
+                        {expedirResult.elapsed && (
+                          <span className="ml-auto text-[10px] text-slate-600">{(expedirResult.elapsed / 1000).toFixed(1)}s</span>
+                        )}
+                      </div>
+                      {expedirResult.msg && <p className="text-xs text-red-300 mt-1">{expedirResult.msg}</p>}
+                      {expedirResult.warning && (
+                        <p className="text-xs text-amber-300 mt-1 flex items-center gap-1">
+                          <AlertTriangle size={10} /> {expedirResult.warning}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
 
-                {lastResult.order && (
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* Coluna 1: info do pedido */}
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-xl text-white">#{lastResult.order.id || lastResult.order.numeroPedido}</span>
-                        <MktBadge mkt={lastResult.order.marketplace} size="lg" />
-                      </div>
-                      <div className="text-sm text-slate-400">{lastResult.order.clienteNome || '—'}</div>
-                      <div className="flex items-center gap-3 text-xs text-slate-500">
-                        <span className="flex items-center gap-1"><Package size={11} /> {(lastResult.order.items || []).reduce((s, it) => s + Number(it.qty || 0), 0)} itens</span>
-                        <span className="flex items-center gap-1"><Clock size={11} /> {fmtTime(lastResult.order.updatedAtMs)}</span>
-                      </div>
-                    </div>
-
-                    {/* Coluna 2: impressões + status */}
-                    <div className="flex flex-col gap-2">
-                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Impressões</div>
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center gap-2 text-sm">
-                          <Printer size={13} className={lastResult.order.etiqueta_impressa ? 'text-emerald-400' : 'text-slate-600'} />
-                          <span className="text-slate-300">Etiqueta de Envio</span>
-                          {lastResult.order.etiqueta_impressa
-                            ? <span className="text-emerald-400 text-xs font-semibold">IMPRESSA • {fmtTime(lastResult.order.expedidoAtMs)}</span>
-                            : <span className="text-slate-600 text-xs">—</span>
-                          }
-                        </div>
-                        <div className="flex items-center gap-2 text-sm">
-                          <Printer size={13} className={lastResult.order.danfe_impressa ? 'text-emerald-400' : 'text-slate-600'} />
-                          <span className="text-slate-300">DANFE Simplificado</span>
-                          {lastResult.order.danfe_impressa
-                            ? <span className="text-emerald-400 text-xs font-semibold">IMPRESSA • {fmtTime(lastResult.order.expedidoAtMs)}</span>
-                            : <span className="text-slate-600 text-xs">—</span>
-                          }
-                        </div>
-                      </div>
-                      {lastResult.status === 'SUCESSO' && (
-                        <div className="mt-1">
-                          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">EXPEDIDO</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {lastResult.msg && <p className="text-sm text-red-300 mt-2">{lastResult.msg}</p>}
-                {lastResult.warning && (
-                  <p className="text-sm text-amber-300 mt-1 flex items-center gap-1">
-                    <AlertTriangle size={12} /> {lastResult.warning}
-                  </p>
-                )}
+                {/* Botão Expedir Agora */}
+                <div className="shrink-0 p-4 border-t border-slate-800">
+                  {paused && (
+                    <p className="text-xs text-amber-400 text-center mb-2 flex items-center justify-center gap-1">
+                      <Pause size={11} /> Impressões pausadas
+                    </p>
+                  )}
+                  <button
+                    onClick={handleExpedir}
+                    disabled={expedindo || paused || (selectedQueueItem && selectedQueueItem.pode_expedir === false)}
+                    className={`w-full flex items-center justify-center gap-2.5 py-4 rounded-xl font-bold text-base transition-all ${
+                      expedindo
+                        ? 'bg-blue-600/30 border border-blue-600/30 text-blue-300 cursor-wait'
+                        : paused
+                          ? 'bg-slate-700/30 border border-slate-700 text-slate-500 cursor-not-allowed'
+                          : selectedQueueItem?.pode_expedir === false
+                            ? 'bg-slate-700/30 border border-slate-700 text-slate-500 cursor-not-allowed'
+                            : 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 border border-emerald-500 text-white shadow-lg shadow-emerald-900/20'
+                    }`}
+                  >
+                    {expedindo ? (
+                      <><Loader2 size={18} className="animate-spin" /> {printStatus || 'Expedindo…'}</>
+                    ) : selectedQueueItem?.pode_expedir === false ? (
+                      <><Clock size={18} /> Agendado para {fmtDate(selectedQueueItem?.data_expedicao)}</>
+                    ) : (
+                      <><Zap size={18} /> Expedir Agora</>
+                    )}
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Painel direito */}
-          <aside className="w-64 shrink-0 flex flex-col border-l border-slate-800 overflow-y-auto">
-
-            {/* Próximos na fila */}
-            <div className="p-3 border-b border-slate-800">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Próximos na fila (Hoje)</span>
-                {counts.hoje > 0 && (
-                  <span className="text-xs font-bold bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">{counts.hoje}</span>
-                )}
-              </div>
-
-              {queue.length === 0 ? (
-                <p className="text-xs text-slate-600 italic py-2">Fila vazia</p>
-              ) : (
-                <div className="flex flex-col gap-0">
-                  {/* Cabeçalho */}
-                  <div className="grid text-[10px] text-slate-600 font-semibold uppercase mb-1" style={{ gridTemplateColumns: '1fr auto auto auto' }}>
-                    <span>Pedido</span><span>Canal</span><span className="px-1">Itens</span><span>Exp.</span>
-                  </div>
-                  {queue.map(o => (
-                    <div key={o.id} className="grid items-center gap-1 py-1.5 border-b border-slate-800/60 last:border-0"
-                      style={{ gridTemplateColumns: '1fr auto auto auto' }}>
-                      <span className="font-mono text-xs text-slate-300 truncate">{o.id}</span>
-                      <MktBadge mkt={o.marketplace} />
-                      <span className="text-xs text-slate-500 text-center px-1">
-                        {(o.items || []).reduce((s, it) => s + Number(it.qty || 0), 0)}
-                      </span>
-                      <span className="text-[10px] text-slate-600 text-right">{o.data_expedicao?.slice(8)}/{o.data_expedicao?.slice(5,7)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Alertas */}
-            <div className="p-3 flex-1">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Alertas</span>
-                {alertas.length > 0 && (
-                  <span className="text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded">{alertas.length}</span>
-                )}
-              </div>
-              {alertas.length === 0 ? (
-                <p className="text-xs text-slate-600 italic">Nenhum alerta</p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {alertas.map(o => (
-                    <div key={o.id} className="flex items-start gap-2 p-2 rounded-lg bg-red-900/10 border border-red-800/30">
-                      <AlertTriangle size={12} className="text-red-400 mt-0.5 shrink-0" />
-                      <div className="min-w-0">
-                        <div className="text-xs font-mono text-red-300 truncate">Pedido {o.id}</div>
-                        <div className="text-[10px] text-red-400/70 truncate">{o.erroMsg || 'Falha de impressão'}</div>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <MktBadge mkt={o.marketplace} />
-                          <span className="text-[10px] text-slate-600">{fmtTime(o.updatedAtMs)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Status QZ */}
-            <div className="p-3 border-t border-slate-800 text-xs text-slate-600">
-              {qzOnline
-                ? <span className="flex items-center gap-1 text-emerald-500"><Wifi size={11} /> QZ Tray conectado</span>
-                : <span className="flex items-center gap-1 text-slate-600"><WifiOff size={11} /> QZ Tray offline — fallback navegador</span>
-              }
-            </div>
-          </aside>
         </div>
       </div>
     </div>
