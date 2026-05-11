@@ -8112,6 +8112,17 @@ app.get('/api/v2/expedicao/queue', async (req, res, next) => {
   }
 });
 
+// GET /api/v2/expedicao/order/:orderId — detalhes completos do pedido (itens, fotos, bin)
+// Lê de orders/{id} via Admin SDK (contorna regras Firestore que bloqueiam client direto)
+app.get('/api/v2/expedicao/order/:orderId', async (req, res, next) => {
+  try {
+    const orderId = safeTrim(req.params.orderId);
+    const snap = await db.collection('orders').doc(orderId).get();
+    if (!snap.exists) return res.status(404).json({ error: 'Pedido não encontrado', orderId });
+    res.json({ ok: true, order: { id: snap.id, ...snap.data() } });
+  } catch (err) { next(err); }
+});
+
 // POST /api/v2/expedicao/scan — valida pedido e inicia processamento
 app.post('/api/v2/expedicao/scan', async (req, res, next) => {
   try {
