@@ -5,8 +5,9 @@
  *   Layout 3 colunas: sidebar nav | fila clicável de pedidos | detalhe + expedir.
  *   Fluxo: operador clica no pedido → vê itens/foto/bin → clica Expedir Agora.
  *   Scan de ORD_ como atalho rápido opcional (abaixo da fila).
- * @version 2.1.0
- * @date 2026-05-10
+ * @version 2.2.0
+ * @date 2026-05-11
+ * @changelog 2.2.0 - Bridge local: etiqueta ZPL direto na Elgin via localhost:9191; auto-avança para próximo pedido após 2s
  * @changelog 2.1.0 - Redesign: fila clicável + painel detalhe com itens/foto/bin
  */
 
@@ -17,7 +18,7 @@ import {
   ScanLine, CheckCircle2, XCircle, AlertTriangle, Package,
   Clock, Wifi, WifiOff, Pause, Play, List, CalendarDays,
   History, AlertCircle, Settings, LayoutDashboard,
-  Maximize2, Minimize2, MapPin, Loader2, Zap, X,
+  Maximize2, Minimize2, MapPin, Loader2, Zap, X, Printer,
 } from 'lucide-react';
 
 // ─── Terminal & Auth ──────────────────────────────────────────────────────────
@@ -139,21 +140,21 @@ async function printEtiqueta(orderId) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Erro etiqueta ${res.status}`);
 
-  if (data.pdfUrl) { window.open(data.pdfUrl, '_blank'); return; }
-  if (data.pdf) {
-    let qzOk = false;
+  // Tenta bridge local (ZPL direto na Elgin — sem pop-up)
+  if (data.zpl) {
     try {
-      const qz = await qzConnect();
-      const printer = await qz.printers.getDefault();
-      const config = qz.configs.create(printer, { scaleContent: false, colorType: 'blackwhite' });
-      await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: data.pdf }]);
-      qzOk = true;
-    } catch {}
-    if (!qzOk) {
-      const blob = new Blob([Uint8Array.from(atob(data.pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
-      window.open(URL.createObjectURL(blob), '_blank');
-    }
+      const br = await fetch('http://localhost:9191/print', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ zpl: data.zpl }),
+      });
+      if (br.ok) return;
+    } catch {} // bridge offline → fallback
   }
+
+  // Fallback: abre link no browser
+  if (data.link) { window.open(data.link, '_blank'); return; }
+  throw new Error('Etiqueta sem conteúdo');
 }
 
 // ─── Helpers visuais ──────────────────────────────────────────────────────────
@@ -333,6 +334,7 @@ export default function ExpedicaoV2Scanner() {
   const [paused, setPaused]                 = useState(false);
   const [fullscreen, setFullscreen]         = useState(false);
   const [qzOnline, setQzOnline]             = useState(false);
+  const [bridgeOnline, setBridgeOnline]     = useState(false);
   const [activeSection, setActiveSection]   = useState('scanner');
   const [hora, setHora]                     = useState('');
   const scanRef                             = useRef(null);
@@ -348,6 +350,14 @@ export default function ExpedicaoV2Scanner() {
   // QZ Tray
   useEffect(() => {
     qzConnect().then(() => setQzOnline(true)).catch(() => setQzOnline(false));
+  }, []);
+
+  // Bridge local
+  useEffect(() => {
+    const check = () => fetch('http://localhost:9191/status').then(r => setBridgeOnline(r.ok)).catch(() => setBridgeOnline(false));
+    check();
+    const id = setInterval(check, 15_000);
+    return () => clearInterval(id);
   }, []);
 
   // Fullscreen listener
@@ -473,10 +483,18 @@ export default function ExpedicaoV2Scanner() {
           body: JSON.stringify({ etiqueta_impressa: etiquetaOk, danfe_impressa: danfeOk }),
         });
         beep(true);
-        setExpedirResult({ ok: true, order, warning, elapsed: Date.now() - t0 });
-        setSelectedId(null);
-        setOrderDetail(null);
+        const nextOrder = queue.find(o => o.id !== order.id && !o.bloqueado && o.status !== 'EXPEDIDO' && o.status !== 'EM_PROCESSO');
+        setExpedirResult({ ok: true, order, warning, elapsed: Date.now() - t0, nextId: nextOrder?.id });
         loadQueue();
+        setTimeout(() => {
+          setExpedirResult(null);
+          if (nextOrder) {
+            selectOrder(nextOrder.id);
+          } else {
+            setSelectedId(null);
+            setOrderDetail(null);
+          }
+        }, 2000);
       } else {
         await api(`/api/v2/expedicao/${order.id}/erro`, {
           method: 'PATCH',
@@ -492,7 +510,7 @@ export default function ExpedicaoV2Scanner() {
       setExpedindo(false);
       setPrintStatus('');
     }
-  }, [selectedId, expedindo, paused, loadQueue]);
+  }, [selectedId, expedindo, paused, queue, loadQueue, selectOrder]);
 
   const selectedQueueItem = queue.find(o => o.id === selectedId);
 
@@ -515,7 +533,10 @@ export default function ExpedicaoV2Scanner() {
 
           <span className={`flex items-center gap-1.5 text-xs ml-1 ${qzOnline ? 'text-emerald-400' : 'text-slate-600'}`}>
             {qzOnline ? <Wifi size={11} /> : <WifiOff size={11} />}
-            Impressora {qzOnline ? 'ONLINE' : 'OFFLINE'}
+            QZ {qzOnline ? 'ONLINE' : 'OFFLINE'}
+          </span>
+          <span className={`flex items-center gap-1.5 text-xs ml-1 ${bridgeOnline ? 'text-emerald-400' : 'text-slate-600'}`}>
+            <Printer size={11} /> Bridge {bridgeOnline ? 'ONLINE' : 'OFFLINE'}
           </span>
 
           <div className="ml-auto flex items-center gap-2">
@@ -703,6 +724,12 @@ export default function ExpedicaoV2Scanner() {
                         <p className="text-xs text-amber-300 mt-1 flex items-center gap-1">
                           <AlertTriangle size={10} /> {expedirResult.warning}
                         </p>
+                      )}
+                      {expedirResult.ok && expedirResult.nextId && (
+                        <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                          <span>Próximo:</span>
+                          <span className="font-mono text-slate-400">{expedirResult.nextId}</span>
+                        </div>
                       )}
                     </div>
                   )}
