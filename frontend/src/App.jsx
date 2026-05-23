@@ -9,9 +9,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { LoginPage }        from './pages/LoginPage';
 import { DashboardPage }    from './pages/DashboardPage';
-import { PainelFinanceiro } from './pages/financeiro/PainelFinanceiro';
-import { GestaoDespesas }   from './pages/financeiro/GestaoDespesas';
-import { GestaoMargem }     from './pages/financeiro/GestaoMargem';
 import { BlingPedidos }     from './pages/expedicao/BlingPedidos';
 import { AppShell }         from './components/AppShell';
 import GestaoInsumos           from './pages/expedicao/GestaoInsumos';
@@ -21,6 +18,7 @@ import CatalogoPro             from './pages/catalogo/CatalogoPro';
 import AdminProdutos           from './pages/catalogo/AdminProdutos';
 import ImportarCSV             from './pages/catalogo/ImportarCSV';
 import ImageStudio             from './pages/catalogo/ImageStudio';
+import BatchImageStudio        from './pages/catalogo/BatchImageStudio';
 import ConfiguracoesSistema    from './pages/sistema/ConfiguracoesSistema';
 import Contas                  from './pages/financeiro/Contas';
 import Compras                 from './pages/expedicao/Compras';
@@ -48,11 +46,9 @@ export default function App() {
         <Route path="/catalogo/importar"   element={<ImportarCSV />} />
         <Route path="/catalogo/automacao"  element={<AutomacaoCadastro />} />
         <Route path="/catalogo/fotos"      element={<ImageStudio />} />
+        <Route path="/catalogo/fotos-lote" element={<BatchImageStudio />} />
         {/* Financeiro */}
         <Route path="/financeiro/contas"    element={<Contas />} />
-        <Route path="/financeiro/despesas" element={<GestaoDespesas />} />
-        <Route path="/financeiro/margem"   element={<GestaoMargem />} />
-        <Route path="/financeiro/painel"   element={<PainelFinanceiro />} />
         {/* Sistema */}
         <Route path="/sistema/config"      element={<ConfiguracoesSistema />} />
       </Route>

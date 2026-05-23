@@ -423,6 +423,24 @@ function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandind
           </span>
         )}
 
+        {/* Atalho Flex */}
+        {!jaCriado && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onFlexToggle(nf.id);
+            }}
+            title={isFlex ? "Prioridade Flex Ativa" : "Marcar como Prioridade Flex"}
+            className={`shrink-0 p-1.5 rounded-lg border transition-all ${
+              isFlex
+                ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-400 scale-110'
+                : 'bg-slate-800/40 border-white/5 text-slate-600 hover:text-slate-400 hover:border-white/10'
+            }`}
+          >
+            <Flame size={13} />
+          </button>
+        )}
+
         {/* Chevron */}
         <div className="shrink-0 text-slate-600 ml-1">
           {expandindo ? <Loader2 size={15} className="animate-spin"/> : expandido ? <ChevronUp size={15}/> : <ChevronDown size={15}/>}

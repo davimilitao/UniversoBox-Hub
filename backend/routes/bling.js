@@ -1,19 +1,40 @@
-// ================================================================
-// BLING MODULE — colar no server.js ANTES de "// ---------------- Errors"
-// ================================================================
+const express = require('express');
+const router  = express.Router();
+const axios   = require('axios');
+const { db }  = require('../config/firebase');
 
 const BLING_CLIENT_ID     = process.env.BLING_CLIENT_ID     || '';
 const BLING_CLIENT_SECRET = process.env.BLING_CLIENT_SECRET || '';
 const BLING_REDIRECT_URI  = process.env.BLING_REDIRECT_URI  || '';
-const BLING_TOKEN_URL     = 'https://www.bling.com.br/Api/v3/oauth/token';
-const BLING_AUTH_URL      = 'https://www.bling.com.br/Api/v3/oauth/authorize';
-const BLING_API_BASE      = 'https://www.bling.com.br/Api/v3';
 
-// ── TOKEN HELPERS ─────────────────────────────────────────────────
+const BLING_AUTH_URL  = 'https://www.bling.com.br/Api/v3/oauth/authorize';
+const BLING_TOKEN_URL = 'https://www.bling.com.br/Api/v3/oauth/token';
+const BLING_API_BASE  = 'https://www.bling.com.br/Api/v3';
+
+// Helpers
+function nowMs() { return Date.now(); }
+function yyyymmdd() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+}
+function padSeq(num, size) {
+  let s = num + "";
+  while (s.length < size) s = "0" + s;
+  return s;
+}
+function safeTrim(v) {
+  if (v == null) return '';
+  return String(v).trim();
+}
+
+const ORDER_SEQ_PAD = Number(process.env.ORDER_SEQ_PAD || 4);
+
+// Token helpers
 async function blingGetToken() {
   const doc = await db.collection('bling_tokens').doc('main').get();
   return doc.exists ? doc.data() : null;
 }
+
 async function blingSaveToken(d) {
   await db.collection('bling_tokens').doc('main').set({
     accessToken:  d.access_token,
@@ -22,6 +43,7 @@ async function blingSaveToken(d) {
     updatedAtMs:  Date.now(),
   }, { merge: true });
 }
+
 async function blingRefreshToken(refreshToken) {
   const creds = Buffer.from(`${BLING_CLIENT_ID}:${BLING_CLIENT_SECRET}`).toString('base64');
   const res = await fetch(BLING_TOKEN_URL, {
@@ -36,6 +58,7 @@ async function blingRefreshToken(refreshToken) {
   if (!res.ok) throw new Error(`Bling refresh failed: ${res.status}`);
   return res.json();
 }
+
 async function blingEnsureToken() {
   let tok = await blingGetToken();
   if (!tok) throw new Error('bling_not_authorized');
@@ -46,6 +69,7 @@ async function blingEnsureToken() {
   }
   return tok.accessToken;
 }
+
 async function blingFetch(path) {
   const token = await blingEnsureToken();
   const res = await fetch(`${BLING_API_BASE}${path}`, {
@@ -57,36 +81,35 @@ async function blingFetch(path) {
   return JSON.parse(text);
 }
 
-// Detecta marketplace pelo campo loja ou padrão do nome do cliente
 function detectarMkt(nf) {
   const loja = (nf.loja?.descricao || nf.loja?.nome || nf.origem?.descricao || '').toLowerCase();
   const nome = (nf.contato?.nome || '').toLowerCase();
   if (loja.includes('mercado') || loja.includes('meli') || loja.includes('mlb')) return 'MERCADO_LIVRE';
   if (loja.includes('shopee')) return 'SHOPEE';
-  // Padrão ML: "Nome Sobrenome (usuario.ml)" — parênteses sem espaço no usuário
   if (nome.match(/\([a-z0-9._-]+\)$/)) return 'MERCADO_LIVRE';
   return 'OUTROS';
 }
 
-// ── PÁGINA ────────────────────────────────────────────────────────
-app.get('/bling', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'bling.html')));
-
 // ── STATUS ────────────────────────────────────────────────────────
-app.get('/bling/status', async (req, res) => {
-  const tok = await blingGetToken();
-  if (!tok) return res.json({ authorized: false });
-  res.json({ authorized: true, expired: Date.now() > tok.expiresAt, updatedAtMs: tok.updatedAtMs });
+router.get('/status', async (req, res) => {
+  try {
+    const tok = await blingGetToken();
+    if (!tok) return res.json({ authorized: false });
+    res.json({ authorized: true, expired: Date.now() > tok.expiresAt, updatedAtMs: tok.updatedAtMs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── INICIAR OAUTH ─────────────────────────────────────────────────
-app.get('/bling/auth', (req, res) => {
+router.get('/auth', (req, res) => {
   if (!BLING_CLIENT_ID) return res.status(500).json({ error: 'BLING_CLIENT_ID não configurado' });
   const p = new URLSearchParams({ response_type: 'code', client_id: BLING_CLIENT_ID, redirect_uri: BLING_REDIRECT_URI, state: 'expedicao_pro' });
   res.redirect(`${BLING_AUTH_URL}?${p}`);
 });
 
 // ── CALLBACK OAUTH ────────────────────────────────────────────────
-app.get('/bling/callback', async (req, res) => {
+router.get('/callback', async (req, res) => {
   const { code, error } = req.query;
   if (error || !code) return res.redirect('/bling?error=auth_denied');
   try {
@@ -107,32 +130,28 @@ app.get('/bling/callback', async (req, res) => {
 });
 
 // ── DESCONECTAR ───────────────────────────────────────────────────
-app.post('/bling/disconnect', async (req, res) => {
-  await db.collection('bling_tokens').doc('main').delete();
-  res.json({ ok: true });
+router.post('/disconnect', async (req, res) => {
+  try {
+    await db.collection('bling_tokens').doc('main').delete();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// ── Hoje no Brasil (Railway roda em UTC, Bling usa horário de Brasília) ────────
-function hojeNoBrasil() {
-  return new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-    .split('/').reverse().join('-'); // dd/mm/yyyy → yyyy-mm-dd
-}
-
-// ── LISTAR NFs — suporte a range ──────────────────────────────────────────────
-// GET /bling/pedidos?dataInicio=2026-04-01&dataFim=2026-04-03&loja=all
-// Retorna resumo das NFs — itens são carregados sob demanda via /bling/pedidos/:id
-app.get('/bling/pedidos', async (req, res, next) => {
+// ── LISTAR NFs DO DIA ─────────────────────────────────────────────
+router.get('/pedidos', async (req, res, next) => {
   try {
-    // Suporte a range (dataInicio/dataFim) e retrocompatibilidade (?data=)
-    const dataInicio = req.query.dataInicio || req.query.data || hojeNoBrasil();
-    const dataFim    = req.query.dataFim    || dataInicio;
+    const hoje    = new Date().toISOString().split('T')[0];
+    const dataInicio = req.query.dataInicio || req.query.data || hoje;
+    const dataFim    = req.query.dataFim    || req.query.data || hoje;
     const pagina     = Number(req.query.pagina || 1);
 
     const params = new URLSearchParams({
       dataEmissaoInicial: dataInicio,
       dataEmissaoFinal:   dataFim,
       pagina,
-      limite: 100,
+      limite: 100
     });
 
     const resp  = await blingFetch(`/nfe?${params}`);
@@ -141,13 +160,13 @@ app.get('/bling/pedidos', async (req, res, next) => {
     const items = notas.map(n => ({
       id:          n.id,
       numero:      n.numero,
-      numeroPedido: null,           // carregado sob demanda
+      numeroPedido: null,
       dataEmissao: n.dataEmissao,
-      situacao:    (typeof n.situacao === 'object' ? n.situacao?.descricao : n.situacao) || '',
+      situacao:    n.situacao?.descricao || '',
       cliente:     { nome: n.contato?.nome || '' },
       marketplace: detectarMkt(n),
       valorTotal:  n.valorTotal || 0,
-      itens:       [],              // carregados sob demanda
+      itens:       [],
       detalhado:   false,
     }));
 
@@ -160,29 +179,31 @@ app.get('/bling/pedidos', async (req, res, next) => {
 });
 
 // ── DETALHES DE UMA NF (com itens) ───────────────────────────────
-// GET /bling/pedidos/:id
-app.get('/bling/pedidos/:id', async (req, res, next) => {
+router.get('/pedidos/:id', async (req, res, next) => {
   try {
     const resp = await blingFetch(`/nfe/${req.params.id}`);
     const n    = resp.data || resp;
 
+    const numeroPedido = n.numeroPedidoLoja || n.numeroPedido || null;
+    const mkt2         = detectarMkt(n);
+    const mlOrderId2   = (mkt2 === 'MERCADO_LIVRE' && numeroPedido) ? String(numeroPedido) : null;
+
     const item = {
       id:           n.id,
       numero:       n.numero,
-      numeroPedido: n.numeroPedidoLoja || n.numeroPedido || null,
+      numeroPedido,
+      mlOrderId:    mlOrderId2,
       dataEmissao:  n.dataEmissao,
       situacao:     n.situacao?.descricao || '',
       cliente:      { nome: n.contato?.nome || '', email: n.contato?.email || '' },
-      marketplace:  detectarMkt(n),
+      marketplace:  mkt2,
       valorTotal:   n.valorTotal || n.totalProdutos || 0,
       detalhado:    true,
       itens: (n.itens || []).map(it => ({
-        // Bling v3 NF: campos diretos no item
-        sku:       safeTrim(it.codigo || it.produto?.codigo || ''),
-        nome:      safeTrim(it.descricao || it.produto?.descricao || ''),
-        qty:       Number(it.quantidade ?? it.qty ?? 1),
-        preco:     Number(it.valor ?? it.valorUnitario ?? 0),
-        produtoId: it.produto?.id || null,   // usado pelo front para lazy-load da foto
+        sku:   safeTrim(it.codigo || it.produto?.codigo || ''),
+        nome:  safeTrim(it.descricao || it.produto?.descricao || ''),
+        qty:   Number(it.quantidade ?? it.qty ?? 1),
+        preco: Number(it.valor ?? it.valorUnitario ?? 0),
       })),
     };
 
@@ -194,100 +215,133 @@ app.get('/bling/pedidos/:id', async (req, res, next) => {
   }
 });
 
-
-// ── DANFE PDF (proxy para o frontend imprimir via QZ Tray) ───────
-// GET /bling/danfe/:id  → retorna { ok, pdf: base64, numero }
-app.get('/bling/danfe/:id', async (req, res, next) => {
+// ── GET /bling/danfe/:id ───────────────────────────────────────
+router.get('/danfe/:id', async (req, res, next) => {
+  const nfId = req.params.id;
   try {
     const token = await blingEnsureToken();
-    // Bling v3: GET /nfe/{id}/danfe  →  retorna PDF binário
-    const resp = await fetch(`${BLING_API_BASE}/nfe/${req.params.id}/danfe`, {
-      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/pdf' },
-    });
-    if (resp.status === 401) throw new Error('bling_not_authorized');
-    if (!resp.ok) {
-      const txt = await resp.text().catch(() => '');
-      throw new Error(`Bling DANFE ${resp.status}: ${txt.slice(0, 120)}`);
+    const headers = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+
+    const resp = await fetch(`${BLING_API_BASE}/nfe/${nfId}`, { headers });
+    if (!resp.ok) return res.status(resp.status).json({ error: `Erro Bling: ${resp.status}` });
+
+    const nfe = await resp.json();
+    const data = nfe.data || {};
+    const sit = (data.situacao?.descricao || '').toLowerCase();
+
+    if (!sit.includes('emitida') && !sit.includes('danfe')) {
+      return res.status(404).json({ error: 'danfe_nao_disponivel', situacao: sit });
     }
-    const buffer = await resp.arrayBuffer();
-    const b64 = Buffer.from(buffer).toString('base64');
-    res.json({ ok: true, pdf: b64, nfId: req.params.id });
-  } catch(err) {
-    if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
-    console.error('[GET /bling/danfe/:id]', err.message);
+
+    const danfeRes = await fetch(`${BLING_API_BASE}/nfe/${nfId}/pdf`, { headers });
+    if (!danfeRes.ok) return res.status(danfeRes.status).json({ error: `Erro PDF Bling: ${danfeRes.status}` });
+
+    const danfe = await danfeRes.json();
+    if (danfe?.data?.pdf) {
+      return res.json({ pdf: danfe.data.pdf });
+    } else if (danfe?.data?.link) {
+      return res.json({ pdfUrl: danfe.data.link });
+    }
+
+    res.status(404).json({ error: 'pdf_not_found_in_payload' });
+  } catch (err) {
+    console.error(`[GET /bling/danfe/${nfId}]`, err.message);
     next(err);
   }
 });
 
-// ── ZPL: Etiqueta de Prateleira (bin label) ──────────────────────
-// POST /orders/:id/etiqueta-bin  body: { sku, nome, bin, ean }
-// Retorna { ok, zpl } — QZ Tray imprime via raw ZPL na L42 Pro
-app.post('/orders/:id/etiqueta-bin', async (req, res) => {
+// ── GET /bling/debug/danfe/:id ──────────────────────────────────
+router.get('/debug/danfe/:id', async (req, res, next) => {
   try {
-    const { sku = '', nome = '', bin = '', ean = '' } = req.body || {};
-    const orderId = req.params.id;
-
-    // Sanitiza: máx 38 chars por linha no ZPL 203dpi / 4"
-    const trunc = (s, n) => String(s || '').slice(0, n).replace(/[^\x20-\x7E]/g, '?');
-    const nomeZpl = trunc(nome, 38);
-    const skuZpl  = trunc(sku,  24);
-    const binZpl  = trunc(bin,  20);
-    const eanZpl  = ean.replace(/\D/g, '').slice(0, 13);
-
-    // ZPL para L42 Pro (203 dpi, 108mm = ~860 dots — usamos 800)
-    // Formato: 80mm × 40mm (~640 × 320 dots a 203dpi)
-    const zpl = [
-      '^XA',
-      '^MMT^PW640^LL320^LS0',
-      // Logo / empresa
-      '^FO20,15^A0N,22,22^FDUniversoBox^FS',
-      '^FO20,15^GB600,1,2^FS',
-      // Nome do produto
-      `^FO20,42^A0N,26,26^FB590,2,0,L^FD${nomeZpl}^FS`,
-      // SKU badge
-      `^FO20,102^GB180,36,36^FR^FS`,
-      `^FO28,108^A0N,24,24^FDSKU ${skuZpl}^FS`,
-      // BIN (localização) — destaque grande
-      bin ? [
-        '^FO220,92^A0N,18,18^FDLocalização^FS',
-        `^FO220,114^A0N,44,44^FD${binZpl}^FS`,
-      ].join('\n') : '',
-      // EAN barcode (se disponível)
-      eanZpl.length >= 8 ? [
-        `^FO20,148^BY2,3,60^BE^FD${eanZpl}^FS`,
-        `^FO20,215^A0N,20,20^FD${eanZpl}^FS`,
-      ].join('\n') : '',
-      // Ordem de origem
-      `^FO400,270^A0N,18,18^FD${trunc(orderId, 22)}^FS`,
-      '^XZ',
-    ].filter(Boolean).join('\n');
-
-    res.json({ ok: true, zpl });
-  } catch(e) {
-    console.error('[POST /orders/:id/etiqueta-bin]', e);
-    res.status(500).json({ error: e.message });
+    const raw = await blingFetch(`/nfe/${req.params.id}`);
+    res.json(raw);
+  } catch(err) {
+    next(err);
   }
 });
 
-// ── DEBUG: ver resposta bruta da API do Bling ────────────────────
-// GET /bling/debug/nfe/:id  — remover em produção após diagnóstico
-app.get('/bling/debug/nfe/:id', async (req, res, next) => {
+// ── GET /bling/product-images ────────────────────────────────────
+router.get('/product-images', async (req, res, next) => {
+  const { ean, sku } = req.query;
+  if (!ean && !sku) return res.status(400).json({ error: 'ean ou sku obrigatório' });
+  try {
+    const token = await blingEnsureToken();
+    const headers = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+    const term = ean ? `gtin=${encodeURIComponent(ean)}` : `codigo=${encodeURIComponent(sku)}`;
+    
+    const { data: listData } = await axios.get(`${BLING_API_BASE}/produtos?${term}`, { headers });
+    if (!listData?.data?.length) return res.json({ images: [] });
+    
+    const prodId = listData.data[0].id;
+    const { data: detData } = await axios.get(`${BLING_API_BASE}/produtos/${prodId}`, { headers });
+    const p = detData.data || {};
+    
+    let images = [];
+    if (p.imagemURL) images.push(p.imagemURL);
+    if (Array.isArray(p.imagens)) {
+      p.imagens.forEach(img => {
+        const u = typeof img === 'string' ? img : img.link || img.url;
+        if (u && !images.includes(u)) images.push(u);
+      });
+    }
+    if (Array.isArray(p.midia)) {
+      p.midia.forEach(m => {
+        const u = m.link || m.url;
+        if (u && !images.includes(u)) images.push(u);
+      });
+    }
+    res.json({ images });
+  } catch (err) {
+    console.error('[GET /bling/product-images]', err.message);
+    next(err);
+  }
+});
+
+// ── DEBUG ENDPOINTS ──────────────────────────────────────────────
+router.get('/debug/nfe/:id', async (req, res, next) => {
   try {
     const raw = await blingFetch(`/nfe/${req.params.id}`);
-    res.json(raw); // retorna tudo como veio do Bling
+    res.json(raw);
   } catch(err) {
+    next(err);
+  }
+});
+
+router.get('/debug/probe', async (req, res, next) => {
+  try {
+    const token = await blingEnsureToken();
+    res.json({ ok: true, tokenPreview: token.slice(0, 10) + '...' });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/debug/lojas', async (req, res, next) => {
+  try {
+    const r = await blingFetch('/lojas');
+    res.json(r);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/debug/lista', async (req, res, next) => {
+  try {
+    const r = await blingFetch('/nfe');
+    res.json(r);
+  } catch (err) {
     next(err);
   }
 });
 
 // ── CLONAR NF → CRIAR PEDIDO ─────────────────────────────────────
-app.post('/bling/clonar', async (req, res, next) => {
+router.post('/clonar', async (req, res, next) => {
   try {
-    const { blingNfId, marketplace, itens, clienteNome, numeroPedido } = req.body;
+    const { marketplace, itens, clienteNome, numeroPedido, mlOrderId, logistica } = req.body;
+    const blingNfId = String(req.body.blingNfId || '').replace(/\D/g, '') || null;
 
     if (!itens || !itens.length) return res.status(400).json({ error: 'Nenhum item enviado. Abra os itens da NF antes de clonar.' });
 
-    // Separar itens com e sem SKU
     const itensComSku = itens.filter(it => safeTrim(it.sku));
     const itensSemSku = itens.filter(it => !safeTrim(it.sku));
 
@@ -296,7 +350,6 @@ app.post('/bling/clonar', async (req, res, next) => {
       itensSemSku: itensSemSku.map(it => it.nome),
     });
 
-    // Buscar produtos no Firestore
     const skus      = itensComSku.map(it => safeTrim(it.sku));
     const prodRefs  = skus.map(sku => db.collection('products').doc(sku));
     const prodSnaps = await db.getAll(...prodRefs);
@@ -328,7 +381,6 @@ app.post('/bling/clonar', async (req, res, next) => {
       skusFaltando,
     });
 
-    // Criar pedido
     const terminalId  = safeTrim(req.header('x-terminal-id')) || `bling_clone`;
     const createdAtMs = nowMs();
     const day         = yyyymmdd();
@@ -344,10 +396,12 @@ app.post('/bling/clonar', async (req, res, next) => {
         source:        'bling',
         blingNfId:     blingNfId   || null,
         numeroPedido:  numeroPedido || null,
+        mlOrderId:     mlOrderId   || null,
+        logistica:     logistica   || 'agency',
         marketplace:   marketplace || 'OUTROS',
         status:        'pending',
         clienteNome:   safeTrim(clienteNome) || '',
-        isPriority:    false,
+        isPriority:    logistica === 'flex',
         items:         cart,
         allowConfirmOnlyIfAllChecked: true,
         createdAtMs,
@@ -365,3 +419,5 @@ app.post('/bling/clonar', async (req, res, next) => {
     next(err);
   }
 });
+
+module.exports = router;

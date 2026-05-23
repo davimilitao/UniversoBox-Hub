@@ -19,7 +19,13 @@ async function blingEnsureToken() {
     const { data: d } = await axios.post(
       BLING_TOKEN_URL,
       new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tok.refreshToken }).toString(),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${creds}` } }
+      { 
+        headers: { 
+          'Content-Type': 'application/x-www-form-urlencoded', 
+          Authorization: `Basic ${creds}`,
+          'enable-jwt': '1'
+        } 
+      }
     );
     await db.collection('bling_tokens').doc('main').set({
       accessToken:  d.access_token,
@@ -244,6 +250,48 @@ router.post('/criar-produto', async (req, res) => {
     const msg = e.response?.data?.error?.message || e.message;
     console.error('[POST /criar-produto]', msg);
     res.status(500).json({ error: msg });
+  }
+});
+
+// ── POST /ler-pdf — extrai dados estruturados de manual PDF ─────────────────
+router.post('/ler-pdf', async (req, res, next) => {
+  const { pdf } = req.body;
+  if (!pdf) return res.status(400).json({ error: 'Conteúdo PDF (base64) obrigatório' });
+  try {
+    const { parseProductManualPdf } = require('../services/geminiService');
+    const data = await parseProductManualPdf(pdf);
+    res.json(data);
+  } catch (err) {
+    console.error('[POST /api/catalogo/ler-pdf] erro:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /config/gemini — verifica se API Key está salva ──────────────────
+router.get('/config/gemini', async (req, res) => {
+  try {
+    if (process.env.GEMINI_API_KEY) {
+      return res.json({ hasKey: true, fromEnv: true });
+    }
+    const doc = await db.collection('config').doc('gemini').get();
+    res.json({ hasKey: doc.exists && !!doc.data().apiKey, fromEnv: false });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /config/gemini — salva a API Key no Firestore ───────────────────
+router.post('/config/gemini', async (req, res) => {
+  const { apiKey } = req.body;
+  if (!apiKey) return res.status(400).json({ error: 'apiKey obrigatória' });
+  try {
+    await db.collection('config').doc('gemini').set({
+      apiKey: apiKey.trim(),
+      updatedAtMs: Date.now(),
+    }, { merge: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

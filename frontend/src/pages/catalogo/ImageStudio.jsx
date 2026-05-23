@@ -11,7 +11,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Search, Loader2, ImageIcon, Sparkles, Plus, Save,
   CheckCircle, AlertCircle, Camera, Trash2, ExternalLink,
@@ -173,6 +173,7 @@ function ImageCard({ url, idx, onEdit, onRemove }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function ImageStudio() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   const [q,          setQ]          = useState('');
   const [buscando,   setBuscando]   = useState(false);
@@ -279,10 +280,17 @@ export default function ImageStudio() {
                 <Sparkles size={32} className="text-violet-400/40" />
               </div>
               <p className="text-slate-400 text-sm font-semibold mb-1">Image Studio</p>
-              <p className="text-slate-600 text-xs leading-relaxed">
+              <p className="text-slate-600 text-xs leading-relaxed mb-4">
                 Busque um produto pela barra lateral para editar as fotos.<br />
                 Você pode navegar aqui diretamente de qualquer tela com imagens.
               </p>
+              <button
+                onClick={() => navigate('/catalogo/fotos-lote')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs transition-all shadow-lg shadow-violet-900/25"
+              >
+                <Sparkles size={12} />
+                Ir para o Estúdio em Lote
+              </button>
             </div>
           </div>
         ) : (

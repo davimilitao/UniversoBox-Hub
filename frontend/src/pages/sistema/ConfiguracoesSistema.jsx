@@ -781,6 +781,112 @@ function TabUsuarios({ showToast }) {
   );
 }
 
+// ─── Local Printer Configuration ──────────────────────────────────────────────
+function LocalPrinterCard() {
+  const [status, setStatus] = useState('checking');
+  const [printers, setPrinters] = useState([]);
+  const [selected, setSelected] = useState(localStorage.getItem('elgin_printer_name') || '');
+
+  const checkAgent = async () => {
+    setStatus('checking');
+    try {
+      const res = await fetch('http://localhost:9000/status');
+      if (res.ok) {
+        const printersRes = await fetch('http://localhost:9000/printers');
+        const printersData = await printersRes.json();
+        setPrinters(printersData.printers || []);
+        setStatus('connected');
+        if (!selected && printersData.defaultPrinter) {
+          setSelected(printersData.defaultPrinter);
+          localStorage.setItem('elgin_printer_name', printersData.defaultPrinter);
+        }
+      } else {
+        setStatus('error');
+      }
+    } catch (e) {
+      setStatus('error');
+    }
+  };
+
+  useEffect(() => {
+    checkAgent();
+  }, []);
+
+  const handleChange = (e) => {
+    const val = e.target.value;
+    setSelected(val);
+    localStorage.setItem('elgin_printer_name', val);
+  };
+
+  return (
+    <SectionCard icon={Box} title="Agente de Impressão Local (Porta 9000)">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-slate-600">Status do Agente</span>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+            status === 'connected'
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+              : status === 'checking'
+              ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+              : 'bg-red-500/10 text-red-400 border-red-500/20'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              status === 'connected' ? 'bg-emerald-400 animate-pulse' : status === 'checking' ? 'bg-amber-400 animate-bounce' : 'bg-red-400'
+            }`} />
+            {status === 'connected' ? 'Conectado' : status === 'checking' ? 'Verificando...' : 'Desconectado'}
+          </span>
+        </div>
+
+        {status === 'connected' ? (
+          <div className="space-y-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Selecione a Impressora Elgin/Etiquetas</label>
+              <select
+                value={selected}
+                onChange={handleChange}
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-white/[0.07] text-xs text-slate-200 focus:outline-none focus:border-blue-500/40 transition-all"
+              >
+                <option value="">— Nenhuma / Padrão do Sistema —</option>
+                {printers.map(p => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+            <p className="text-[9px] text-slate-700 italic">Etiquetas e notas fiscais DANFE serão enviadas diretamente à impressora selecionada.</p>
+          </div>
+        ) : (
+          <div className="text-[10px] text-slate-400 leading-relaxed bg-slate-900/60 rounded-lg p-3 border border-white/[0.05] space-y-1.5">
+            <p className="text-amber-400 font-semibold flex items-center gap-1">
+              <AlertTriangle size={11} /> Agente de Impressão offline
+            </p>
+            <p>Para imprimir etiquetas automaticamente e sem confirmação visual:</p>
+            <ol className="list-decimal list-inside space-y-0.5 text-slate-500">
+              <li>Certifique-se de rodar o agente local em sua máquina.</li>
+              <li>Execute o comando <code className="text-slate-300 font-mono">node backend/scripts/print-agent.js</code> no terminal.</li>
+              <li>Certifique-se de que a Elgin L42 Pro está instalada no Windows.</li>
+            </ol>
+            <div className="flex gap-2 mt-2 flex-wrap">
+              <button
+                onClick={checkAgent}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 border border-white/[0.07] hover:border-slate-500 text-[10px] font-bold text-slate-300 transition-colors flex items-center gap-1"
+              >
+                <RefreshCw size={9} /> Tentar Reconexão
+              </button>
+              <a
+                href="/print-agent.js"
+                download="print-agent.js"
+                className="px-3 py-1.5 rounded-lg bg-violet-600/10 hover:bg-violet-600/25 border border-violet-500/20 text-[10px] font-bold text-violet-400 transition-all flex items-center gap-1"
+              >
+                📥 Baixar print-agent.js
+              </a>
+            </div>
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: SISTEMA
 // ─────────────────────────────────────────────────────────────────────────────
@@ -832,6 +938,7 @@ function TabSistema({ showToast }) {
 
   return (
     <div className="h-full overflow-y-auto p-5 space-y-4 max-w-xl pb-12">
+      <LocalPrinterCard />
 
       {/* Sessão atual */}
       <SectionCard icon={User} title="Sessão atual">

@@ -16,7 +16,7 @@ import {
   RefreshCw, Plus, Loader2, ChevronRight, User, MapPin, X,
   ScanLine, Printer, PackageCheck, SendHorizonal, CircleCheck,
   BoxesIcon, Truck, ClipboardCheck, Camera, CameraOff,
-  BarChart2, Tag, Bell, BellOff, ChevronDown, ChevronUp,
+  BarChart2, Tag, Bell, BellOff, ChevronDown, ChevronUp, Flame
 } from 'lucide-react';
 import { useOrderNotifier }  from '../../hooks/useOrderNotifier';
 import { useBarcodeCamera }  from '../../hooks/useBarcodeCamera';
@@ -96,16 +96,7 @@ function beep(ok = true) {
   } catch {}
 }
 
-// ─── QZ Tray helpers ──────────────────────────────────────────────────────────
-async function qzConnect() {
-  const qz = window.qz;
-  if (!qz) throw new Error('QZ Tray não encontrado. Instale em qz.io/download');
-  if (!qz.websocket.isActive()) {
-    try { qz.security.setCertificatePromise(r => r(null)); qz.security.setSignatureAlgorithm('SHA512'); qz.security.setSignaturePromise(() => r => r(null)); } catch {}
-    await qz.websocket.connect({ retries: 3, delay: 1 });
-  }
-  return qz;
-}
+// Impressão via Agente Local na porta 9000 (Substituiu o QZ Tray)
 
 async function printDanfe(blingNfId, onStatus) {
   // ── 1. Busca DANFE no backend PRIMEIRO (antes de conectar ao QZ) ──────
@@ -155,21 +146,28 @@ async function printDanfe(blingNfId, onStatus) {
 
   if (!b64pdf) throw new Error('Bling não retornou PDF da DANFE.');
 
-  // ── 3. Tenta imprimir via QZ Tray ────────────────────────────────────
-  onStatus?.('Conectando à impressora…');
-  let qzOk = false;
+  // ── 3. Tenta imprimir via Agente Local ────────────────────────────────
+  onStatus?.('Imprimindo via Agente Local…');
+  let agentOk = false;
   try {
-    const qz      = await qzConnect();
-    const printer  = await qz.printers.getDefault();
-    const config   = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
-    await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64pdf }]);
-    qzOk = true;
-  } catch (qzErr) {
-    console.warn('[printDanfe] QZ indisponível:', qzErr.message);
+    const printer = localStorage.getItem('elgin_printer_name') || '';
+    const agentRes = await fetch('http://localhost:9000/print-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdf: b64pdf, printer }),
+    });
+    if (agentRes.ok) {
+      agentOk = true;
+    } else {
+      const errData = await agentRes.json().catch(() => ({}));
+      console.warn('[printDanfe] Agente local retornou erro:', errData.error);
+    }
+  } catch (err) {
+    console.warn('[printDanfe] Falha ao conectar ao Agente Local:', err.message);
   }
 
   // ── 4. Fallback: abre blob PDF no browser ────────────────────────────
-  if (!qzOk) {
+  if (!agentOk) {
     onStatus?.('Abrindo PDF no navegador…');
     const blob = new Blob([Uint8Array.from(atob(b64pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
     const url  = URL.createObjectURL(blob);
@@ -178,14 +176,8 @@ async function printDanfe(blingNfId, onStatus) {
   }
 }
 
-/**
- * Imprime etiqueta de transporte do Mercado Livre via QZ Tray.
- * Suporta ZPL (impressoras térmicas) e PDF (impressoras comuns).
- * @param {string} mlOrderId  — número do pedido ML (numeroPedido / mlOrderId do order)
- * @param {Function} onStatus — callback de status para exibir progresso no UI
- */
 async function printShippingLabel(mlOrderId, onStatus) {
-  // ── 1. Busca a etiqueta no backend PRIMEIRO (antes do QZ) ─────────────
+  // ── 1. Busca a etiqueta no backend PRIMEIRO ────────────────────────────
   onStatus?.('Buscando etiqueta no ML…');
   const token = localStorage.getItem('expedicao_token') || '';
   const res   = await fetch(`/api/ml/orders/${encodeURIComponent(mlOrderId)}/label`, {
@@ -194,11 +186,10 @@ async function printShippingLabel(mlOrderId, onStatus) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    // Se o backend retornou mlWebUrl, abre no browser como último recurso
     if (data.mlWebUrl) {
       onStatus?.('Abrindo impressão no ML…');
       window.open(data.mlWebUrl, '_blank');
-      return; // não lança erro — usuário verá a página do ML
+      return;
     }
     throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta`);
   }
@@ -223,30 +214,38 @@ async function printShippingLabel(mlOrderId, onStatus) {
     }
   }
 
-  // ── 3. Tenta imprimir via QZ Tray ─────────────────────────────────────
-  onStatus?.('Conectando à impressora…');
-  let qzOk = false;
+  // ── 3. Tenta imprimir via Agente Local ────────────────────────────────
+  onStatus?.('Imprimindo via Agente Local…');
+  let agentOk = false;
   try {
-    const qz = await qzConnect();
-    const printer = await qz.printers.getDefault();
-
+    const printer = localStorage.getItem('elgin_printer_name') || '';
+    let agentRes;
     if (zplStr) {
-      const config = qz.configs.create(printer, { language: { type: 'ZPL' } });
-      await qz.print(config, [{ type: 'raw', format: 'plain', data: zplStr }]);
-      qzOk = true;
-    } else if (b64pdf) {
-      const config = qz.configs.create(printer, { scaleContent: true, colorType: 'blackwhite' });
-      await qz.print(config, [{ type: 'pixel', format: 'pdf', flavor: 'base64', data: b64pdf }]);
-      qzOk = true;
+      agentRes = await fetch('http://localhost:9000/print-zpl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zpl: zplStr, printer }),
+      });
+    } else if (b64pdf || pdfUrl) {
+      agentRes = await fetch('http://localhost:9000/print-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf: b64pdf || pdfUrl, printer }),
+      });
     }
-  } catch (qzErr) {
-    console.warn('[printShippingLabel] QZ Tray indisponível:', qzErr.message);
-    // Não lança — cai para fallback browser
+    if (agentRes && agentRes.ok) {
+      agentOk = true;
+    } else if (agentRes) {
+      const errData = await agentRes.json().catch(() => ({}));
+      console.warn('[printShippingLabel] Agente local retornou erro:', errData.error);
+    }
+  } catch (err) {
+    console.warn('[printShippingLabel] Falha ao conectar ao Agente Local:', err.message);
   }
 
-  if (qzOk) return;
+  if (agentOk) return;
 
-  // ── 4. Fallback: abre PDF no browser (sem impressora física) ──────────
+  // ── 4. Fallback: abre PDF no browser ──────────────────────────────────
   onStatus?.('Abrindo PDF no navegador…');
   if (b64pdf) {
     const blob = new Blob([Uint8Array.from(atob(b64pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
@@ -260,7 +259,6 @@ async function printShippingLabel(mlOrderId, onStatus) {
     return;
   }
   if (zplStr) {
-    // ZPL sem QZ Tray: baixa como arquivo .zpl para uso posterior
     onStatus?.('Baixando arquivo ZPL…');
     const blob = new Blob([zplStr], { type: 'text/plain' });
     const url  = URL.createObjectURL(blob);
@@ -272,11 +270,10 @@ async function printShippingLabel(mlOrderId, onStatus) {
     return;
   }
 
-  throw new Error('Etiqueta não disponível — verifique se o pedido tem envio associado no ML.');
+  throw new Error('Etiqueta não disponível — verifique se o envio está pronto no ML.');
 }
 
 async function printBinLabel(orderId, item, onStatus) {
-  const qz = await qzConnect();
   onStatus?.('Gerando etiqueta ZPL…');
   const r = await api(`/orders/${encodeURIComponent(orderId)}/etiqueta-bin`, {
     method: 'POST',
@@ -284,9 +281,20 @@ async function printBinLabel(orderId, item, onStatus) {
   });
   if (!r?.zpl) throw new Error('Falha ao gerar ZPL');
   onStatus?.('Imprimindo etiqueta…');
-  const printer = await qz.printers.getDefault();
-  const config = qz.configs.create(printer, { language: { type: 'ZPL' } });
-  await qz.print(config, [{ type: 'raw', format: 'plain', data: r.zpl }]);
+  try {
+    const printer = localStorage.getItem('elgin_printer_name') || '';
+    const agentRes = await fetch('http://localhost:9000/print-zpl', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zpl: r.zpl, printer }),
+    });
+    if (!agentRes.ok) {
+      const errData = await agentRes.json().catch(() => ({}));
+      throw new Error(errData.error || 'Falha ao enviar ZPL para o Agente Local');
+    }
+  } catch (err) {
+    throw new Error('Agente de Impressão Local offline ou com erro: ' + err.message);
+  }
 }
 
 // ─── Marketplace Logos ────────────────────────────────────────────────────────
@@ -452,7 +460,7 @@ function CameraOverlay({ onScan, onClose }) {
 }
 
 // ─── Order Card ───────────────────────────────────────────────────────────────
-function OrderCard({ o, tab, active, onClick }) {
+function OrderCard({ o, tab, active, onClick, onFlexToggle }) {
   const its     = Array.isArray(o.items) ? o.items : [];
   const total   = its.reduce((a, it) => a + Number(it.qty || 0), 0);
   const checked = its.reduce((a, it) => a + Number(it.checkedQty || 0), 0);
@@ -476,8 +484,26 @@ function OrderCard({ o, tab, active, onClick }) {
       )}
       <div className="p-3">
         <div className="flex items-center justify-between gap-2 mb-2">
-          <MktLogo mkt={o.marketplace} />
-          <span className="font-mono text-[10px] text-slate-500 truncate">{o.id}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <MktLogo mkt={o.marketplace} />
+            <span className="font-mono text-[10px] text-slate-500 truncate">{o.id}</span>
+          </div>
+          {tab !== 'packed' && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onFlexToggle?.(o, e);
+              }}
+              title={isFlex ? "Prioridade Flex Ativa (Remover)" : "Marcar como Prioridade Flex"}
+              className={`p-1.5 rounded-lg border transition-all ${
+                isFlex
+                  ? 'bg-amber-400/20 border-amber-400/40 text-amber-400 scale-105'
+                  : 'bg-slate-800/40 border-white/5 text-slate-600 hover:text-slate-400 hover:border-white/10'
+              }`}
+            >
+              <Flame size={12} className={isFlex ? 'fill-amber-400' : ''} />
+            </button>
+          )}
         </div>
         {etiq?.valor && (
           <div className={`text-[11px] font-bold mb-2.5 truncate px-2 py-1 rounded-lg
@@ -1072,6 +1098,46 @@ export default function PedidosDoDia() {
     setTimeout(() => scanInputRef.current?.focus(), 100);
   }
 
+  async function toggleOrderPriority(o, e) {
+    if (e) e.stopPropagation();
+    const currentPriority = o.logistica === 'flex' || !!o.isPriority;
+    const nextPriority = !currentPriority;
+
+    setOrders(prev => {
+      const updateList = (list) => list.map(item => item.id === o.id ? { ...item, isPriority: nextPriority, logistica: nextPriority ? 'flex' : 'agency' } : item);
+      return {
+        pending: sortOrders(updateList(prev.pending)),
+        picked: sortOrders(updateList(prev.picked)),
+        packed: sortOrders(updateList(prev.packed))
+      };
+    });
+
+    if (selOrder?.id === o.id) {
+      setSelOrder(prev => prev ? { ...prev, isPriority: nextPriority, logistica: nextPriority ? 'flex' : 'agency' } : null);
+    }
+
+    try {
+      await api(`/orders/${encodeURIComponent(o.id)}/priority`, {
+        method: 'POST',
+        body: JSON.stringify({ isPriority: nextPriority })
+      });
+      showToast(`Prioridade atualizada: ${nextPriority ? '🔥 FLEX' : 'Padrão'}`, 'ok');
+    } catch (err) {
+      setOrders(prev => {
+        const updateList = (list) => list.map(item => item.id === o.id ? { ...item, isPriority: currentPriority, logistica: currentPriority ? 'flex' : 'agency' } : item);
+        return {
+          pending: sortOrders(updateList(prev.pending)),
+          picked: sortOrders(updateList(prev.picked)),
+          packed: sortOrders(updateList(prev.packed))
+        };
+      });
+      if (selOrder?.id === o.id) {
+        setSelOrder(prev => prev ? { ...prev, isPriority: currentPriority, logistica: currentPriority ? 'flex' : 'agency' } : null);
+      }
+      showToast(`Erro ao salvar prioridade: ${err.message}`, 'err');
+    }
+  }
+
   // ── Scan SEPARAÇÃO ──
   async function onScan(code) {
     if (tab !== 'pending') return;
@@ -1285,7 +1351,7 @@ export default function PedidosDoDia() {
                   : '🔍 Sem resultados'}
               </div>
             ) : listaFiltrada.map(o => (
-              <OrderCard key={o.id} o={o} tab={tab} active={selOrder?.id===o.id} onClick={() => selectOrder(o)} />
+              <OrderCard key={o.id} o={o} tab={tab} active={selOrder?.id===o.id} onClick={() => selectOrder(o)} onFlexToggle={toggleOrderPriority} />
             ))}
           </div>
         </div>

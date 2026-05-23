@@ -4,14 +4,30 @@
  *              e salva de volta — sync bidirecional com o Bling.
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search, Loader2, Save, CheckCircle, AlertCircle,
   ArrowLeft, Package, Tag, Hash, Truck, Image,
-  RefreshCw, ExternalLink, Plus, Sparkles,
+  RefreshCw, ExternalLink, Plus, Sparkles, BarChart2,
 } from 'lucide-react';
 import { ImageEditor } from '../../components/ImageEditor';
+
+const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+function brl(v) { return BRL.format(v || 0); }
+
+function estimateFrete(pesoBrutoKg) {
+  const w = parseFloat(pesoBrutoKg) || 0;
+  if (w <= 0.5) return 19.90;
+  if (w <= 1.0) return 21.90;
+  if (w <= 2.0) return 23.90;
+  if (w <= 5.0) return 28.90;
+  if (w <= 9.0) return 34.90;
+  if (w <= 13.0) return 44.90;
+  if (w <= 17.0) return 54.90;
+  if (w <= 30.0) return 69.90;
+  return 99.90;
+}
 
 // ── Campo de texto genérico ───────────────────────────────────────────────────
 function Campo({ label, value, onChange, mono, placeholder, area, hint }) {
@@ -88,8 +104,254 @@ function TelaBusca({ onBuscar, carregando, erro }) {
   );
 }
 
+// ── Componente de Upload de PDF para Autopreenchimento ──
+function UploaderIA({ onFill, showToast }) {
+  const [loading, setLoading] = useState(false);
+  const [fileName, setFileName] = useState('');
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      showToast('Por favor, selecione um arquivo PDF.', 'err');
+      return;
+    }
+    setFileName(file.name);
+    setLoading(true);
+
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
+        const base64 = reader.result;
+        try {
+          const res = await fetch('/api/catalogo/ler-pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pdf: base64 }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Falha ao processar manual');
+          onFill(data);
+          showToast('Campos preenchidos por IA com sucesso! ✓');
+        } catch (err) {
+          showToast('Erro ao ler PDF: ' + err.message, 'err');
+        } finally {
+          setLoading(false);
+        }
+      };
+    } catch (err) {
+      showToast('Erro ao ler arquivo local.', 'err');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="bg-slate-900 border border-violet-500/20 bg-gradient-to-r from-slate-900 via-violet-950/10 to-slate-900 rounded-2xl p-5 space-y-3">
+      <h2 className="text-[11px] text-violet-400 font-bold uppercase tracking-widest flex items-center gap-2">
+        <Sparkles size={12} className="text-violet-400 animate-pulse" /> Auto-Preenchimento por IA (Manual PDF Dorel)
+      </h2>
+      <p className="text-xs text-slate-500 font-medium">Faça o upload do manual em PDF para extrair automaticamente nome, SKU, EAN, dimensões, pesos e descrição técnica.</p>
+      
+      <div className="flex items-center gap-3">
+        <label className="cursor-pointer bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-colors flex items-center gap-1.5 shadow-lg shadow-violet-900/30">
+          <input type="file" accept=".pdf" onChange={handleFileChange} disabled={loading} className="hidden" />
+          {loading ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+          {loading ? 'Processando PDF com Gemini...' : 'Selecionar Manual PDF'}
+        </label>
+        {fileName && (
+          <span className="text-[10px] text-slate-500 truncate max-w-xs font-mono">{fileName}</span>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ── Componente Precificadora Inteligente de Canais ──
+function Precificadora({ precoVenda, setPrecoVenda, custo, setCusto, simplesNacional, setSimplesNacional, pesoBruto, onApplyPrice }) {
+  const pVenda = parseFloat(precoVenda) || 0;
+  const pCusto = parseFloat(custo) || 0;
+  const impPct = parseFloat(simplesNacional) || 0;
+  
+  const freteEstimado = useMemo(() => {
+    return estimateFrete(pesoBruto);
+  }, [pesoBruto]);
+
+  const mlClassico = useMemo(() => {
+    const taxaPct = 0.12;
+    const taxaFixa = pVenda < 79 ? 6.50 : 0;
+    const frete = pVenda >= 79 ? freteEstimado : 0;
+    const imposto = pVenda * (impPct / 100);
+    const comissao = pVenda * taxaPct + taxaFixa;
+    const liquido = pVenda - pCusto - imposto - comissao - frete;
+    const margem = pVenda > 0 ? (liquido / pVenda) * 100 : 0;
+    return { comissao, frete, imposto, liquido, margem };
+  }, [pVenda, pCusto, impPct, freteEstimado]);
+
+  const mlPremium = useMemo(() => {
+    const taxaPct = 0.17;
+    const taxaFixa = pVenda < 79 ? 6.50 : 0;
+    const frete = pVenda >= 79 ? freteEstimado : 0;
+    const imposto = pVenda * (impPct / 100);
+    const comissao = pVenda * taxaPct + taxaFixa;
+    const liquido = pVenda - pCusto - imposto - comissao - frete;
+    const margem = pVenda > 0 ? (liquido / pVenda) * 100 : 0;
+    return { comissao, frete, imposto, liquido, margem };
+  }, [pVenda, pCusto, impPct, freteEstimado]);
+
+  const shopee = useMemo(() => {
+    const taxaPct = 0.20;
+    const taxaFixa = 4.00;
+    const frete = 0; 
+    const imposto = pVenda * (impPct / 100);
+    const comissao = pVenda * taxaPct + taxaFixa;
+    const liquido = pVenda - pCusto - imposto - comissao - frete;
+    const margem = pVenda > 0 ? (liquido / pVenda) * 100 : 0;
+    return { comissao, frete, imposto, liquido, margem };
+  }, [pVenda, pCusto, impPct]);
+
+  return (
+    <section className="bg-slate-900 border border-white/5 rounded-2xl p-5 space-y-4">
+      <h2 className="text-[11px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
+        <BarChart2 size={12} className="text-slate-500" /> Precificadora de Canais
+      </h2>
+      
+      <div className="grid grid-cols-3 gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Custo Prod (R$)</label>
+          <input
+            type="number"
+            step="0.01"
+            value={custo}
+            onChange={e => setCusto(e.target.value)}
+            placeholder="0.00"
+            className="w-full bg-slate-800 border border-white/5 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500/60 font-mono text-emerald-400"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Simples (%)</label>
+          <input
+            type="number"
+            step="0.1"
+            value={simplesNacional}
+            onChange={e => setSimplesNacional(e.target.value)}
+            placeholder="6.0"
+            className="w-full bg-slate-800 border border-white/5 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500/60 font-mono text-emerald-400"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Preço Simulado (R$)</label>
+          <input
+            type="number"
+            step="0.01"
+            value={precoVenda}
+            onChange={e => setPrecoVenda(e.target.value)}
+            placeholder="0.00"
+            className="w-full bg-slate-800 border border-white/5 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500/60 font-mono text-emerald-400 font-bold"
+          />
+        </div>
+      </div>
+
+      <div className="text-[10px] text-slate-500 flex justify-between bg-slate-800/40 px-3 py-2 rounded-lg border border-white/[0.03]">
+        <span>Peso Bruto: <strong>{pesoBruto || 0} kg</strong></span>
+        <span>Frete Estimado (ML): <strong>{brl(freteEstimado)}</strong></span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* ML Classico */}
+        <div className="bg-slate-950/60 rounded-xl p-3 border border-white/[0.04] flex flex-col justify-between min-h-[140px]">
+          <div>
+            <p className="text-[10px] font-bold text-yellow-500 uppercase tracking-wider">ML Clássico</p>
+            <div className="space-y-1 mt-2 text-[9px] text-slate-500">
+              <div className="flex justify-between"><span>Imposto:</span><span>{brl(mlClassico.imposto)}</span></div>
+              <div className="flex justify-between"><span>Comissão:</span><span>{brl(mlClassico.comissao)}</span></div>
+              <div className="flex justify-between"><span>Frete:</span><span>{brl(mlClassico.frete)}</span></div>
+            </div>
+          </div>
+          <div className="border-t border-white/[0.05] pt-1.5 mt-2">
+            <div className="flex justify-between items-baseline">
+              <span className="text-[9px] text-slate-600">Lucro:</span>
+              <span className={`text-[11px] font-black ${mlClassico.liquido >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {brl(mlClassico.liquido)}
+              </span>
+            </div>
+            <div className="flex justify-between items-baseline">
+              <span className="text-[9px] text-slate-600">Margem:</span>
+              <span className={`text-[9px] font-bold ${mlClassico.margem >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {mlClassico.margem.toFixed(1)}%
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* ML Premium */}
+        <div className="bg-slate-950/60 rounded-xl p-3 border border-white/[0.04] flex flex-col justify-between min-h-[140px]">
+          <div>
+            <p className="text-[10px] font-bold text-yellow-400 uppercase tracking-wider">ML Premium</p>
+            <div className="space-y-1 mt-2 text-[9px] text-slate-500">
+              <div className="flex justify-between"><span>Imposto:</span><span>{brl(mlPremium.imposto)}</span></div>
+              <div className="flex justify-between"><span>Comissão:</span><span>{brl(mlPremium.comissao)}</span></div>
+              <div className="flex justify-between"><span>Frete:</span><span>{brl(mlPremium.frete)}</span></div>
+            </div>
+          </div>
+          <div className="border-t border-white/[0.05] pt-1.5 mt-2">
+            <div className="flex justify-between items-baseline">
+              <span className="text-[9px] text-slate-600">Lucro:</span>
+              <span className={`text-[11px] font-black ${mlPremium.liquido >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {brl(mlPremium.liquido)}
+              </span>
+            </div>
+            <div className="flex justify-between items-baseline">
+              <span className="text-[9px] text-slate-600">Margem:</span>
+              <span className={`text-[9px] font-bold ${mlPremium.margem >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {mlPremium.margem.toFixed(1)}%
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Shopee */}
+        <div className="bg-slate-950/60 rounded-xl p-3 border border-white/[0.04] flex flex-col justify-between min-h-[140px]">
+          <div>
+            <p className="text-[10px] font-bold text-orange-500 uppercase tracking-wider">Shopee</p>
+            <div className="space-y-1 mt-2 text-[9px] text-slate-500">
+              <div className="flex justify-between"><span>Imposto:</span><span>{brl(shopee.imposto)}</span></div>
+              <div className="flex justify-between"><span>Comissão:</span><span>{brl(shopee.comissao)}</span></div>
+              <div className="flex justify-between"><span>Frete:</span><span>—</span></div>
+            </div>
+          </div>
+          <div className="border-t border-white/[0.05] pt-1.5 mt-2">
+            <div className="flex justify-between items-baseline">
+              <span className="text-[9px] text-slate-600">Lucro:</span>
+              <span className={`text-[11px] font-black ${shopee.liquido >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {brl(shopee.liquido)}
+              </span>
+            </div>
+            <div className="flex justify-between items-baseline">
+              <span className="text-[9px] text-slate-600">Margem:</span>
+              <span className={`text-[9px] font-bold ${shopee.margem >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {shopee.margem.toFixed(1)}%
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end pt-1">
+        <button
+          onClick={() => onApplyPrice(precoVenda)}
+          disabled={pVenda <= 0}
+          className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/25 px-4 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-40"
+        >
+          Aplicar Preço Simulado ao Produto
+        </button>
+      </div>
+    </section>
+  );
+}
+
 // ── Studio principal ──────────────────────────────────────────────────────────
-function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, onVoltar, isNovo }) {
+function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, onVoltar, isNovo, precoSimulado, setPrecoSimulado, custoSimulado, setCustoSimulado, simplesNacional, setSimplesNacional, onFill, showToast }) {
   const p = produto;
   const set = (campo) => (val) => setProduto(prev => ({ ...prev, [campo]: val }));
   const [editorImg, setEditorImg] = useState(null); // { url, idx }
@@ -113,7 +375,7 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               {p.nome || 'Novo Produto'}
             </h1>
             <div className="flex items-center gap-2 mt-0.5">
-              {p.codigo && <span className="text-xs font-mono text-slateald-500">{p.codigo}</span>}
+              {p.codigo && <span className="text-xs font-mono text-slate-500">{p.codigo}</span>}
               {p.gtin && <span className="text-xs text-slate-600">· EAN {p.gtin}</span>}
               <SituacaoBadge sit={p.situacao} />
               {!isNovo && (
@@ -145,6 +407,8 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
 
         {/* ── Coluna principal ── */}
         <div className="lg:col-span-2 space-y-4">
+
+          <UploaderIA onFill={onFill} showToast={showToast} />
 
           {/* Identificação */}
           <section className="bg-slate-900 border border-white/5 rounded-2xl p-5 space-y-4">
@@ -198,6 +462,20 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               </div>
             </div>
           </section>
+
+          <Precificadora
+            precoVenda={precoSimulado}
+            setPrecoVenda={setPrecoSimulado}
+            custo={custoSimulado}
+            setCusto={setCustoSimulado}
+            simplesNacional={simplesNacional}
+            setSimplesNacional={setSimplesNacional}
+            pesoBruto={p.pesoBruto}
+            onApplyPrice={val => {
+              set('preco')(val);
+              setPrecoSimulado(val);
+            }}
+          />
 
           {/* Descrição */}
           <section className="bg-slate-900 border border-white/5 rounded-2xl p-5 space-y-4">
@@ -358,9 +636,14 @@ export default function AutomacaoCadastro() {
   const [produto,    setProduto]    = useState(null);
   const [categorias, setCategorias] = useState([]);
   const [erro,       setErro]       = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [salvoOk,    setSalvoOk]    = useState(false);
   const [searchParams]              = useSearchParams();
   const isNovo = produto && !produto.id;
+
+  const [precoSimulado, setPrecoSimulado] = useState('0.00');
+  const [custoSimulado, setCustoSimulado] = useState('0.00');
+  const [simplesNacional, setSimplesNacional] = useState('6.0');
 
   // Carrega categorias uma vez
   useEffect(() => {
@@ -377,11 +660,31 @@ export default function AutomacaoCadastro() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function showToast(msg, type = 'ok') {
+    if (type === 'err') {
+      setErro(msg);
+    } else {
+      setSuccessMsg(msg);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    }
+  }
+
+  function handleFill(data) {
+    setProduto(prev => ({
+      ...prev,
+      ...data,
+      imagens: prev.imagens || []
+    }));
+    if (data.preco) setPrecoSimulado(data.preco);
+  }
+
   async function handleBuscar(q) {
     if (q === '__novo__') {
       setProduto({ nome: '', codigo: '', gtin: '', preco: '0.00', marca: '', ncm: '',
         descricaoCurta: '', descricao: '', situacao: 'A', origem: 0, pesoLiq: '0.000', pesoBruto: '0.000',
         altura: '0', largura: '0', profundidade: '0', categoria: null, imagens: [] });
+      setPrecoSimulado('0.00');
+      setCustoSimulado('0.00');
       setStatus('studio');
       return;
     }
@@ -393,6 +696,7 @@ export default function AutomacaoCadastro() {
       const d   = await res.json();
       if (!res.ok) throw new Error(d.error || 'Produto não encontrado');
       setProduto(d);
+      setPrecoSimulado(d.preco || '0.00');
       setStatus('studio');
     } catch (e) {
       setErro(e.message);
@@ -418,6 +722,7 @@ export default function AutomacaoCadastro() {
       if (!res.ok) throw new Error(d.error || 'Falha ao salvar');
       if (isNovo && d.id) setProduto(prev => ({ ...prev, id: d.id }));
       setSalvoOk(true);
+      showToast('Produto salvo no Bling com sucesso! ✓');
       setTimeout(() => setSalvoOk(false), 3000);
     } catch (e) {
       setErro(e.message);
@@ -449,6 +754,12 @@ export default function AutomacaoCadastro() {
           <button onClick={() => setErro('')} className="ml-auto text-red-600 hover:text-red-400">✕</button>
         </div>
       )}
+      {successMsg && (
+        <div className="mx-4 mt-4 flex items-center gap-2 text-emerald-400 text-sm bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3 animate-fade-in">
+          <CheckCircle size={15} className="shrink-0" /> {successMsg}
+          <button onClick={() => setSuccessMsg('')} className="ml-auto text-emerald-600 hover:text-emerald-400">✕</button>
+        </div>
+      )}
       <Studio
         produto={produto}
         setProduto={setProduto}
@@ -458,6 +769,14 @@ export default function AutomacaoCadastro() {
         salvoOk={salvoOk}
         onVoltar={handleVoltar}
         isNovo={isNovo}
+        precoSimulado={precoSimulado}
+        setPrecoSimulado={setPrecoSimulado}
+        custoSimulado={custoSimulado}
+        setCustoSimulado={setCustoSimulado}
+        simplesNacional={simplesNacional}
+        setSimplesNacional={setSimplesNacional}
+        onFill={handleFill}
+        showToast={showToast}
       />
     </div>
   );

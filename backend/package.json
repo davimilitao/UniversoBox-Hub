@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
+    "@google/generative-ai": "^0.24.1",
     "axios": "^1.14.0",
     "cheerio": "^1.2.0",
     "cloudinary": "^2.9.0",
@@ -23,6 +24,7 @@
     "helmet": "^7.1.0",
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
+    "pdf-to-printer": "^5.8.0",
     "typesense": "^3.0.3",
     "uuid": "^10.0.0"
   },

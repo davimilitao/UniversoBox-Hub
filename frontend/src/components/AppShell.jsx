@@ -40,11 +40,9 @@ const ROTAS = [
   { key: 'enriquecer-xml', moduleId: 'enriquecer-xml', label: 'Cadastro XML',      secao: 'Catálogo',   Icon: FileCode,          react: false, href: '/enriquecer-xml',      locked: true },
   { key: 'importar',       moduleId: 'importar',       label: 'Importar CSV',      secao: 'Catálogo',   Icon: FileUp,            react: true,  href: '/catalogo/importar'    },
   { key: 'image-studio',   moduleId: 'catalogo',       label: 'Image Studio',      secao: 'Catálogo',   Icon: Camera,            react: true,  href: '/catalogo/fotos'       },
+  { key: 'batch-image-studio', moduleId: 'catalogo',   label: 'Estúdio em Lote',   secao: 'Catálogo',   Icon: Sparkles,          react: true,  href: '/catalogo/fotos-lote'  },
   // Financeiro
   { key: 'fin-contas',     moduleId: 'financas',       label: 'Contas a Pagar',    secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/contas'    },
-  { key: 'fin-despesas',   moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Receipt,           react: true,  href: '/financeiro/despesas'  },
-  { key: 'fin-margem',     moduleId: 'financas',       label: 'Margem',            secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/margem'    },
-  { key: 'fin-painel',     moduleId: 'financas',       label: 'Painel',            secao: 'Financeiro', Icon: LayoutDashboard,   react: true,  href: '/financeiro/painel'    },
   { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Expedição',  Icon: ShoppingBag,       react: true,  href: '/expedicao/compras'    },
   // Sistema
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },
