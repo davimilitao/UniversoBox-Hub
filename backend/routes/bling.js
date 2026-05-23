@@ -90,6 +90,53 @@ function detectarMkt(nf) {
   return 'OUTROS';
 }
 
+const SITUACOES_NFE = {
+  1: 'Pendente',
+  2: 'Cancelada',
+  3: 'Aguardando recibo',
+  4: 'Rejeitada',
+  5: 'Autorizada',
+  6: 'Emitida DANFE',
+  7: 'Registrada',
+  8: 'Aguardando protocolo',
+  9: 'Denegada',
+  10: 'Consulta situação',
+  11: 'Bloqueada'
+};
+
+function getSituacaoDescricao(sit) {
+  if (typeof sit === 'object' && sit !== null) {
+    return sit.descricao || SITUACOES_NFE[sit.id] || '';
+  }
+  return SITUACOES_NFE[sit] || String(sit || '');
+}
+
+function isSemDanfe(sitDesc) {
+  const s = (sitDesc || '').toLowerCase();
+  if (s.includes('cancelada')) return false;
+  if (s.includes('sem danfe')) return true;
+  if (s.includes('emitida') || s.includes('danfe')) return false;
+  return true; // 'autorizada', 'pendente', etc.
+}
+
+function isComDanfe(sitDesc) {
+  if (isSemDanfe(sitDesc)) return false;
+  const s = (sitDesc || '').toLowerCase();
+  return s.includes('emitida') || s.includes('danfe');
+}
+
+function matchCanal(canalId, mkt) {
+  const m = (mkt || '').toLowerCase();
+  switch (canalId) {
+    case 'ml':     return (m.includes('mercado') || m.includes('meli') || m.includes('mlb')) && !m.includes('full');
+    case 'mlfull': return m.includes('full');
+    case 'shopee': return m.includes('shopee');
+    case 'magalu': return m.includes('magalu');
+    case 'tiktok': return m.includes('tiktok');
+    default:       return true;
+  }
+}
+
 // ── STATUS ────────────────────────────────────────────────────────
 router.get('/status', async (req, res) => {
   try {
@@ -148,8 +195,8 @@ router.get('/pedidos', async (req, res, next) => {
     const pagina     = Number(req.query.pagina || 1);
 
     const params = new URLSearchParams({
-      dataEmissaoInicial: dataInicio,
-      dataEmissaoFinal:   dataFim,
+      dataEmissaoInicial: `${dataInicio} 00:00:00`,
+      dataEmissaoFinal:   `${dataFim} 23:59:59`,
       pagina,
       limite: 100
     });
@@ -157,18 +204,34 @@ router.get('/pedidos', async (req, res, next) => {
     const resp  = await blingFetch(`/nfe?${params}`);
     const notas = resp.data || [];
 
-    const items = notas.map(n => ({
+    let items = notas.map(n => ({
       id:          n.id,
       numero:      n.numero,
       numeroPedido: null,
       dataEmissao: n.dataEmissao,
-      situacao:    n.situacao?.descricao || '',
+      situacao:    getSituacaoDescricao(n.situacao),
       cliente:     { nome: n.contato?.nome || '' },
       marketplace: detectarMkt(n),
       valorTotal:  n.valorTotal || 0,
       itens:       [],
       detalhado:   false,
     }));
+
+    // Filtragem local retrocompatível para bling.html antigo
+    const situacaoFiltro = req.query.situacao;
+    const lojaFiltro = req.query.loja;
+
+    if (situacaoFiltro && situacaoFiltro !== 'all') {
+      if (situacaoFiltro === '5') {
+        items = items.filter(item => isSemDanfe(item.situacao));
+      } else if (situacaoFiltro === '7') {
+        items = items.filter(item => isComDanfe(item.situacao));
+      }
+    }
+
+    if (lojaFiltro && lojaFiltro !== 'all') {
+      items = items.filter(item => matchCanal(lojaFiltro, item.marketplace));
+    }
 
     res.json({ items, total: items.length, dataInicio, dataFim });
   } catch(err) {
@@ -194,10 +257,12 @@ router.get('/pedidos/:id', async (req, res, next) => {
       numeroPedido,
       mlOrderId:    mlOrderId2,
       dataEmissao:  n.dataEmissao,
-      situacao:     n.situacao?.descricao || '',
+      situacao:     getSituacaoDescricao(n.situacao),
       cliente:      { nome: n.contato?.nome || '', email: n.contato?.email || '' },
       marketplace:  mkt2,
       valorTotal:   n.valorTotal || n.totalProdutos || 0,
+      linkDanfe:    n.linkDanfe || null,
+      linkPDF:      n.linkPDF || null,
       detalhado:    true,
       itens: (n.itens || []).map(it => ({
         sku:   safeTrim(it.codigo || it.produto?.codigo || ''),
@@ -227,10 +292,10 @@ router.get('/danfe/:id', async (req, res, next) => {
 
     const nfe = await resp.json();
     const data = nfe.data || {};
-    const sit = (data.situacao?.descricao || '').toLowerCase();
+    const sitDesc = getSituacaoDescricao(data.situacao).toLowerCase();
 
-    if (!sit.includes('emitida') && !sit.includes('danfe')) {
-      return res.status(404).json({ error: 'danfe_nao_disponivel', situacao: sit });
+    if (!sitDesc.includes('emitida') && !sitDesc.includes('danfe') && !sitDesc.includes('autorizada')) {
+      return res.status(404).json({ error: 'danfe_nao_disponivel', situacao: sitDesc });
     }
 
     const danfeRes = await fetch(`${BLING_API_BASE}/nfe/${nfId}/pdf`, { headers });

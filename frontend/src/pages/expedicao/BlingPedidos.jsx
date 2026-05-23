@@ -49,7 +49,11 @@ function primeiroDiaSemana(ano, mes) { return new Date(ano, mes, 1).getDay(); }
 
 // ─── DANFE ───────────────────────────────────────────────────────────────────
 function isSemDanfe(sit) {
-  return (sit || '').toLowerCase().includes('sem danfe');
+  const s = (sit || '').toLowerCase();
+  if (s.includes('cancelada')) return false;
+  if (s.includes('sem danfe')) return true;
+  if (s.includes('emitida') || s.includes('danfe')) return false;
+  return true; // "autorizada", "pendente", etc. are treated as "Sem DANFE"
 }
 function isComDanfe(sit) {
   if (isSemDanfe(sit)) return false;
@@ -110,12 +114,15 @@ function canalCor(mkt) {
 
 // ─── Badge situação ───────────────────────────────────────────────────────────
 function SituacaoBadge({ sit }) {
+  const s = (sit || '').toLowerCase();
+  if (s.includes('cancelada'))
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-500/10 text-red-400 border border-red-500/25 whitespace-nowrap"><XCircle size={10}/> Cancelada</span>;
+  if (s === 'autorizada')
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/25 whitespace-nowrap"><Clock size={10}/> Autorizada</span>;
   if (isSemDanfe(sit))
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/25 whitespace-nowrap"><Clock size={10}/> Sem DANFE</span>;
   if (isComDanfe(sit))
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 whitespace-nowrap"><CheckCircle2 size={10}/> DANFE OK</span>;
-  if ((sit||'').toLowerCase().includes('cancelada'))
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-500/10 text-red-400 border border-red-500/25 whitespace-nowrap"><XCircle size={10}/> Cancelada</span>;
   return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-700 text-slate-400 border border-slate-600 whitespace-nowrap">{sit||'—'}</span>;
 }
 
@@ -407,7 +414,7 @@ function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandind
 
         {/* Valor */}
         <span className="hidden sm:block text-sm tabular-nums text-slate-400 w-28 text-right shrink-0">
-          {detalhe?.valorTotal ? BRL.format(detalhe.valorTotal) : '—'}
+          {nf.valorTotal ? BRL.format(nf.valorTotal) : detalhe?.valorTotal ? BRL.format(detalhe.valorTotal) : '—'}
         </span>
 
         {/* Data */}
