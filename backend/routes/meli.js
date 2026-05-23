@@ -10,7 +10,7 @@ const ML_REDIRECT_URI  = process.env.ML_REDIRECT_URI  || '';
 const ML_TOKEN_URL     = 'https://api.mercadolibre.com/oauth/token';
 const ML_AUTH_URL      = 'https://auth.mercadolivre.com.br/authorization';
 const ML_API_BASE      = 'https://api.mercadolibre.com';
-const BLING_API_BASE  = 'https://www.bling.com.br/Api/v3';
+const BLING_API_BASE  = 'https://api.bling.com.br/Api/v3';
 
 // Helpers
 function safeTrim(v) {
