@@ -135,7 +135,11 @@ function montarPayload(p) {
       profundidade: parseFloat(p.profundidade)  || 0,
     },
     ...(p.categoria?.id ? { categoria: { id: Number(p.categoria.id) } } : {}),
-    midia: (p.imagens || []).filter(Boolean).map(link => ({ link, tipo: 'imagens' })),
+    ...(p.imagens?.length ? {
+      midia: {
+        imagens: p.imagens.map(link => ({ link }))
+      }
+    } : {}),
   };
 }
 
