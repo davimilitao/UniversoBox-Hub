@@ -46,7 +46,7 @@ export default function App() {
         <Route path="/catalogo/fotos"      element={<ImageStudio />} />
         <Route path="/catalogo/fotos-lote" element={<BatchImageStudio />} />
         {/* Financeiro */}
-        <Route path="/financeiro/contas"    element={<Contas />} />
+        <Route path="/financeiro/despesas"    element={<Contas />} />
         {/* Sistema */}
         <Route path="/sistema/config"      element={<ConfiguracoesSistema />} />
       </Route>

@@ -8,7 +8,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search, Loader2, Save, CheckCircle, AlertCircle,
-  ArrowLeft, Package, Tag, Hash, Truck, Image,
+  ArrowLeft, Package, Tag, Hash, Truck, Image as ImageIcon,
   RefreshCw, ExternalLink, Plus, Sparkles, BarChart2,
   Upload,
 } from 'lucide-react';
@@ -658,7 +658,7 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
           <section className="bg-slate-900 border border-white/5 rounded-2xl p-5 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-[11px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
-                <Image size={12} /> Fotos
+                <ImageIcon size={12} /> Fotos
               </h2>
               {p.codigo && (
                 <button
@@ -684,7 +684,7 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
                     </button>
                   </>
                 : <div className="text-slate-600 text-sm text-center px-4">
-                    <Image size={32} className="mx-auto mb-2 opacity-30" />
+                    <ImageIcon size={32} className="mx-auto mb-2 opacity-30" />
                     Sem imagem
                   </div>
               }
@@ -802,6 +802,80 @@ export default function AutomacaoCadastro() {
   const [salvoOk,    setSalvoOk]    = useState(false);
   const [searchParams]              = useSearchParams();
   const isNovo = produto && !produto.id;
+  const [originalProduto, setOriginalProduto] = useState(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  // Calcula diferenças entre o produto editado e o original do Bling
+  const diffs = useMemo(() => {
+    if (!originalProduto || !produto) return [];
+    const fields = [
+      { key: 'nome', label: 'Nome' },
+      { key: 'codigo', label: 'SKU/Código' },
+      { key: 'gtin', label: 'EAN/GTIN' },
+      { key: 'gtinEmbalagem', label: 'EAN Caixa Master' },
+      { key: 'itensPorCaixa', label: 'Itens por Caixa' },
+      { key: 'preco', label: 'Preço', format: v => BRL.format(parseFloat(v) || 0) },
+      { key: 'marca', label: 'Marca' },
+      { key: 'ncm', label: 'NCM' },
+      { key: 'situacao', label: 'Situação', format: v => v === 'A' ? 'Ativo' : 'Inativo' },
+      { key: 'pesoLiq', label: 'Peso Líquido', format: v => `${v} kg` },
+      { key: 'pesoBruto', label: 'Peso Bruto', format: v => `${v} kg` },
+      { key: 'altura', label: 'Altura', format: v => `${v} cm` },
+      { key: 'largura', label: 'Largura', format: v => `${v} cm` },
+      { key: 'profundidade', label: 'Profundidade', format: v => `${v} cm` },
+      { key: 'categoria', label: 'Categoria', format: v => v?.nome || 'Nenhuma' },
+    ];
+
+    const list = [];
+    fields.forEach(f => {
+      let orig = originalProduto[f.key];
+      let curr = produto[f.key];
+      
+      let diff = false;
+      if (f.key === 'categoria') {
+        diff = (orig?.id !== curr?.id);
+      } else {
+        diff = (String(orig ?? '') !== String(curr ?? ''));
+      }
+
+      if (diff) {
+        list.push({
+          label: f.label,
+          orig: f.format ? f.format(orig) : (orig || '—'),
+          curr: f.format ? f.format(curr) : (curr || '—'),
+        });
+      }
+    });
+
+    const origImgs = originalProduto.imagens || [];
+    const currImgs = produto.imagens || [];
+    if (JSON.stringify(origImgs) !== JSON.stringify(currImgs)) {
+      list.push({
+        label: 'Imagens',
+        orig: `${origImgs.length} imagem(ns)`,
+        curr: `${currImgs.length} imagem(ns)`,
+      });
+    }
+
+    const origDesc = (originalProduto.descricao || '').trim();
+    const currDesc = (produto.descricao || '').trim();
+    if (origDesc !== currDesc) {
+      list.push({
+        label: 'Descrição',
+        orig: origDesc ? 'Alterada' : 'Vazia',
+        curr: currDesc ? 'Alterada' : 'Vazia',
+      });
+    }
+
+    return list;
+  }, [originalProduto, produto]);
+
+  function triggerConfirm() {
+    if (!produto.nome || !produto.codigo) {
+      setErro('Nome e SKU são obrigatórios'); return;
+    }
+    setShowConfirm(true);
+  }
 
   const [precoSimulado, setPrecoSimulado] = useState('0.00');
   const [custoSimulado, setCustoSimulado] = useState('0.00');
@@ -842,9 +916,11 @@ export default function AutomacaoCadastro() {
 
   async function handleBuscar(q) {
     if (q === '__novo__') {
-      setProduto({ nome: '', codigo: '', gtin: '', preco: '0.00', marca: '', ncm: '',
+      const template = { nome: '', codigo: '', gtin: '', preco: '0.00', marca: '', ncm: '',
         descricaoCurta: '', descricao: '', situacao: 'A', origem: 0, pesoLiq: '0.000', pesoBruto: '0.000',
-        altura: '0', largura: '0', profundidade: '0', categoria: null, imagens: [] });
+        altura: '0', largura: '0', profundidade: '0', categoria: null, imagens: [] };
+      setProduto(template);
+      setOriginalProduto(template);
       setPrecoSimulado('0.00');
       setCustoSimulado('0.00');
       setStatus('studio');
@@ -858,6 +934,7 @@ export default function AutomacaoCadastro() {
       const d   = await res.json();
       if (!res.ok) throw new Error(d.error || 'Produto não encontrado');
       setProduto(d);
+      setOriginalProduto(d);
       setPrecoSimulado(d.preco || '0.00');
       setStatus('studio');
     } catch (e) {
@@ -882,7 +959,12 @@ export default function AutomacaoCadastro() {
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Falha ao salvar');
-      if (isNovo && d.id) setProduto(prev => ({ ...prev, id: d.id }));
+      if (isNovo && d.id) {
+        setProduto(prev => ({ ...prev, id: d.id }));
+        setOriginalProduto({ ...produto, id: d.id });
+      } else {
+        setOriginalProduto(produto);
+      }
       setSalvoOk(true);
       showToast('Produto salvo no Bling com sucesso! ✓');
       setTimeout(() => setSalvoOk(false), 3000);
@@ -926,7 +1008,7 @@ export default function AutomacaoCadastro() {
         produto={produto}
         setProduto={setProduto}
         categorias={categorias}
-        onSalvar={handleSalvar}
+        onSalvar={triggerConfirm}
         salvando={status === 'salvando'}
         salvoOk={salvoOk}
         onVoltar={handleVoltar}
@@ -940,6 +1022,100 @@ export default function AutomacaoCadastro() {
         onFill={handleFill}
         showToast={showToast}
       />
+
+      {/* Modal de Confirmação de Sincronização */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl animate-scale-up">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-white/5 bg-slate-950 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RefreshCw size={14} className="text-emerald-400 animate-spin-slow" />
+                <span className="text-xs font-bold text-slate-200 uppercase tracking-widest">Confirmar Sincronização</span>
+              </div>
+              <button onClick={() => setShowConfirm(false)} className="text-slate-500 hover:text-slate-300">
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
+              <p className="text-xs text-slate-400">
+                Revise as informações que serão gravadas no **Bling ERP** para o SKU <strong className="text-white font-mono">{produto.codigo}</strong>:
+              </p>
+
+              {isNovo ? (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Novo Produto a ser criado:</p>
+                  <div className="bg-slate-950/60 rounded-xl p-3 border border-white/[0.04] space-y-2 text-xs">
+                    <div className="flex justify-between border-b border-white/5 pb-1">
+                      <span className="text-slate-500">Nome:</span>
+                      <span className="text-white font-semibold">{produto.nome}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-white/5 pb-1">
+                      <span className="text-slate-500">SKU:</span>
+                      <span className="text-white font-mono">{produto.codigo}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-white/5 pb-1">
+                      <span className="text-slate-500">Preço:</span>
+                      <span className="text-emerald-400 font-bold">{brl(parseFloat(produto.preco) || 0)}</span>
+                    </div>
+                    {produto.gtin && (
+                      <div className="flex justify-between border-b border-white/5 pb-1">
+                        <span className="text-slate-500">EAN/GTIN:</span>
+                        <span className="text-white font-mono">{produto.gtin}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Imagens:</span>
+                      <span className="text-white">{(produto.imagens || []).length} selecionada(s)</span>
+                    </div>
+                  </div>
+                </div>
+              ) : diffs.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Alterações detectadas:</p>
+                  <div className="space-y-1.5">
+                    {diffs.map((d, idx) => (
+                      <div key={idx} className="bg-slate-950/40 rounded-xl p-3 border border-white/[0.04] text-xs flex justify-between items-center gap-4">
+                        <span className="text-slate-500 shrink-0 font-medium">{d.label}:</span>
+                        <div className="flex items-center gap-2 text-right min-w-0">
+                          <span className="text-slate-600 line-through truncate max-w-[140px]">{d.orig}</span>
+                          <span className="text-slate-400 font-mono shrink-0">→</span>
+                          <span className="text-white font-semibold truncate max-w-[180px]">{d.curr}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-slate-950/50 text-center text-xs text-slate-500 border border-dashed border-slate-800">
+                  Nenhuma alteração detectada em relação ao cadastro atual no Bling.
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-4 border-t border-white/5 bg-slate-950 flex gap-2 justify-end">
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="px-4 py-2 rounded-xl border border-white/5 hover:bg-white/[0.05] text-xs font-semibold text-slate-400 transition-all"
+              >
+                Voltar e Editar
+              </button>
+              <button
+                onClick={() => {
+                  setShowConfirm(false);
+                  handleSalvar();
+                }}
+                className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-500/10"
+              >
+                <CheckCircle size={12} /> Confirmar e Sincronizar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

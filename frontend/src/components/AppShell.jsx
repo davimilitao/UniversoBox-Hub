@@ -42,7 +42,7 @@ const ROTAS = [
   { key: 'image-studio',   moduleId: 'catalogo',       label: 'Image Studio',      secao: 'Catálogo',   Icon: Camera,            react: true,  href: '/catalogo/fotos'       },
   { key: 'batch-image-studio', moduleId: 'catalogo',   label: 'Estúdio em Lote',   secao: 'Catálogo',   Icon: Sparkles,          react: true,  href: '/catalogo/fotos-lote'  },
   // Financeiro
-  { key: 'fin-contas',     moduleId: 'financas',       label: 'Contas a Pagar',    secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/contas'    },
+  { key: 'fin-contas',     moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/despesas'  },
   { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Expedição',  Icon: ShoppingBag,       react: true,  href: '/expedicao/compras'    },
   // Sistema
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },
