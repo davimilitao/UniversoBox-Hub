@@ -10,7 +10,10 @@ import {
   Search, Loader2, Save, CheckCircle, AlertCircle,
   ArrowLeft, Package, Tag, Hash, Truck, Image,
   RefreshCw, ExternalLink, Plus, Sparkles, BarChart2,
+  Upload,
 } from 'lucide-react';
+import { getAuthToken } from '../../utils/getAuthToken';
+
 import { ImageEditor } from '../../components/ImageEditor';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -28,6 +31,92 @@ function estimateFrete(pesoBrutoKg) {
   if (w <= 30.0) return 69.90;
   return 99.90;
 }
+
+// WYSIWYG Editor de Descrição Completa para compatibilidade com Bling
+function EditorDescricao({ value, onChange }) {
+  const editorRef = useRef(null);
+
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== value) {
+      editorRef.current.innerHTML = value || '';
+    }
+  }, [value]);
+
+  const execCommand = (command, argument = null) => {
+    document.execCommand(command, false, argument);
+    if (editorRef.current) {
+      onChange(editorRef.current.innerHTML);
+    }
+  };
+
+  const handleInput = () => {
+    if (editorRef.current) {
+      onChange(editorRef.current.innerHTML);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1 border border-white/5 bg-slate-800 rounded-xl overflow-hidden">
+      <div className="flex items-center gap-1.5 bg-slate-900 border-b border-white/5 p-2 flex-wrap">
+        <button type="button" onClick={() => execCommand('bold')} className="px-2 py-1 rounded text-xs font-bold bg-white/[0.03] hover:bg-white/10 text-slate-200 transition-colors">B</button>
+        <button type="button" onClick={() => execCommand('italic')} className="px-2 py-1 rounded text-xs italic bg-white/[0.03] hover:bg-white/10 text-slate-200 transition-colors">I</button>
+        <button type="button" onClick={() => execCommand('underline')} className="px-2 py-1 rounded text-xs underline bg-white/[0.03] hover:bg-white/10 text-slate-200 transition-colors">U</button>
+        <div className="w-px h-4 bg-white/10 mx-1" />
+        <button type="button" onClick={() => execCommand('insertUnorderedList')} className="px-2 py-1 rounded text-xs bg-white/[0.03] hover:bg-white/10 text-slate-200 transition-colors">Lista</button>
+        <button type="button" onClick={() => execCommand('insertOrderedList')} className="px-2 py-1 rounded text-xs bg-white/[0.03] hover:bg-white/10 text-slate-200 transition-colors">Lista Num.</button>
+        <div className="w-px h-4 bg-white/10 mx-1" />
+        <button type="button" onClick={() => execCommand('removeFormat')} className="px-2 py-1 rounded text-[10px] bg-white/[0.03] hover:bg-red-500/10 hover:text-red-400 text-slate-400 transition-colors" title="Limpar Formatação">Limpar</button>
+      </div>
+      <div
+        ref={editorRef}
+        contentEditable
+        onInput={handleInput}
+        className="w-full bg-slate-800 px-4 py-3 text-white outline-none min-h-[160px] max-h-[300px] overflow-y-auto text-sm leading-relaxed"
+        style={{ colorScheme: 'dark' }}
+      />
+    </div>
+  );
+}
+
+// Auxiliar para padronizar fotos via Canvas a 1200x1200px com fundo branco
+function processImageToCanvas(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const SIZE = 1200;
+        const canvas = document.createElement('canvas');
+        canvas.width = SIZE;
+        canvas.height = SIZE;
+        const ctx = canvas.getContext('2d');
+
+        // Fundo branco
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, SIZE, SIZE);
+
+        const pad = SIZE * 0.05; // 5% de margem
+        const maxSide = SIZE - pad * 2;
+        const scale = Math.min(maxSide / img.naturalWidth, maxSide / img.naturalHeight);
+        const w = img.naturalWidth * scale;
+        const h = img.naturalHeight * scale;
+
+        // Desenhar centralizado
+        ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
+
+        canvas.toBlob((blob) => {
+          if (!blob) return reject(new Error('Falha no Canvas'));
+          resolve(blob);
+        }, 'image/jpeg', 0.92);
+      };
+      img.onerror = () => reject(new Error('Erro ao ler imagem'));
+      img.src = event.target.result;
+    };
+    reader.onerror = () => reject(new Error('Erro no arquivo'));
+    reader.readAsDataURL(file);
+  });
+}
+
 
 // ── Campo de texto genérico ───────────────────────────────────────────────────
 function Campo({ label, value, onChange, mono, placeholder, area, hint }) {
@@ -354,12 +443,60 @@ function Precificadora({ precoVenda, setPrecoVenda, custo, setCusto, simplesNaci
 function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, onVoltar, isNovo, precoSimulado, setPrecoSimulado, custoSimulado, setCustoSimulado, simplesNacional, setSimplesNacional, onFill, showToast }) {
   const p = produto;
   const set = (campo) => (val) => setProduto(prev => ({ ...prev, [campo]: val }));
+  const [uploadingImages, setUploadingImages] = useState(false);
+
+  const handleImageUpload = async (e) => {
+    const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
+    if (!files.length) return;
+    if (!p.codigo) {
+      showToast('Por favor, defina o SKU antes de enviar imagens.', 'err');
+      return;
+    }
+
+    setUploadingImages(true);
+    try {
+      const token = await getAuthToken();
+      const updatedImgs = [...(p.imagens || [])];
+
+      for (const file of files) {
+        // 1. Process local image via Canvas
+        const processedBlob = await processImageToCanvas(file);
+
+        // 2. Upload processed blob to Cloudinary
+        const fd = new FormData();
+        fd.append('file', processedBlob, `${p.codigo}_standard.jpg`);
+        fd.append('kind', 'stock');
+
+        const uploadRes = await fetch(`/admin/save-photo-cloudinary/${encodeURIComponent(p.codigo)}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd,
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok || !uploadData.ok) {
+          throw new Error(uploadData.error || 'Erro no upload de uma das imagens.');
+        }
+
+        updatedImgs.push(uploadData.url);
+      }
+
+      setProduto(prev => ({ ...prev, imagens: updatedImgs }));
+      showToast('Fotos adicionadas e tratadas com sucesso! ✓');
+    } catch (err) {
+      showToast('Erro no upload das fotos: ' + err.message, 'err');
+    } finally {
+      setUploadingImages(false);
+    }
+  };
+
   const [editorImg, setEditorImg] = useState(null); // { url, idx }
   const navigate = useNavigate();
   const setCategoria = (id) => {
     const cat = categorias.find(c => String(c.id) === String(id));
     setProduto(prev => ({ ...prev, categoria: cat ? { id: cat.id, nome: cat.nome } : null }));
   };
+
+
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-4">
@@ -418,7 +555,7 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
             <Campo label="Título / Nome do Produto" value={p.nome} onChange={set('nome')} placeholder="Nome completo do produto" />
             <div className="grid grid-cols-2 gap-4">
               <Campo label="SKU / Código" value={p.codigo} onChange={set('codigo')} mono placeholder="EX: BUBA-PRATO-VD" />
-              <Campo label="EAN / GTIN" value={p.gtin} onChange={set('gtin')} mono placeholder="Código de barras" />
+              <Campo label="EAN / GTIN (Unitário)" value={p.gtin} onChange={set('gtin')} mono placeholder="Código de barras unitário" />
             </div>
             <div className="grid grid-cols-3 gap-4">
               <Campo label="Marca" value={p.marca} onChange={set('marca')} placeholder="Ex: Buba" />
@@ -489,13 +626,10 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               placeholder="Texto resumido para listagens e marketplaces..."
               hint="Campo descricaoCurta do Bling — aparece em cards de produto"
             />
-            <Campo
-              label="Descrição completa"
-              value={p.descricao}
-              onChange={set('descricao')}
-              area
-              placeholder="Descrição completa para os marketplaces..."
-            />
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Descrição completa (HTML/Formatada)</label>
+              <EditorDescricao value={p.descricao || ''} onChange={set('descricao')} />
+            </div>
           </section>
 
           {/* Logística */}
@@ -511,6 +645,10 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               <Campo label="Largura (cm)" value={p.largura} onChange={set('largura')} placeholder="0" />
               <Campo label="Altura (cm)" value={p.altura} onChange={set('altura')} placeholder="0" />
               <Campo label="Profundidade (cm)" value={p.profundidade} onChange={set('profundidade')} placeholder="0" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Campo label="Itens por Caixa Master" value={p.itensPorCaixa} onChange={set('itensPorCaixa')} placeholder="1" />
+              <Campo label="EAN Caixa Master" value={p.gtinEmbalagem} onChange={set('gtinEmbalagem')} placeholder="Código de barras da caixa master" />
             </div>
           </section>
         </div>
@@ -579,6 +717,30 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
                   >✕</button>
                 </div>
               ))}
+              {/* Canvas Drag & Drop Image Uploader */}
+              <div className="border border-dashed border-white/10 hover:border-emerald-500/40 rounded-xl p-4 text-center bg-slate-950/40 hover:bg-slate-950/60 transition-all cursor-pointer relative group">
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  disabled={uploadingImages}
+                  className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                />
+                {uploadingImages ? (
+                  <div className="flex flex-col items-center gap-1.5 py-1">
+                    <Loader2 size={18} className="animate-spin text-emerald-400" />
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Tratando imagens...</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-1">
+                    <Upload size={18} className="text-slate-500 group-hover:text-emerald-400 transition-colors" />
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider group-hover:text-emerald-300 transition-colors">Enviar Fotos Locals</span>
+                    <span className="text-[9px] text-slate-600">Canvas 1200x1200px + Fundo Branco</span>
+                  </div>
+                )}
+              </div>
+
               <button
                 onClick={() => setProduto(prev => ({ ...prev, imagens: [...(prev.imagens || []), ''] }))}
                 className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-white/10 text-slate-600 hover:text-slate-400 hover:border-white/20 text-xs transition-colors"

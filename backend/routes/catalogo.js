@@ -103,6 +103,8 @@ function normalizarProduto(p, listItem = null) {
     largura:      String(p.dimensoes?.largura     || p.largura     || '0'),
     profundidade: String(p.dimensoes?.profundidade|| p.profundidade|| '0'),
     categoria:    p.categoria ? { id: p.categoria.id, nome: p.categoria.descricao || p.categoria.nome || '' } : null,
+    gtinEmbalagem: p.gtinEmbalagem || '',
+    itensPorCaixa: p.itensPorCaixa || 1,
     imagens,
   };
 }
@@ -115,6 +117,8 @@ function montarPayload(p) {
     tipo:         p.tipo      || 'P',
     situacao:     p.situacao  || 'A',
     gtin:         p.gtin      || '',
+    gtinEmbalagem: p.gtinEmbalagem || '',
+    itensPorCaixa: parseInt(p.itensPorCaixa) || 1,
     preco:        parseFloat(p.preco)        || 0,
     marca:        p.marca     || '',
     ncm:          p.ncm       || '',
@@ -131,11 +135,10 @@ function montarPayload(p) {
       profundidade: parseFloat(p.profundidade)  || 0,
     },
     ...(p.categoria?.id ? { categoria: { id: Number(p.categoria.id) } } : {}),
-    ...(p.imagens?.length ? {
-      midia: p.imagens.map(link => ({ link, tipo: 'imagens' }))
-    } : {}),
+    midia: (p.imagens || []).filter(Boolean).map(link => ({ link, tipo: 'imagens' })),
   };
 }
+
 
 // ── GET /categorias ───────────────────────────────────────────────────────────
 router.get('/categorias', async (req, res) => {
@@ -150,6 +153,61 @@ router.get('/categorias', async (req, res) => {
     res.status(500).json({ error: 'Falha ao buscar categorias' });
   }
 });
+
+// ── GET /produtos ─────────────────────────────────────────────────────────────
+// Lista ou busca produtos diretamente na API do Bling
+router.get('/produtos', async (req, res) => {
+  const queryBusca = (req.query.q || '').trim();
+  const pagina = Number(req.query.pagina) || 1;
+  const limite = Number(req.query.limite) || 50;
+
+  try {
+    const token = await blingEnsureToken();
+    const headers = { Authorization: `Bearer ${token}` };
+    let rawItems = [];
+
+    if (queryBusca) {
+      // Se for apenas numérico longo, busca por GTIN
+      if (/^\d{8,14}$/.test(queryBusca)) {
+        const r = await axios.get(`${BLING_API_BASE}/produtos?gtin=${encodeURIComponent(queryBusca)}&limite=${limite}&pagina=${pagina}`, { headers });
+        rawItems = r.data?.data || [];
+      } else {
+        // Busca por Nome
+        const rName = await axios.get(`${BLING_API_BASE}/produtos?nome=${encodeURIComponent(queryBusca)}&limite=${limite}&pagina=${pagina}`, { headers });
+        rawItems = rName.data?.data || [];
+
+        // Fallback: se não achar por nome e for palavra única (provável SKU), busca por SKU/código
+        if (rawItems.length === 0 && !/\s/.test(queryBusca)) {
+          const rCode = await axios.get(`${BLING_API_BASE}/produtos?codigo=${encodeURIComponent(queryBusca)}&limite=${limite}&pagina=${pagina}`, { headers });
+          rawItems = rCode.data?.data || [];
+        }
+      }
+    } else {
+      // Sem busca: lista produtos ativos (criterio=1)
+      const r = await axios.get(`${BLING_API_BASE}/produtos?criterio=1&limite=${limite}&pagina=${pagina}`, { headers });
+      rawItems = r.data?.data || [];
+    }
+
+    // Normaliza os produtos para a exibição em lista no catálogo
+    const items = rawItems.map(p => ({
+      id:           p.id,
+      name:         p.nome          || '',
+      sku:          p.codigo        || '',
+      ean:          p.gtin          || '',
+      preco:        String(p.preco  || '0.00'),
+      tipo:         p.tipo          || 'P',
+      situacao:     p.situacao === 1 || p.situacao === 'A' ? 'A' : 'I',
+      displayImage: p.imagemURL || '/assets/placeholder.png',
+    }));
+
+    res.json({ items, total: items.length });
+  } catch (e) {
+    const msg = e.response?.data?.error?.message || e.message;
+    console.error('[GET /produtos]', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 
 // ── GET /buscar?q=SKU_ou_EAN ──────────────────────────────────────────────────
 // Busca por código (SKU) ou GTIN (EAN) — retorna produto normalizado

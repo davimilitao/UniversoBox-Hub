@@ -63,6 +63,10 @@ export function useCompras() {
 
   // ── Carrega parcelas ordenadas por vencimento ─────────────────────────────
   const loadParcelas = useCallback(async () => {
+    if (!db) {
+      setErro('Firebase não configurado. Por favor, configure as variáveis VITE_FIREBASE_* no .env.');
+      return;
+    }
     setLoading(true);
     try {
       const q = query(collection(db, 'fin_parcelas'), orderBy('vencimento', 'asc'));
@@ -78,6 +82,7 @@ export function useCompras() {
 
   // ── Carrega compras (cabeçalhos) ──────────────────────────────────────────
   const loadCompras = useCallback(async () => {
+    if (!db) return;
     try {
       const q = query(collection(db, 'fin_compras'), orderBy('createdAt', 'desc'));
       const snap = await getDocs(q);
@@ -93,23 +98,8 @@ export function useCompras() {
   }, [loadParcelas, loadCompras]);
 
   // ── Lança compra + gera parcelas ──────────────────────────────────────────
-  /**
-   * @param {Object} dados
-   * @param {string}  dados.fornecedor
-   * @param {string}  dados.descricao
-   * @param {number}  dados.totalBruto        — valor total sem juros
-   * @param {number}  dados.numeroParcelas     — 1-24
-   * @param {number}  dados.taxaJuros          — % mensal (0 = sem juros)
-   * @param {string}  dados.meioId             — id do fin_meios_pagamento
-   * @param {string}  dados.meioNome           — apelido do cartão
-   * @param {string}  dados.meioBandeira
-   * @param {number}  dados.diaVencimento      — dia de vencimento do cartão
-   * @param {Date}    dados.dataPrimeiraParcela — data base para a 1ª parcela
-   * @param {string}  [dados.sku]              — SKU do produto (para margem)
-   * @param {number}  [dados.qtd]              — quantidade comprada
-   * @param {number}  [dados.custoUnitario]    — custo por unidade calculado
-   */
   async function lancarCompra(dados) {
+    if (!db) return { ok: false, error: 'Firebase não configurado.' };
     setSaving(true); setErro('');
     try {
       const n = dados.numeroParcelas || 1;
@@ -176,6 +166,7 @@ export function useCompras() {
 
   // ── Marca parcela como paga ───────────────────────────────────────────────
   async function marcarPago(parcelaId) {
+    if (!db) return { ok: false, error: 'Firebase não configurado.' };
     try {
       await updateDoc(doc(db, 'fin_parcelas', parcelaId), {
         status: 'pago',
@@ -193,6 +184,7 @@ export function useCompras() {
 
   // ── Desfaz pagamento ─────────────────────────────────────────────────────
   async function desfazerPagamento(parcelaId) {
+    if (!db) return { ok: false, error: 'Firebase não configurado.' };
     try {
       await updateDoc(doc(db, 'fin_parcelas', parcelaId), {
         status: 'pendente',

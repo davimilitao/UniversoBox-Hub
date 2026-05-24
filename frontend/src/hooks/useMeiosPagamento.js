@@ -8,6 +8,10 @@ export function useMeiosPagamento() {
 
   // Busca os cartões e contas cadastrados
   const fetchMeios = async () => {
+    if (!db) {
+      console.warn("Firebase não configurado. Ignorando fetchMeios.");
+      return;
+    }
     setLoading(true);
     try {
       const snap = await getDocs(collection(db, 'fin_meios_pagamento'));
@@ -26,6 +30,7 @@ export function useMeiosPagamento() {
 
   // Salva um novo cartão (Apenas dados seguros)
   const adicionarMeio = async (dados) => {
+    if (!db) return { success: false, error: "Firebase não configurado" };
     try {
       const novoMeio = {
         ...dados,

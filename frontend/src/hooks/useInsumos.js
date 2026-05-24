@@ -6,6 +6,10 @@ export const useInsumos = () => {
   const [loading, setLoading] = useState(false);
 
   const getInsumos = useCallback(async () => {
+    if (!db) {
+      console.warn("Firebase não configurado. Ignorando getInsumos.");
+      return [];
+    }
     setLoading(true);
     try {
       const querySnapshot = await getDocs(collection(db, 'insumos'));
@@ -19,6 +23,7 @@ export const useInsumos = () => {
   }, []);
 
   const addInsumo = async (dadosInsumo) => {
+    if (!db) throw new Error("Firebase não configurado.");
     setLoading(true);
     try {
       const docRef = await addDoc(collection(db, 'insumos'), {
@@ -35,6 +40,7 @@ export const useInsumos = () => {
   };
 
   const updateInsumo = async (id, dadosAtualizados) => {
+    if (!db) throw new Error("Firebase não configurado.");
     setLoading(true);
     try {
       const docRef = doc(db, 'insumos', id);
@@ -52,6 +58,7 @@ export const useInsumos = () => {
 
   // NOVA FUNÇÃO: Apagar um documento
   const deleteInsumo = async (id) => {
+    if (!db) throw new Error("Firebase não configurado.");
     setLoading(true);
     try {
       const docRef = doc(db, 'insumos', id);

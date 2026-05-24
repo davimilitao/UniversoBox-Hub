@@ -16,7 +16,6 @@ import PedidosDoDia            from './pages/expedicao/PedidosDoDia';
 import AutomacaoCadastro       from './pages/catalogo/AutomacaoCadastro';
 import CatalogoPro             from './pages/catalogo/CatalogoPro';
 import AdminProdutos           from './pages/catalogo/AdminProdutos';
-import ImportarCSV             from './pages/catalogo/ImportarCSV';
 import ImageStudio             from './pages/catalogo/ImageStudio';
 import BatchImageStudio        from './pages/catalogo/BatchImageStudio';
 import ConfiguracoesSistema    from './pages/sistema/ConfiguracoesSistema';
@@ -43,7 +42,6 @@ export default function App() {
         {/* Catálogo */}
         <Route path="/catalogo/produtos"   element={<CatalogoPro />} />
         <Route path="/catalogo/admin"      element={<AdminProdutos />} />
-        <Route path="/catalogo/importar"   element={<ImportarCSV />} />
         <Route path="/catalogo/automacao"  element={<AutomacaoCadastro />} />
         <Route path="/catalogo/fotos"      element={<ImageStudio />} />
         <Route path="/catalogo/fotos-lote" element={<BatchImageStudio />} />

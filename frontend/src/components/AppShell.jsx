@@ -38,7 +38,6 @@ const ROTAS = [
   { key: 'embalagens',     moduleId: 'embalagens',     label: 'Embalagens',        secao: 'Catálogo',   Icon: Box,               react: false, href: '/embalagens',          locked: true },
   { key: 'cadastrar',      moduleId: 'cadastrar',      label: 'Cadastro Rápido',   secao: 'Catálogo',   Icon: PlusCircle,        react: false, href: '/cadastrar',           locked: true },
   { key: 'enriquecer-xml', moduleId: 'enriquecer-xml', label: 'Cadastro XML',      secao: 'Catálogo',   Icon: FileCode,          react: false, href: '/enriquecer-xml',      locked: true },
-  { key: 'importar',       moduleId: 'importar',       label: 'Importar CSV',      secao: 'Catálogo',   Icon: FileUp,            react: true,  href: '/catalogo/importar'    },
   { key: 'image-studio',   moduleId: 'catalogo',       label: 'Image Studio',      secao: 'Catálogo',   Icon: Camera,            react: true,  href: '/catalogo/fotos'       },
   { key: 'batch-image-studio', moduleId: 'catalogo',   label: 'Estúdio em Lote',   secao: 'Catálogo',   Icon: Sparkles,          react: true,  href: '/catalogo/fotos-lote'  },
   // Financeiro

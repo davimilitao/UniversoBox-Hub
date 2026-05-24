@@ -15,6 +15,8 @@ import {
 import { useCompras, calcParcelas } from '../../hooks/useCompras';
 import { useMeiosPagamento } from '../../hooks/useMeiosPagamento';
 import MeiosPagamento from './components/MeiosPagamento';
+import { isFirebaseClientReady } from '../../firebase';
+
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
@@ -497,6 +499,29 @@ export default function Contas() {
   const { parcelas, loading, saving, lancarCompra, marcarPago, desfazerPagamento, getResumo, reload } = useCompras();
   const { meios, loading: loadingMeios } = useMeiosPagamento();
   const resumo = getResumo();
+
+  if (!isFirebaseClientReady()) {
+    return (
+      <div className="h-full flex items-center justify-center p-6 bg-slate-950">
+        <div className="max-w-md w-full bg-slate-900 border border-red-500/20 bg-gradient-to-br from-slate-900 via-red-950/5 to-slate-900 rounded-3xl p-6 text-center space-y-4 shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto shadow-lg shadow-red-900/10 animate-pulse">
+            <AlertTriangle className="text-red-400" size={32} />
+          </div>
+          <div className="space-y-1.5">
+            <h1 className="text-white text-lg font-black tracking-tight font-sans">Módulo Financeiro Indisponível</h1>
+            <p className="text-slate-400 text-xs leading-relaxed font-sans">
+              O banco de dados local do Firebase não está configurado. Por favor, insira as credenciais do cliente Firebase (<code className="text-[10px] text-red-300 font-mono">VITE_FIREBASE_*</code>) nas variáveis de ambiente do seu servidor local ou da Railway.
+            </p>
+          </div>
+          <div className="text-[10px] text-slate-500 bg-slate-950/60 p-3 rounded-xl border border-white/[0.03] text-left font-mono leading-relaxed">
+            VITE_FIREBASE_API_KEY=...<br/>
+            VITE_FIREBASE_PROJECT_ID=...<br/>
+            VITE_FIREBASE_APP_ID=...
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const ABAS = [
     { id: 'vencimentos', label: 'Vencimentos',  badge: resumo.vencidas.items.length || null },

@@ -485,29 +485,25 @@ export default function CatalogoPro() {
   const [gruposOpts,  setGruposOpts]  = useState([]);
 
   // ── Carregamento ──────────────────────────────────────────────────────────
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async (searchQuery = '') => {
     setLoading(true);
     setErro(null);
     try {
-      const r = await fetch('/products/all', { headers: apiHeaders() });
+      const url = searchQuery
+        ? `/api/catalogo/produtos?q=${encodeURIComponent(searchQuery)}`
+        : '/api/catalogo/produtos';
+      const r = await fetch(url, { headers: apiHeaders() });
       const data = await r.json();
-      const items = Array.isArray(data) ? data : (data.items || []);
+      const items = data.items || [];
 
-      // Enriquecer com tags parseadas
-      const enrich = items.map(p => {
-        const { marcas, mods, grupos } = parseTags(p.tagsRaw || '');
-        return { ...p, _marcas: marcas, _mods: mods, _grupos: grupos };
-      });
+      // Adaptação simples de tags para manter compatibilidade com componentes de filtro
+      const enrich = items.map(p => ({
+        ...p,
+        _marcas: new Set(p.marca ? [p.marca] : []),
+        _mods: new Set(),
+        _grupos: new Set(),
+      }));
 
-      // Extrair opções únicas
-      const allMarcas = new Set();
-      const allGrupos = new Set();
-      enrich.forEach(p => {
-        p._marcas.forEach(m => allMarcas.add(m));
-        p._grupos.forEach(g => allGrupos.add(g));
-      });
-      setMarcasOpts([...allMarcas].sort());
-      setGruposOpts([...allGrupos].sort());
       setProdutos(enrich);
     } catch (e) {
       setErro(e.message);
@@ -516,38 +512,60 @@ export default function CatalogoPro() {
     }
   }, []);
 
-  useEffect(() => { carregar(); }, [carregar]);
+  // Debounce para busca em tempo real na API do Bling
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      carregar(busca);
+    }, 450);
+    return () => clearTimeout(handler);
+  }, [busca, carregar]);
+
+  // Carrega os detalhes completos do produto do Bling quando selecionado
+  const handleSelectProduct = async (p) => {
+    if (!p) {
+      setSelected(null);
+      return;
+    }
+    setSelected(p); // Abre painel com informações básicas imediatamente
+    try {
+      const res = await fetch(`/api/catalogo/produto/${p.id}`, { headers: apiHeaders() });
+      if (res.ok) {
+        const full = await res.json();
+        setSelected({
+          ...p,
+          ...full,
+          name: full.nome,
+          sku: full.codigo,
+          ean: full.gtin,
+          preco: full.preco,
+          weight: full.pesoBruto,
+          width: full.largura,
+          height: full.altura,
+          depth: full.profundidade,
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao carregar detalhes do produto:', err);
+    }
+  };
 
   // ── Filtrar ───────────────────────────────────────────────────────────────
   const filtrados = useMemo(() => {
     let arr = produtos;
 
-    // Busca textual
-    if (busca.trim()) {
-      const q = busca.trim().toLowerCase();
-      arr = arr.filter(p =>
-        p.sku?.toLowerCase().includes(q) ||
-        p.name?.toLowerCase().includes(q) ||
-        p.ean?.toLowerCase().includes(q) ||
-        p.eanBox?.toLowerCase().includes(q) ||
-        p.marca?.toLowerCase().includes(q)
-      );
-    }
-
-    // Filtros inteligentes
+    // Filtros inteligentes aplicados na listagem carregada
     if (filtros.semFoto)      arr = arr.filter(p => !hasPhoto(p));
     if (filtros.semEan)       arr = arr.filter(p => !p.ean);
     if (filtros.semDims)      arr = arr.filter(p => !p.width || !p.height || !p.depth);
-    if (filtros.semPreco)     arr = arr.filter(p => !p.preco);
+    if (filtros.semPreco)     arr = arr.filter(p => !p.preco || p.preco === '0.00' || p.preco === '0');
     if (filtros.estoqueZero)  arr = arr.filter(p => p.stock === 0 || p.stock == null);
 
-    // Filtros categorias
-    if (filtros.marca)        arr = arr.filter(p => p._marcas.has(filtros.marca) || p.marca === filtros.marca);
-    if (filtros.modalidade)   arr = arr.filter(p => p._mods.has(filtros.modalidade));
-    if (filtros.grupo)        arr = arr.filter(p => p._grupos.has(filtros.grupo));
+    // Filtros de marca e grupo
+    if (filtros.marca)        arr = arr.filter(p => p.marca === filtros.marca);
 
     return arr;
-  }, [produtos, busca, filtros]);
+  }, [produtos, filtros]);
+
 
   // ── Estatísticas rápidas ──────────────────────────────────────────────────
   const stats = useMemo(() => ({
@@ -757,7 +775,7 @@ export default function CatalogoPro() {
                       key={p.sku}
                       produto={p}
                       selected={selected?.sku === p.sku}
-                      onClick={() => setSelected(p.sku === selected?.sku ? null : p)}
+                      onClick={() => handleSelectProduct(p.sku === selected?.sku ? null : p)}
                     />
                   ))}
                 </div>
@@ -779,7 +797,7 @@ export default function CatalogoPro() {
                       key={p.sku}
                       produto={p}
                       selected={selected?.sku === p.sku}
-                      onClick={() => setSelected(p.sku === selected?.sku ? null : p)}
+                      onClick={() => handleSelectProduct(p.sku === selected?.sku ? null : p)}
                     />
                   ))}
                 </div>

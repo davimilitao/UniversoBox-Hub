@@ -7,3 +7,6 @@ frontend/.env
 # (evita vazar VITE_FIREBASE_* keys no repositório público)
 backend/public/spa/
 .tmp.driveupload/
+.claude/
+.claude
+
