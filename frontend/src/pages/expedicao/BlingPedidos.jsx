@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { getAuthToken } from '../../utils/getAuthToken';
+import { auth } from '../../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 // ─── helpers de data ──────────────────────────────────────────────────────────
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -132,7 +134,7 @@ function SituacaoBadge({ sit }) {
   if (isSemDanfe(sit))
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25 uppercase tracking-wider"><Clock size={9}/> Sem DANFE</span>;
   if (isComDanfe(sit))
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 uppercase tracking-wider"><CheckCircle2 size={9}/> DANFE OK</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 uppercase tracking-wider status-success"><CheckCircle2 size={9}/> DANFE OK</span>;
   return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-700 text-slate-400 border border-slate-600 uppercase tracking-wider">{sit||'—'}</span>;
 }
 
@@ -428,34 +430,34 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
   const cli      = parseCliente(nf.cliente?.nome);
 
   return (
-    <div className={`rounded-xl border transition-all bg-slate-800/30 p-4 flex flex-col gap-3.5
+    <div className={`rounded-xl border transition-all bg-slate-800/30 p-2.5 md:p-3 flex flex-col gap-2
       ${selected ? 'border-emerald-500/50 bg-slate-800 shadow-lg ring-1 ring-emerald-500/10' : 'border-white/5 hover:border-white/10 hover:bg-slate-800/40'}`}>
 
       {/* TOP HEADER */}
-      <div className="flex items-center gap-3 flex-wrap justify-between border-b border-white/5 pb-2.5">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center gap-2 flex-wrap justify-between border-b border-white/5 pb-1.5">
+        <div className="flex items-center gap-2 min-w-0">
           <input
             type="checkbox"
             checked={selected}
             onChange={onSelectToggle}
             disabled={jaCriado}
-            className="w-4.5 h-4.5 rounded border-white/15 bg-slate-900 text-emerald-500 focus:ring-0 focus:ring-offset-0 disabled:opacity-30 cursor-pointer transition-colors"
+            className="w-4 h-4 rounded border-white/15 bg-slate-900 text-emerald-500 focus:ring-0 focus:ring-offset-0 disabled:opacity-30 cursor-pointer transition-colors"
           />
-          <span className="text-xs font-mono text-slate-500 shrink-0">#{nf.numero}</span>
-          <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-black border uppercase tracking-wider whitespace-nowrap ${canalCor(nf.marketplace)}`}>
+          <span className="text-[10px] font-mono text-slate-500 shrink-0">#{nf.numero}</span>
+          <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-black border uppercase tracking-wider whitespace-nowrap ${canalCor(nf.marketplace)}`}>
             {nf.marketplace || '?'}
           </span>
-          <span className="text-sm font-bold text-slate-200 truncate">
+          <span className="text-xs font-bold text-slate-200 truncate">
             {cli.nome} {cli.apelido && <span className="text-slate-400 font-bold ml-1">({cli.apelido})</span>}
           </span>
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
+        <div className="flex items-center gap-2 text-[10px] text-slate-500 shrink-0">
           <span>{fmtBR(nf.dataEmissao)}</span>
           <SituacaoBadge sit={nf.situacao} />
           {jaCriado && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider">
-              <CheckCircle2 size={10}/> No sistema
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider status-success">
+              <CheckCircle2 size={9}/> No sistema
             </span>
           )}
         </div>
@@ -464,99 +466,108 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
       {/* ITEMS LIST (FLAT) */}
       <div className="flex-1">
         {detalhe ? (
-          <div className="space-y-2">
-            {detalhe.itens?.map((it, idx) => (
-              <div key={idx} className="flex items-center gap-3 rounded-xl bg-slate-900/35 border border-white/[0.03] p-2 hover:border-white/5 transition-colors">
-                <ProductThumb />
-                
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-slate-200 line-clamp-2 leading-tight">{it.nome || '—'}</p>
-                  <p className="text-[10px] text-slate-500 font-mono mt-1 flex items-center gap-1">
-                    <Tag size={10} /> SKU: {it.sku || 'Sem SKU'}
-                  </p>
-                </div>
+          detalhe.error ? (
+            <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-medium flex items-center gap-1.5">
+              <AlertTriangle size={12} />
+              <span>{detalhe.message}</span>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {detalhe.itens?.map((it, idx) => (
+                <div key={idx} className="flex items-center gap-2 rounded-lg bg-slate-900/35 border border-white/[0.03] p-1.5 hover:border-white/5 transition-colors">
+                  <div className="shrink-0 w-8 h-8 rounded bg-slate-900 border border-white/5 flex items-center justify-center">
+                    <Package size={12} className="text-slate-600" />
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-semibold text-slate-200 line-clamp-1 leading-tight">{it.nome || '—'}</p>
+                    <p className="text-[9px] text-slate-500 font-mono mt-0.5 flex items-center gap-1">
+                      <Tag size={9} /> {it.sku || 'Sem SKU'}
+                    </p>
+                  </div>
 
-                <div className="shrink-0 flex flex-col items-center justify-center w-11 h-11 rounded-lg bg-slate-800 border border-white/5">
-                  <span className="text-[8px] text-slate-500 font-bold uppercase">Qtd</span>
-                  <span className="text-base font-black text-white leading-none">{it.qty}</span>
-                </div>
+                  <div className="shrink-0 flex flex-col items-center justify-center w-9 h-9 rounded bg-slate-800 border border-white/5">
+                    <span className="text-[7px] text-slate-500 font-bold uppercase leading-none">Qtd</span>
+                    <span className="text-xs font-black text-white leading-none mt-0.5">{it.qty}</span>
+                  </div>
 
-                <div className="shrink-0 text-right w-20">
-                  <span className="text-[8px] text-slate-500 block">Unitário</span>
-                  <span className="text-xs font-semibold text-slate-300 tabular-nums">{BRL.format(it.preco)}</span>
+                  <div className="shrink-0 text-right w-16">
+                    <span className="text-[7px] text-slate-500 block leading-none">Unitário</span>
+                    <span className="text-[10px] font-semibold text-slate-300 tabular-nums leading-none mt-1.5 block">{BRL.format(it.preco)}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
-            
-            {detalhe.numeroPedido && (
-              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono pl-1 pt-1">
-                <Hash size={10}/> Pedido na loja: <span className="text-slate-400">{detalhe.numeroPedido}</span>
-              </div>
-            )}
-          </div>
+              ))}
+              
+              {detalhe.numeroPedido && (
+                <div className="flex items-center gap-1 text-[9px] text-slate-500 font-mono pl-1 pt-0.5">
+                  <Hash size={9}/> Pedido na loja: <span className="text-slate-400">{detalhe.numeroPedido}</span>
+                </div>
+              )}
+            </div>
+          )
         ) : loadingDetalhe ? (
-          <div className="space-y-2 py-1">
-            <div className="h-14 rounded-xl bg-slate-900/30 border border-white/5 animate-pulse flex items-center px-4 justify-between">
-              <div className="flex items-center gap-3 flex-1">
-                <div className="w-9 h-9 rounded bg-slate-800 animate-pulse shrink-0" />
-                <div className="space-y-2 flex-1">
-                  <div className="h-3 w-40 bg-slate-800 rounded animate-pulse" />
-                  <div className="h-2.5 w-20 bg-slate-800 rounded animate-pulse" />
+          <div className="space-y-1.5 py-0.5">
+            <div className="h-10 rounded-lg bg-slate-900/30 border border-white/5 animate-pulse flex items-center px-3 justify-between">
+              <div className="flex items-center gap-2 flex-1">
+                <div className="w-7 h-7 rounded bg-slate-800 animate-pulse shrink-0" />
+                <div className="space-y-1.5 flex-1">
+                  <div className="h-2.5 w-32 bg-slate-800 rounded animate-pulse" />
+                  <div className="h-2 w-16 bg-slate-800 rounded animate-pulse" />
                 </div>
               </div>
-              <div className="w-10 h-10 rounded bg-slate-800 animate-pulse shrink-0" />
+              <div className="w-8 h-8 rounded bg-slate-800 animate-pulse shrink-0" />
             </div>
           </div>
         ) : (
-          <div className="py-2 text-center text-xs text-slate-600 flex items-center justify-center gap-2">
-            <Loader2 size={12} className="animate-spin" /> Carregando produtos...
+          <div className="py-1.5 text-center text-[10px] text-slate-600 flex items-center justify-center gap-1.5">
+            <Loader2 size={10} className="animate-spin" /> Carregando produtos...
           </div>
         )}
       </div>
 
       {/* FOOTER */}
-      <div className="flex items-center justify-between gap-4 pt-3 border-t border-white/5 flex-wrap">
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-[10px] text-slate-500 uppercase font-black">Valor Total</span>
-          <span className="text-base font-black text-white tabular-nums">
+      <div className="flex items-center justify-between gap-3 pt-2 border-t border-white/5 flex-wrap">
+        <div className="flex items-baseline gap-1">
+          <span className="text-[8px] text-slate-500 uppercase font-black">Total</span>
+          <span className="text-xs font-black text-white tabular-nums">
             {BRL.format(nf.valorTotal || detalhe?.valorTotal || 0)}
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* Flex Toggle */}
           {!jaCriado && (
             <button
               onClick={() => onFlexToggle(nf.id)}
               title="Marcar como FLEX"
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors
                 ${isFlex
                   ? 'bg-yellow-500/15 border-yellow-500/30 text-yellow-400 scale-102'
                   : 'bg-slate-800 border-white/5 text-slate-500 hover:text-slate-300'}`}
             >
-              <Flame size={12} className={isFlex ? 'text-yellow-400 fill-yellow-400/20' : ''} />
-              {isFlex ? 'FLEX — Envio Rápido' : 'Marcar Flex'}
+              <Flame size={10} className={isFlex ? 'text-yellow-400 fill-yellow-400/20' : ''} />
+              {isFlex ? 'FLEX — Rápido' : 'Flex'}
             </button>
           )}
 
           {/* Clone Action Button */}
           {jaCriado ? (
             <Link
-              to="/pedidos"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-700 border border-white/10 text-slate-300 hover:text-white hover:border-white/20 transition-all"
+              to="/expedicao/pedidos"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-700 border border-white/10 text-slate-300 hover:text-white hover:border-white/20 transition-all"
             >
-              <ExternalLink size={12}/> Ver na separação
+              <ExternalLink size={10}/> Separar
             </Link>
           ) : (
             <button
               onClick={() => onClonar(nf, detalhe)}
-              disabled={!detalhe || !detalhe.itens?.length || eClonar}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-lg shadow-emerald-500/10 hover:scale-[1.02] active:scale-[0.98] transition-all"
+              disabled={!detalhe || detalhe.error || !detalhe.itens?.length || eClonar}
+              className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-[10px] font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-lg shadow-emerald-500/10 hover:scale-[1.02] active:scale-[0.98] transition-all"
             >
               {eClonar ? (
-                <><Loader2 size={12} className="animate-spin" /> Criando...</>
+                <><Loader2 size={10} className="animate-spin" /> Salvando...</>
               ) : (
-                <><PackagePlus size={12} /> Expedir</>
+                <><PackagePlus size={10} /> Expedir</>
               )}
             </button>
           )}
@@ -580,6 +591,7 @@ export function BlingPedidos() {
   const [loadingNfs,             setLoadingNfs]             = useState(false);
   const [loadingMsg,             setLoadingMsg]             = useState('');
   const [erro,                   setErro]                   = useState(null);
+  const [hasFetched,             setHasFetched]             = useState(false);
   
   // Fila de carregamento de detalhes
   const [nfeDetails,             setNfeDetails]             = useState({});
@@ -630,7 +642,13 @@ export function BlingPedidos() {
   }, []);
 
   useEffect(() => {
-    fetchStatus();
+    // Sincroniza o status após autenticação inicial
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        fetchStatus();
+      }
+    });
+    return () => unsub();
   }, [fetchStatus]);
 
   // Fila de preloading assíncrono e concorrente (max 4 requests paralelos)
@@ -660,14 +678,20 @@ export function BlingPedidos() {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           const data = await res.json();
-          if (data.item) {
+          if (res.ok && data.item) {
             setNfeDetails(prev => ({ ...prev, [nf.id]: data.item }));
           } else {
-            loadedIdsRef.current.delete(nf.id);
+            setNfeDetails(prev => ({
+              ...prev,
+              [nf.id]: { error: true, message: data.message || 'Nota fiscal não encontrada no Bling.' }
+            }));
           }
         } catch (e) {
           console.error('Error preloading details for NFe:', nf.id, e);
-          loadedIdsRef.current.delete(nf.id);
+          setNfeDetails(prev => ({
+            ...prev,
+            [nf.id]: { error: true, message: 'Erro de conexão ao buscar produtos.' }
+          }));
         } finally {
           setDetailsLoading(prev => ({ ...prev, [nf.id]: false }));
         }
@@ -676,14 +700,17 @@ export function BlingPedidos() {
   }, []);
 
   // Buscar NFs — canal sempre "all", filtragem local
-  const fetchNFs = useCallback(async () => {
+  const fetchNFs = useCallback(async (customIni, customFim) => {
     if (status && status.active === false) {
       setNfs([]);
       return;
     }
+    const ini = customIni || rangeIni;
+    const fim = customFim || rangeFim;
+
     setLoadingNfs(true); setErro(null); setLoadingMsg('Buscando notas fiscais no Bling...');
     try {
-      const params = new URLSearchParams({ dataInicio: rangeIni, dataFim: rangeFim, loja: 'all' });
+      const params = new URLSearchParams({ dataInicio: ini, dataFim: fim, loja: 'all' });
       const res  = await fetch(`/bling/pedidos?${params}`);
       const data = await res.json();
       if (data.error === 'bling_not_authorized') {
@@ -700,6 +727,7 @@ export function BlingPedidos() {
       
       // Iniciar preloading assíncrono
       preloadDetails(fetchedNfs);
+      setHasFetched(true);
     } catch (e) {
       setErro(e.message);
     } finally {
@@ -708,15 +736,9 @@ export function BlingPedidos() {
     }
   }, [rangeIni, rangeFim, status, preloadDetails]);
 
-  // Carrega ao mudar o status ou inicializar
-  useEffect(() => {
-    if (status && status.active !== false) {
-      fetchNFs();
-    }
-  }, [fetchNFs, status]);
-
   function handleRangeConfirm(ini, fim) {
     setRangeIni(ini); setRangeFim(fim); setShowPicker(false);
+    fetchNFs(ini, fim);
   }
 
   function handleFlexToggle(nfId) {
@@ -795,7 +817,7 @@ export function BlingPedidos() {
         }
       }
 
-      if (det && det.itens?.length) {
+      if (det && !det.error && det.itens?.length) {
         const logistica = flexFlags[nf.id] ? 'flex' : 'agency';
         payload.push({
           blingNfId:    nf.id,
@@ -986,15 +1008,15 @@ export function BlingPedidos() {
     : `${fmtBR(rangeIni)} → ${fmtBR(rangeFim)}`;
 
   return (
-    <div className="text-slate-100 px-4 py-8 max-w-6xl mx-auto overflow-y-auto flex-1 relative">
+    <div className="text-slate-100 px-2 py-3 md:px-4 md:py-6 w-full max-w-[1600px] mx-auto overflow-y-auto flex-1 relative">
 
       {/* Glassmorphism Full Loading Blocker */}
       {loadingNfs && (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-md transition-all duration-300">
-          <div className="flex flex-col items-center gap-4 p-8 rounded-2xl bg-slate-900 border border-white/10 shadow-2xl relative overflow-hidden">
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/85 backdrop-blur-md transition-all duration-300">
+          <div className="flex flex-col items-center gap-4 p-6 rounded-2xl bg-slate-900 border border-white/10 shadow-2xl relative overflow-hidden">
             <div className="absolute -top-12 -left-12 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl animate-pulse" />
-            <Loader2 className="w-12 h-12 text-emerald-400 animate-spin" />
-            <p className="text-sm font-semibold text-slate-200 tracking-wide mt-2">{loadingMsg || 'Buscando dados no Bling...'}</p>
+            <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
+            <p className="text-xs font-semibold text-slate-200 tracking-wide mt-2">{loadingMsg || 'Buscando dados no Bling...'}</p>
           </div>
         </div>
       )}
@@ -1032,52 +1054,12 @@ export function BlingPedidos() {
           ${toast.tipo==='ok' ? 'bg-emerald-900/90 border-emerald-600 text-emerald-300' : 'bg-red-900/90 border-red-600 text-red-300'}`}>
           <p>{toast.msg}</p>
           {toast.tipo === 'ok' && (
-            <Link to="/pedidos" className="mt-2 flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 font-semibold text-xs underline">
+            <Link to="/expedicao/pedidos" className="mt-2 flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 font-semibold text-xs underline">
               <ExternalLink size={11}/> Ir para Pedidos do Dia
             </Link>
           )}
         </div>
       )}
-
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <Zap size={20} className="text-yellow-400"/> Pedidos do Bling
-          </h1>
-          <p className="text-sm text-slate-500 mt-0.5">NFs de saída autorizadas — importe para a fila de separação</p>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <Link to="/pedidos"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-slate-400 text-sm hover:text-slate-200 hover:border-white/20 transition-colors">
-            <ExternalLink size={13}/> Pedidos do Dia
-          </Link>
-
-          {status && (status.authorized ? (
-            <>
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"/>
-                Bling conectado
-                {status.updatedAtMs && (
-                  <span className="text-emerald-600 text-xs">
-                    · {new Date(status.updatedAtMs).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}
-                  </span>
-                )}
-              </div>
-              <button onClick={handleDisconnect} title="Desconectar"
-                className="p-2 rounded-lg bg-slate-800 border border-white/10 text-slate-500 hover:text-red-400 hover:border-red-500/30 transition-colors">
-                <Unplug size={15}/>
-              </button>
-            </>
-          ) : (
-            <Link to="/bling/auth"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm font-medium hover:bg-yellow-500/20 transition-colors">
-              <Plug size={14}/> Conectar Bling
-            </Link>
-          ))}
-        </div>
-      </div>
 
       {status && status.active === false ? (
         <div className="flex flex-col items-center justify-center p-12 mt-8 rounded-2xl border border-white/[0.06] bg-slate-900/30 text-center max-w-xl mx-auto shadow-2xl relative overflow-hidden backdrop-blur-md">
@@ -1107,202 +1089,262 @@ export function BlingPedidos() {
           </Link>
         </div>
       ) : (
-        <>
-          {/* ── Cabeçalho Estatístico Inteligente ── */}
-          {!erro && nfs.length > 0 && (
-            <div className="bg-slate-900/40 border border-white/[0.06] rounded-2xl p-5 mb-5 backdrop-blur-md shadow-xl relative overflow-hidden">
-              <div className="absolute -top-32 -right-32 w-64 h-64 bg-emerald-500/[0.02] rounded-full blur-3xl pointer-events-none" />
+        <div className="grid grid-cols-1 lg:grid-cols-[330px_1fr] gap-4 items-start">
+          
+          {/* COLUNA ESQUERDA: Configurações, Filtros e Resumo (Sticky no Desktop) */}
+          <div className="flex flex-col gap-3 lg:sticky lg:top-3">
+            
+            {/* Header info & Status */}
+            <div className="bg-slate-900/40 border border-white/[0.06] rounded-xl p-3 shadow-md flex flex-col gap-2.5">
+              <div className="flex items-center justify-between">
+                <h1 className="text-sm font-black flex items-center gap-1.5">
+                  <Zap size={15} className="text-yellow-400"/> Pedidos do Bling
+                </h1>
+                
+                <button 
+                  onClick={() => { fetchStatus(); fetchNFs(); }}
+                  disabled={loadingNfs} 
+                  title="Atualizar"
+                  className="p-1 rounded bg-slate-800 border border-white/10 text-slate-400 hover:text-slate-200 disabled:opacity-40 transition-colors shrink-0"
+                >
+                  <RefreshCw size={12} className={loadingNfs ? 'animate-spin' : ''}/>
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-500 leading-tight">NFs de saída autorizadas — importe para a fila de separação</p>
               
-              <h2 className="text-sm font-bold text-slate-200 mb-3 flex items-center gap-2">
-                <ShoppingBag className="text-emerald-400 animate-pulse" size={16} />
-                Comunicação da Expedição
-              </h2>
-              
-              <p className="text-sm text-slate-400 mb-5 leading-relaxed">
-                Olá! Analisando o período selecionado, identificamos notas disponíveis:
-                {groupedByDay.hoje.length > 0 && <span className="block mt-1 text-slate-300">📦 Total de <strong className="text-emerald-400 font-extrabold">{groupedByDay.hoje.length}</strong> pedidos prontos para <strong>Hoje</strong>.</span>}
-                {groupedByDay.amanha.length > 0 && <span className="block mt-1 text-slate-300">🗓️ Total de <strong className="text-blue-400 font-extrabold">{groupedByDay.amanha.length}</strong> pedidos prontos para <strong>Amanhã</strong>.</span>}
-                {groupedByDay.futuros.length > 0 && <span className="block mt-1 text-slate-300">⏳ Outros <strong className="text-purple-400 font-extrabold">{groupedByDay.futuros.length}</strong> pedidos programados para os <strong>dias seguintes</strong>.</span>}
-                {groupedByDay.hoje.length === 0 && groupedByDay.amanha.length === 0 && groupedByDay.futuros.length === 0 && (
-                  <span className="block text-slate-500 mt-1">Nenhuma nota fiscal disponível encontrada.</span>
-                )}
-              </p>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {groupedByDay.hoje.length > 0 && (
-                  <DayGroupCard
-                    title="Hoje"
-                    list={groupedByDay.hoje}
-                    color="emerald"
-                    onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.hoje, mkt)}
-                    onFilterClick={(mkt) => handleFilterClick('hoje', mkt)}
-                  />
-                )}
-                {groupedByDay.amanha.length > 0 && (
-                  <DayGroupCard
-                    title="Amanhã"
-                    list={groupedByDay.amanha}
-                    color="blue"
-                    onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.amanha, mkt)}
-                    onFilterClick={(mkt) => handleFilterClick('amanha', mkt)}
-                  />
-                )}
-                {groupedByDay.futuros.length > 0 && (
-                  <DayGroupCard
-                    title="Dias Seguintes"
-                    list={groupedByDay.futuros}
-                    color="purple"
-                    onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.futuros, mkt)}
-                    onFilterClick={(mkt) => handleFilterClick('futuros', mkt)}
-                  />
-                )}
+              <div className="flex items-center justify-between gap-1.5 pt-2 border-t border-white/5 flex-wrap">
+                {status && (status.authorized ? (
+                  <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"/>
+                    Bling ativo
+                  </div>
+                ) : (
+                  <Link to="/bling/auth"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-[10px] font-bold hover:bg-yellow-500/20 transition-colors">
+                    <Plug size={10}/> Conectar
+                  </Link>
+                ))}
+                
+                <div className="flex items-center gap-1">
+                  <Link to="/expedicao/pedidos"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 border border-white/10 text-slate-400 text-[10px] hover:text-slate-200 hover:border-white/20 transition-colors">
+                    <ExternalLink size={10}/> Pedidos do Dia
+                  </Link>
+                  {status && status.authorized && (
+                    <button onClick={handleDisconnect} title="Desconectar"
+                      className="p-1 rounded bg-slate-800 border border-white/10 text-slate-500 hover:text-red-400 hover:border-red-500/30 transition-colors">
+                      <Unplug size={10}/>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-          )}
 
-          {/* ── Filtros Clássicos ── */}
-          <div className="flex flex-col gap-3 mb-5">
-
-            {/* Range + refresh */}
-            <div className="flex items-center gap-2 flex-wrap">
+            {/* Calendário e Filtros de Canais */}
+            <div className="bg-slate-900/40 border border-white/[0.06] rounded-xl p-3 shadow-md flex flex-col gap-2.5">
+              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Período & Canais</span>
+              
+              {/* Date button */}
               <div className="relative" ref={pickerRef}>
                 <button
                   onClick={() => setShowPicker(v => !v)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border transition-colors
+                  className={`w-full flex items-center justify-between px-2.5 py-1 rounded-lg text-[11px] border transition-colors
                     ${showPicker ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-white/10 text-slate-300 hover:border-white/20'}`}
                 >
-                  <CalendarDays size={14} className="text-emerald-400"/>
-                  {labelRange}
-                  <ChevronDown size={13} className="text-slate-500"/>
+                  <span className="flex items-center gap-1.5 truncate">
+                    <CalendarDays size={12} className="text-emerald-400 shrink-0"/>
+                    {labelRange}
+                  </span>
+                  <ChevronDown size={11} className="text-slate-500 shrink-0"/>
                 </button>
                 {showPicker && (
-                  <div className="absolute left-0 top-full mt-2 z-50">
+                  <div className="absolute left-0 top-full mt-1 z-50">
                     <RangePicker ini={rangeIni} fim={rangeFim} onConfirm={handleRangeConfirm}/>
                   </div>
                 )}
               </div>
-              
-              <button 
-                onClick={() => { fetchStatus(); fetchNFs(); }}
-                disabled={loadingNfs} 
-                title="Atualizar"
-                className="p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors"
-              >
-                <RefreshCw size={14} className={loadingNfs ? 'animate-spin' : ''}/>
-              </button>
+
+              {/* Channels (tighter spacing) */}
+              <div className="flex flex-wrap gap-1">
+                {CANAIS.map(c => (
+                  <button key={c.id} onClick={() => setCanalSel(c.id)}
+                    className={`px-2 py-0.5 rounded-full text-[9px] font-bold border transition-colors
+                      ${canalSel === c.id
+                        ? c.id === 'all' ? 'bg-slate-600 border-slate-500 text-white' : COR_CANAL[c.cor]
+                        : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Situation Filter (Tabs) */}
+              <div className="flex gap-0.5 border-t border-white/5 pt-2">
+                {[{id:'all',label:'Todas'},{id:'sem_danfe',label:'Sem DANFE'},{id:'danfe',label:'Com DANFE'}].map(s => (
+                  <button key={s.id} onClick={() => setSituacaoSel(s.id)}
+                    className={`flex-1 text-center py-1 rounded-md text-[9px] font-bold border transition-colors
+                      ${situacaoSel === s.id ? 'bg-slate-600 border-slate-500 text-white' : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Canais + DANFE */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {CANAIS.map(c => (
-                <button key={c.id} onClick={() => setCanalSel(c.id)}
-                  className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
-                    ${canalSel === c.id
-                      ? c.id === 'all' ? 'bg-slate-600 border-slate-500 text-white' : COR_CANAL[c.cor]
-                      : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
-                  {c.label}
-                </button>
-              ))}
-              <span className="w-px h-4 bg-white/10 mx-1"/>
-              {[{id:'all',label:'Todas'},{id:'sem_danfe',label:'Sem DANFE'},{id:'danfe',label:'Com DANFE'}].map(s => (
-                <button key={s.id} onClick={() => setSituacaoSel(s.id)}
-                  className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
-                    ${situacaoSel === s.id ? 'bg-slate-600 border-slate-500 text-white' : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
+            {/* Resumo Card Stats (Grid 2x2) */}
+            {!erro && nfs.length > 0 && (
+              <div className="grid grid-cols-2 gap-1.5">
+                <ResumoCard label="Total NFs"    valor={resumo.total}      cor="slate"/>
+                <ResumoCard label="Sem DANFE"    valor={resumo.semDanfe}   cor="amber"/>
+                <ResumoCard label="Importadas"   valor={resumo.importadas} cor="emerald"/>
+                <ResumoCard label="Pendentes"    valor={resumo.pendentes}  cor={resumo.pendentes > 0 ? 'amber' : 'slate'}/>
+              </div>
+            )}
+
+            {/* Comunicação da Expedição (Coletas Agrupadas) */}
+            {!erro && nfs.length > 0 && (
+              <div className="bg-slate-900/40 border border-white/[0.06] rounded-xl p-3 shadow-md flex flex-col gap-2">
+                <div className="flex items-center gap-1.5 border-b border-white/5 pb-1.5">
+                  <ShoppingBag className="text-emerald-400" size={13} />
+                  <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-200">Coletas Programadas</h2>
+                </div>
+                
+                <div className="flex flex-col gap-1.5 font-sans">
+                  {groupedByDay.hoje.length > 0 && (
+                    <DayGroupCard
+                      title="Hoje"
+                      list={groupedByDay.hoje}
+                      color="emerald"
+                      onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.hoje, mkt)}
+                      onFilterClick={(mkt) => handleFilterClick('hoje', mkt)}
+                    />
+                  )}
+                  {groupedByDay.amanha.length > 0 && (
+                    <DayGroupCard
+                      title="Amanhã"
+                      list={groupedByDay.amanha}
+                      color="blue"
+                      onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.amanha, mkt)}
+                      onFilterClick={(mkt) => handleFilterClick('amanha', mkt)}
+                    />
+                  )}
+                  {groupedByDay.futuros.length > 0 && (
+                    <DayGroupCard
+                      title="Dias Seguintes"
+                      list={groupedByDay.futuros}
+                      color="purple"
+                      onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.futuros, mkt)}
+                      onFilterClick={(mkt) => handleFilterClick('futuros', mkt)}
+                    />
+                  )}
+                  {groupedByDay.hoje.length === 0 && groupedByDay.amanha.length === 0 && groupedByDay.futuros.length === 0 && (
+                    <span className="text-[10px] text-slate-500 text-center py-2">Nenhuma coleta identificada.</span>
+                  )}
+                </div>
+              </div>
+            )}
+
           </div>
 
-          {/* Filtros Inteligentes Ativos */}
-          {(selectedDayFilter !== 'all' || selectedChannelFilter !== 'all') && (
-            <div className="flex items-center gap-2.5 mb-4 bg-slate-900/40 border border-white/5 rounded-xl px-4 py-2 text-xs">
-              <span className="text-slate-500 font-bold">Filtro do Painel:</span>
-              <span className="font-extrabold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg uppercase tracking-wider">
-                {selectedDayFilter !== 'all' ? `Período: ${selectedDayFilter}` : ''}
-                {selectedDayFilter !== 'all' && selectedChannelFilter !== 'all' ? ' + ' : ''}
-                {selectedChannelFilter !== 'all' ? `Canal: ${selectedChannelFilter.replace('_', ' ')}` : ''}
-              </span>
-              <button
-                onClick={() => { setSelectedDayFilter('all'); setSelectedChannelFilter('all'); }}
-                className="text-red-400 hover:text-red-300 hover:underline font-black ml-auto transition-colors"
-              >
-                Limpar Filtro
-              </button>
-            </div>
-          )}
-
-          {/* ── Resumo Clássico ── */}
-          {!loadingNfs && !erro && nfs.length > 0 && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-              <ResumoCard label="Total NFs"    valor={resumo.total}      cor="slate"/>
-              <ResumoCard label="Sem DANFE"    valor={resumo.semDanfe}   cor="amber"   sub="Aguardando emissão"/>
-              <ResumoCard label="Importadas"   valor={resumo.importadas} cor="emerald" sub="Pedidos criados"/>
-              <ResumoCard label="Pendentes"    valor={resumo.pendentes}  cor={resumo.pendentes > 0 ? 'amber' : 'slate'} sub="Aguardando importação"/>
-            </div>
-          )}
-
-          {/* ── Erro ── */}
-          {erro && (
-            <div className="rounded-xl bg-red-900/20 border border-red-700/40 p-4 text-red-400 text-sm mb-5 flex items-center gap-2">
-              <AlertTriangle size={15}/> {erro}
-            </div>
-          )}
-
-          {/* ── Lista de Pedidos (Flat) ── */}
-          {!loadingNfs && !erro && (
-            nfsFiltradas.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 gap-3 bg-slate-900/20 border border-white/[0.03] rounded-2xl">
-                <Inbox size={36} className="text-slate-700"/>
-                <p className="text-slate-500 text-sm">
-                  {nfs.length === 0
-                    ? `Nenhuma NF no período ${fmtBR(rangeIni)} → ${fmtBR(rangeFim)}.`
-                    : 'Nenhuma NF correspondente aos filtros aplicados.'}
-                </p>
+          {/* COLUNA DIREITA: Stream de Pedidos / Cartões */}
+          <div className="flex flex-col gap-2">
+            
+            {/* Filtros Inteligentes Ativos */}
+            {(selectedDayFilter !== 'all' || selectedChannelFilter !== 'all') && (
+              <div className="flex items-center gap-2 mb-1 bg-slate-900/40 border border-white/[0.06] rounded-xl px-3 py-1.5 text-[10px]">
+                <span className="text-slate-500 font-bold">Filtro Ativo:</span>
+                <span className="font-extrabold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded uppercase tracking-wider">
+                  {selectedDayFilter !== 'all' ? `Período: ${selectedDayFilter}` : ''}
+                  {selectedDayFilter !== 'all' && selectedChannelFilter !== 'all' ? ' + ' : ''}
+                  {selectedChannelFilter !== 'all' ? `Canal: ${selectedChannelFilter.replace('_', ' ')}` : ''}
+                </span>
+                <button
+                  onClick={() => { setSelectedDayFilter('all'); setSelectedChannelFilter('all'); }}
+                  className="text-red-400 hover:text-red-300 hover:underline font-black ml-auto transition-colors"
+                >
+                  Limpar Filtro
+                </button>
               </div>
-            ) : (
-              <div className="space-y-3.5">
-                
-                {/* List Header com Checkbox Geral */}
-                <div className="flex items-center justify-between px-4 py-2 border border-white/[0.04] bg-slate-900/30 rounded-xl text-xs">
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={handleSelectAllToggle}
-                      className="w-4.5 h-4.5 rounded border-white/15 bg-slate-950 text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer transition-colors"
-                    />
-                    <span className="font-extrabold text-slate-500 uppercase tracking-wider">Selecionar Todos</span>
+            )}
+
+            {/* Erro */}
+            {erro && (
+              <div className="rounded-xl bg-red-900/20 border border-red-700/40 p-3.5 text-red-400 text-xs mb-2 flex items-center gap-2">
+                <AlertTriangle size={14}/> {erro}
+              </div>
+            )}
+
+            {/* Listagem principal */}
+            {!loadingNfs && !erro && (
+              !hasFetched ? (
+                <div className="flex flex-col items-center justify-center py-16 px-4 gap-4 bg-slate-900/20 border border-white/[0.04] rounded-xl text-center">
+                  <Inbox size={36} className="text-slate-600"/>
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-300">Pronto para carregar</h3>
+                    <p className="text-slate-500 text-[10px] mt-1 max-w-xs mx-auto">
+                      Selecione o período desejado no painel ao lado e clique em buscar para carregar as notas autorizadas.
+                    </p>
                   </div>
-                  <span className="font-bold text-slate-600">
-                    Exibindo {nfsFiltradas.length} de {nfs.length} Notas
-                  </span>
+                  <button
+                    onClick={() => { fetchStatus(); fetchNFs(); }}
+                    className="px-5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition-all shadow-md active:scale-95"
+                  >
+                    Buscar Notas Fiscais
+                  </button>
                 </div>
+              ) : nfsFiltradas.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 bg-slate-900/20 border border-white/[0.03] rounded-xl">
+                  <Inbox size={32} className="text-slate-700"/>
+                  <p className="text-slate-500 text-xs">
+                    {nfs.length === 0
+                      ? `Nenhuma NF no período ${fmtBR(rangeIni)} → ${fmtBR(rangeFim)}.`
+                      : 'Nenhuma NF correspondente aos filtros aplicados.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  
+                  {/* List Header com Checkbox Geral */}
+                  <div className="flex items-center justify-between px-3 py-1.5 border border-white/[0.04] bg-slate-900/30 rounded-lg text-[10px]">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={handleSelectAllToggle}
+                        className="w-4 h-4 rounded border-white/15 bg-slate-950 text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer transition-colors"
+                      />
+                      <span className="font-extrabold text-slate-500 uppercase tracking-wider">Selecionar Todos</span>
+                    </div>
+                    <span className="font-bold text-slate-600">
+                      Exibindo {nfsFiltradas.length} de {nfs.length} Notas
+                    </span>
+                  </div>
 
-                {/* Cards de Notas */}
-                {nfsFiltradas.map(nf => (
-                  <NFCard
-                    key={nf.id}
-                    nf={nf}
-                    detalhe={nfeDetails[nf.id] || null}
-                    loadingDetalhe={!!detailsLoading[nf.id]}
-                    clonados={clonados}
-                    onClonar={handleClonar}
-                    isFlex={!!flexFlags[nf.id]}
-                    onFlexToggle={handleFlexToggle}
-                    clonando={clonando}
-                    selected={selectedIds.has(nf.id)}
-                    onSelectToggle={() => handleSelectToggle(nf.id)}
-                  />
-                ))}
+                  {/* Cards de Notas */}
+                  {nfsFiltradas.map(nf => (
+                    <NFCard
+                      key={nf.id}
+                      nf={nf}
+                      detalhe={nfeDetails[nf.id] || null}
+                      loadingDetalhe={!!detailsLoading[nf.id]}
+                      clonados={clonados}
+                      onClonar={handleClonar}
+                      isFlex={!!flexFlags[nf.id]}
+                      onFlexToggle={handleFlexToggle}
+                      clonando={clonando}
+                      selected={selectedIds.has(nf.id)}
+                      onSelectToggle={() => handleSelectToggle(nf.id)}
+                    />
+                  ))}
 
-                <p className="text-xs text-slate-700 text-center pt-2">
-                  Fim dos pedidos exibidos.
-                </p>
-              </div>
-            )
-          )}
-        </>
+                  <p className="text-[10px] text-slate-700 text-center pt-2">
+                    Fim dos pedidos exibidos.
+                  </p>
+                </div>
+              )
+            )}
+
+          </div>
+
+        </div>
       )}
     </div>
   );
