@@ -11,13 +11,11 @@ import { auth }                from '../firebase';
 
 // Módulos válidos (espelha server.js — inclui 'insumos')
 const DEFAULT_MODULOS = {
-  admin:      ['pedidos','manual','bling','ml-dashboard','insumos','admin','catalogo',
-               'embalagens','financas','compras','importar','index','config',
-               'cadastrar','enriquecer-xml'],
-  operacao:   ['pedidos','manual','bling','ml-dashboard','insumos','embalagens','index'],
-  financeiro: ['financas','compras','index'],
-  catalogo:   ['admin','catalogo','embalagens','cadastrar','enriquecer-xml','compras','importar','index'],
-  vendas:     ['catalogo','index'],
+  admin:      ['pedidos', 'bling', 'financas', 'index', 'config'],
+  operacao:   ['pedidos', 'bling', 'index'],
+  financeiro: ['financas', 'index'],
+  catalogo:   ['index'],
+  vendas:     ['index'],
 };
 
 const TEMAS_VALIDOS = ['dark', 'uber', 'ifood', '99', 'marvel', 'rick'];

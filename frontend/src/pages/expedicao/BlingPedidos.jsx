@@ -8,7 +8,7 @@
  * @date 2026-04-03
  */
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import {
   Zap, CalendarDays, RefreshCw, Unplug, Plug,
   ChevronDown, ChevronUp, PackagePlus, CheckCircle2,
@@ -16,6 +16,9 @@ import {
   Tag, Hash, ChevronLeft, ChevronRight, Flame, ExternalLink,
   Package, ShoppingBag,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { getAuthToken } from '../../utils/getAuthToken';
+
 
 // ─── helpers de data ──────────────────────────────────────────────────────────
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -129,39 +132,11 @@ function SituacaoBadge({ sit }) {
 // ─── Thumbnail de produto — lazy load via Catálogo ────────────────────────────
 const _imgCache = {};
 
-function ProductThumb({ produtoId }) {
-  const [url, setUrl] = useState(_imgCache[produtoId] ?? null);
-  const [err, setErr] = useState(false);
-
-  useEffect(() => {
-    if (!produtoId || url !== null) return;
-    fetch(`/api/catalogo/produto/${produtoId}`)
-      .then(r => r.json())
-      .then(d => {
-        const u = (d.imagens && d.imagens[0]) || '';
-        _imgCache[produtoId] = u;
-        setUrl(u);
-      })
-      .catch(() => { _imgCache[produtoId] = ''; setUrl(''); });
-  }, [produtoId, url]);
-
-  if (!produtoId || err || url === '') {
-    return (
-      <div className="shrink-0 w-12 h-12 rounded-xl bg-slate-800 border border-white/5 flex items-center justify-center">
-        <Package size={16} className="text-slate-700" />
-      </div>
-    );
-  }
-  if (url === null) {
-    return <div className="shrink-0 w-12 h-12 rounded-xl bg-slate-800 border border-white/5 animate-pulse" />;
-  }
+function ProductThumb() {
   return (
-    <img
-      src={url}
-      alt=""
-      className="shrink-0 w-12 h-12 rounded-xl object-cover border border-white/10 bg-slate-800"
-      onError={() => setErr(true)}
-    />
+    <div className="shrink-0 w-12 h-12 rounded-xl bg-slate-800 border border-white/5 flex items-center justify-center">
+      <Package size={16} className="text-slate-500" />
+    </div>
   );
 }
 
@@ -245,7 +220,7 @@ function MiniCal({ ano, mes, rangeIni, rangeFim, hoverDate, onDay, onHover }) {
 }
 
 function RangePicker({ ini, fim, onConfirm }) {
-  const [preset,    setPreset]    = useState('3dias');
+  const [preset,    setPreset]    = useState('hoje');
   const [tempIni,   setTempIni]   = useState(ini);
   const [tempFim,   setTempFim]   = useState(fim);
   const [hoverDate, setHoverDate] = useState(null);
@@ -392,7 +367,7 @@ function ItemRow({ it }) {
 }
 
 // ─── Row de NF ────────────────────────────────────────────────────────────────
-function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandindo, isFlex, onFlexToggle, clonando }) {
+const NFRow = memo(function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandindo, isFlex, onFlexToggle, clonando }) {
   const jaCriado = clonados.has(String(nf.id));
   const eClonar  = clonando === nf.id;
 
@@ -535,11 +510,11 @@ function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandind
       )}
     </div>
   );
-}
+});
 
 // ─── Página principal ──────────────────────────────────────────────────────────
 export function BlingPedidos() {
-  const defaultRange = calcPreset('3dias');
+  const defaultRange = calcPreset('hoje');
 
   const [status,      setStatus]      = useState(null);
   const [rangeIni,    setRangeIni]    = useState(defaultRange.ini);
@@ -570,7 +545,25 @@ export function BlingPedidos() {
 
   // Status polling
   const fetchStatus = useCallback(async () => {
-    try { const r = await fetch('/bling/status'); setStatus(await r.json()); } catch {}
+    try {
+      const token = await getAuthToken();
+      const r = await fetch('/api/bling/config', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await r.json();
+      setStatus({
+        authorized: data.authorized,
+        active: data.active,
+        updatedAtMs: data.tokenUpdatedAtMs
+      });
+    } catch (e) {
+      // Fallback fallback to local status if auth fails
+      try {
+        const r = await fetch('/bling/status');
+        const localData = await r.json();
+        setStatus(prev => ({ ...prev, authorized: localData.authorized, updatedAtMs: localData.updatedAtMs }));
+      } catch {}
+    }
   }, []);
 
   useEffect(() => {
@@ -581,6 +574,10 @@ export function BlingPedidos() {
 
   // Buscar NFs — canal sempre "all", filtragem local
   const fetchNFs = useCallback(async () => {
+    if (status && status.active === false) {
+      setNfs([]);
+      return;
+    }
     setLoadingNfs(true); setErro(null);
     try {
       const params = new URLSearchParams({ dataInicio: rangeIni, dataFim: rangeFim, loja: 'all' });
@@ -596,9 +593,13 @@ export function BlingPedidos() {
     } finally {
       setLoadingNfs(false);
     }
-  }, [rangeIni, rangeFim]);
+  }, [rangeIni, rangeFim, status]);
 
-  useEffect(() => { fetchNFs(); }, [fetchNFs]);
+  useEffect(() => {
+    if (status && status.active !== false) {
+      fetchNFs();
+    }
+  }, [fetchNFs, status]);
 
   function handleRangeConfirm(ini, fim) {
     setRangeIni(ini); setRangeFim(fim); setShowPicker(false);
@@ -734,114 +735,146 @@ export function BlingPedidos() {
         </div>
       </div>
 
-      {/* ── Filtros ── */}
-      <div className="flex flex-col gap-3 mb-5">
+      {status && status.active === false ? (
+        <div className="flex flex-col items-center justify-center p-12 mt-8 rounded-2xl border border-white/[0.06] bg-slate-900/30 text-center max-w-xl mx-auto shadow-2xl relative overflow-hidden backdrop-blur-md">
+          {/* Glowing pulse aura in background */}
+          <div className="absolute -top-24 -left-24 w-48 h-48 bg-red-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+          
+          <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-white/[0.08] flex items-center justify-center mb-6 shadow-inner relative z-10">
+            <Unplug size={28} className="text-slate-400" />
+            <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500"></span>
+            </span>
+          </div>
 
-        {/* Range + refresh */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative" ref={pickerRef}>
-            <button
-              onClick={() => setShowPicker(v => !v)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border transition-colors
-                ${showPicker ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-white/10 text-slate-300 hover:border-white/20'}`}
-            >
-              <CalendarDays size={14} className="text-emerald-400"/>
-              {labelRange}
-              <ChevronDown size={13} className="text-slate-500"/>
-            </button>
-            {showPicker && (
-              <div className="absolute left-0 top-full mt-2 z-50">
-                <RangePicker ini={rangeIni} fim={rangeFim} onConfirm={handleRangeConfirm}/>
+          <h2 className="text-lg font-bold text-slate-100 mb-2 relative z-10">Integração Bling Desativada</h2>
+          <p className="text-xs text-slate-400 leading-relaxed mb-6 max-w-sm relative z-10">
+            A sincronização automática de pedidos e notas fiscais com o Bling ERP está atualmente inativa. 
+            Para reativar a integração e gerenciar as coletas e expedições, acesse o painel de configurações.
+          </p>
+
+          <Link
+            to="/sistema/config"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-lg shadow-blue-900/40 hover:scale-[1.02] active:scale-[0.98] relative z-10"
+          >
+            Configurar Integração
+            <ExternalLink size={13} />
+          </Link>
+        </div>
+      ) : (
+        <>
+          {/* ── Filtros ── */}
+          <div className="flex flex-col gap-3 mb-5">
+
+            {/* Range + refresh */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative" ref={pickerRef}>
+                <button
+                  onClick={() => setShowPicker(v => !v)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border transition-colors
+                    ${showPicker ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-white/10 text-slate-300 hover:border-white/20'}`}
+                >
+                  <CalendarDays size={14} className="text-emerald-400"/>
+                  {labelRange}
+                  <ChevronDown size={13} className="text-slate-500"/>
+                </button>
+                {showPicker && (
+                  <div className="absolute left-0 top-full mt-2 z-50">
+                    <RangePicker ini={rangeIni} fim={rangeFim} onConfirm={handleRangeConfirm}/>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <button onClick={fetchNFs} disabled={loadingNfs} title="Atualizar"
-            className="p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors">
-            <RefreshCw size={14} className={loadingNfs ? 'animate-spin' : ''}/>
-          </button>
-        </div>
-
-        {/* Canais + DANFE */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {CANAIS.map(c => (
-            <button key={c.id} onClick={() => setCanalSel(c.id)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
-                ${canalSel === c.id
-                  ? c.id === 'all' ? 'bg-slate-600 border-slate-500 text-white' : COR_CANAL[c.cor]
-                  : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
-              {c.label}
-            </button>
-          ))}
-          <span className="w-px h-4 bg-white/10 mx-1"/>
-          {[{id:'all',label:'Todas'},{id:'sem_danfe',label:'Sem DANFE'},{id:'danfe',label:'Com DANFE'}].map(s => (
-            <button key={s.id} onClick={() => setSituacaoSel(s.id)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
-                ${situacaoSel === s.id ? 'bg-slate-600 border-slate-500 text-white' : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
-              {s.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Resumo ── */}
-      {!loadingNfs && !erro && nfs.length > 0 && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-          <ResumoCard label="Total NFs"    valor={resumo.total}      cor="slate"/>
-          <ResumoCard label="Sem DANFE"    valor={resumo.semDanfe}   cor="amber"   sub="Aguardando emissão"/>
-          <ResumoCard label="Importadas"   valor={resumo.importadas} cor="emerald" sub="Pedidos criados"/>
-          <ResumoCard label="Pendentes"    valor={resumo.pendentes}  cor={resumo.pendentes > 0 ? 'amber' : 'slate'} sub="Sem DANFE não importadas"/>
-        </div>
-      )}
-
-      {/* ── Erro ── */}
-      {erro && (
-        <div className="rounded-xl bg-red-900/20 border border-red-700/40 p-4 text-red-400 text-sm mb-5 flex items-center gap-2">
-          <AlertTriangle size={15}/> {erro}
-        </div>
-      )}
-
-      {/* ── Loading ── */}
-      {loadingNfs && (
-        <div className="space-y-2">
-          {[...Array(6)].map((_,i) => <div key={i} className="h-14 rounded-xl bg-slate-800 border border-white/5 animate-pulse"/>)}
-        </div>
-      )}
-
-      {/* ── Lista ── */}
-      {!loadingNfs && !erro && (
-        nfsFiltradas.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <Inbox size={36} className="text-slate-700"/>
-            <p className="text-slate-500 text-sm">
-              {nfs.length === 0
-                ? `Nenhuma NF no período ${fmtBR(rangeIni)} → ${fmtBR(rangeFim)}.`
-                : 'Nenhuma NF para os filtros selecionados.'}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {/* Header da lista */}
-            <div className="hidden sm:grid grid-cols-[4rem_6rem_1fr_7rem_6rem_8rem_2rem] gap-3 px-4 py-1.5 text-[11px] font-medium text-slate-600 uppercase tracking-wider">
-              <span>NF</span><span>Canal</span><span>Cliente</span>
-              <span className="text-right">Valor</span><span className="text-right">Data</span>
-              <span>Situação</span><span/>
+              <button onClick={fetchNFs} disabled={loadingNfs} title="Atualizar"
+                className="p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors">
+                <RefreshCw size={14} className={loadingNfs ? 'animate-spin' : ''}/>
+              </button>
             </div>
 
-            {nfsFiltradas.map(nf => (
-              <NFRow key={nf.id} nf={nf} clonados={clonados}
-                onClonar={handleClonar} onExpand={handleExpand}
-                expandido={!!expandidos[nf.id]} detalhe={expandidos[nf.id] || null}
-                expandindo={expandindo === nf.id}
-                isFlex={!!flexFlags[nf.id]} onFlexToggle={handleFlexToggle}
-                clonando={clonando}/>
-            ))}
-
-            <p className="text-xs text-slate-700 text-center pt-2">
-              {nfsFiltradas.length} NF{nfsFiltradas.length !== 1 ? 's' : ''} exibida{nfsFiltradas.length !== 1 ? 's' : ''}
-              {nfsFiltradas.length !== nfs.length ? ` de ${nfs.length}` : ''}
-            </p>
+            {/* Canais + DANFE */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {CANAIS.map(c => (
+                <button key={c.id} onClick={() => setCanalSel(c.id)}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
+                    ${canalSel === c.id
+                      ? c.id === 'all' ? 'bg-slate-600 border-slate-500 text-white' : COR_CANAL[c.cor]
+                      : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
+                  {c.label}
+                </button>
+              ))}
+              <span className="w-px h-4 bg-white/10 mx-1"/>
+              {[{id:'all',label:'Todas'},{id:'sem_danfe',label:'Sem DANFE'},{id:'danfe',label:'Com DANFE'}].map(s => (
+                <button key={s.id} onClick={() => setSituacaoSel(s.id)}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
+                    ${situacaoSel === s.id ? 'bg-slate-600 border-slate-500 text-white' : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
           </div>
-        )
+
+          {/* ── Resumo ── */}
+          {!loadingNfs && !erro && nfs.length > 0 && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+              <ResumoCard label="Total NFs"    valor={resumo.total}      cor="slate"/>
+              <ResumoCard label="Sem DANFE"    valor={resumo.semDanfe}   cor="amber"   sub="Aguardando emissão"/>
+              <ResumoCard label="Importadas"   valor={resumo.importadas} cor="emerald" sub="Pedidos criados"/>
+              <ResumoCard label="Pendentes"    valor={resumo.pendentes}  cor={resumo.pendentes > 0 ? 'amber' : 'slate'} sub="Sem DANFE não importadas"/>
+            </div>
+          )}
+
+          {/* ── Erro ── */}
+          {erro && (
+            <div className="rounded-xl bg-red-900/20 border border-red-700/40 p-4 text-red-400 text-sm mb-5 flex items-center gap-2">
+              <AlertTriangle size={15}/> {erro}
+            </div>
+          )}
+
+          {/* ── Loading ── */}
+          {loadingNfs && (
+            <div className="space-y-2">
+              {[...Array(6)].map((_,i) => <div key={i} className="h-14 rounded-xl bg-slate-800 border border-white/5 animate-pulse"/>)}
+            </div>
+          )}
+
+          {/* ── Lista ── */}
+          {!loadingNfs && !erro && (
+            nfsFiltradas.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <Inbox size={36} className="text-slate-700"/>
+                <p className="text-slate-500 text-sm">
+                  {nfs.length === 0
+                    ? `Nenhuma NF no período ${fmtBR(rangeIni)} → ${fmtBR(rangeFim)}.`
+                    : 'Nenhuma NF para os filtros selecionados.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {/* Header da lista */}
+                <div className="hidden sm:grid grid-cols-[4rem_6rem_1fr_7rem_6rem_8rem_2rem] gap-3 px-4 py-1.5 text-[11px] font-medium text-slate-600 uppercase tracking-wider">
+                  <span>NF</span><span>Canal</span><span>Cliente</span>
+                  <span className="text-right">Valor</span><span className="text-right">Data</span>
+                  <span>Situação</span><span/>
+                </div>
+
+                {nfsFiltradas.map(nf => (
+                  <NFRow key={nf.id} nf={nf} clonados={clonados}
+                    onClonar={handleClonar} onExpand={handleExpand}
+                    expandido={!!expandidos[nf.id]} detalhe={expandidos[nf.id] || null}
+                    expandindo={expandindo === nf.id}
+                    isFlex={!!flexFlags[nf.id]} onFlexToggle={handleFlexToggle}
+                    clonando={clonando}/>
+                ))}
+
+                <p className="text-xs text-slate-700 text-center pt-2">
+                  {nfsFiltradas.length} NF{nfsFiltradas.length !== 1 ? 's' : ''} exibida{nfsFiltradas.length !== 1 ? 's' : ''}
+                  {nfsFiltradas.length !== nfs.length ? ` de ${nfs.length}` : ''}
+                </p>
+              </div>
+            )
+          )}
+        </>
       )}
     </div>
   );

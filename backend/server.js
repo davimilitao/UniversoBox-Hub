@@ -22,6 +22,7 @@ const catalogoRouter = require('./routes/catalogo');
 const blingRouter = require('./routes/bling');
 const meliRouter = require('./routes/meli');
 const financeiroRouter = require('./routes/financeiro');
+const sistemaRouter = require('./routes/sistema');
 const { requireFirebaseAuth, requireFirebaseRole } = require('./middleware/requireFirebaseAuth');
 const { db, serviceAccount } = require('./config/firebase');
 const fs = require('fs');
@@ -117,6 +118,7 @@ app.use('/bling', blingRouter);
 app.use('/api/ml', meliRouter);
 app.use('/ml', meliRouter);
 app.use('/api', financeiroRouter);
+app.use('/api', sistemaRouter);
 
 // ✅ fallback: placeholder 1x1 transparente se faltar arquivo
 app.get('/assets/placeholder.png', (req, res) => {
