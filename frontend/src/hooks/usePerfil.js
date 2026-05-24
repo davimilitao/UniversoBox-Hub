@@ -18,7 +18,7 @@ const DEFAULT_MODULOS = {
   vendas:     ['index'],
 };
 
-const TEMAS_VALIDOS = ['dark', 'uber', 'ifood', '99', 'marvel', 'rick'];
+const TEMAS_VALIDOS = ['dark', 'uber', 'ifood', '99', 'marvel', 'rick', 'clean'];
 
 function applyTheme(tema) {
   const t = TEMAS_VALIDOS.includes(tema) ? tema : 'dark';
