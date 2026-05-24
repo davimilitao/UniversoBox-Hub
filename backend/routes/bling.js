@@ -520,4 +520,122 @@ router.post('/clonar', async (req, res, next) => {
   }
 });
 
+// ── CLONAR NFs EM LOTE ───────────────────────────────────────────
+router.post('/clonar-lote', async (req, res, next) => {
+  try {
+    const { pedidos } = req.body;
+    if (!Array.isArray(pedidos) || !pedidos.length) {
+      return res.status(400).json({ error: 'Nenhum pedido enviado para clonagem.' });
+    }
+
+    const allSkusSet = new Set();
+    for (const p of pedidos) {
+      if (Array.isArray(p.itens)) {
+        for (const it of p.itens) {
+          if (it.sku) allSkusSet.add(safeTrim(it.sku));
+        }
+      }
+    }
+
+    const allSkus = Array.from(allSkusSet);
+    const prodMap = new Map();
+    if (allSkus.length > 0) {
+      const prodRefs = allSkus.map(sku => db.collection('products').doc(sku));
+      const prodSnaps = await db.getAll(...prodRefs);
+      for (const s of prodSnaps) if (s.exists) prodMap.set(s.id, s.data());
+    }
+
+    const terminalId  = safeTrim(req.header('x-terminal-id')) || `bling_clone_lote`;
+    const createdAtMs = nowMs();
+    const day         = yyyymmdd();
+    const counterRef  = db.collection('meta').doc(`counters_${day}`);
+
+    const result = await db.runTransaction(async tx => {
+      const cSnap   = await tx.get(counterRef);
+      const startSeq = cSnap.exists ? Number(cSnap.data().seq || 0) : 0;
+      let seq = startSeq;
+
+      const createdOrders = [];
+
+      for (let i = 0; i < pedidos.length; i++) {
+        const p = pedidos[i];
+        const blingNfId = String(p.blingNfId || '').replace(/\D/g, '') || null;
+        
+        const itens = p.itens || [];
+        const itensComSku = itens.filter(it => safeTrim(it.sku));
+        
+        if (!itensComSku.length) continue;
+
+        const cart = [];
+        const skusFaltando = [];
+
+        for (const it of itensComSku) {
+          const sku = safeTrim(it.sku);
+          const prodData = prodMap.get(sku);
+          if (!prodData) {
+            skusFaltando.push(sku);
+            cart.push({
+              sku,
+              nameShort:  (it.nome || sku).slice(0, 48),
+              qty:        Number(it.qty || 1),
+              ean:        '',
+              eanBox:     '',
+              bin:        '',
+              image:      '/assets/placeholder.png',
+              images:     [],
+              checkedQty: 0,
+            });
+          } else {
+            cart.push({
+              sku,
+              nameShort:  (prodData.name || it.nome || sku).slice(0, 48),
+              qty:        Number(it.qty || 1),
+              ean:        prodData.ean    || '',
+              eanBox:     prodData.eanBox || '',
+              bin:        prodData.bin    || '',
+              image:      '/assets/placeholder.png',
+              images:     prodData.images || [],
+              checkedQty: 0,
+            });
+          }
+        }
+
+        seq++;
+        const orderId = `ORD_${day}_${padSeq(seq, ORDER_SEQ_PAD)}`;
+
+        tx.set(db.collection('orders').doc(orderId), {
+          docType:       'order',
+          source:        'bling',
+          blingNfId:     blingNfId   || null,
+          numeroPedido:  p.numeroPedido || null,
+          mlOrderId:     p.mlOrderId   || null,
+          logistica:     p.logistica   || 'agency',
+          marketplace:   p.marketplace || 'OUTROS',
+          status:        'pending',
+          clienteNome:   safeTrim(p.clienteNome) || '',
+          isPriority:    p.logistica === 'flex',
+          items:         cart,
+          allowConfirmOnlyIfAllChecked: true,
+          createdAtMs,
+          updatedAtMs:   createdAtMs,
+          lockedBy:      terminalId,
+          lockedAt:      createdAtMs,
+          skusFaltando:  skusFaltando.length ? skusFaltando : null,
+        });
+
+        createdOrders.push({ orderId, blingNfId });
+      }
+
+      tx.set(counterRef, { docType: 'counter', day, seq, updatedAtMs: createdAtMs }, { merge: true });
+
+      return { createdOrders };
+    });
+
+    res.json({ ok: true, createdCount: result.createdOrders.length, orders: result.createdOrders });
+  } catch (err) {
+    console.error('[POST /bling/clonar-lote]', err);
+    next(err);
+  }
+});
+
 module.exports = router;
