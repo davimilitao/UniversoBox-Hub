@@ -44,9 +44,9 @@ async function parseProductManualPdf(pdfBase64) {
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  // Usa o 2.5-flash por ser estável, rápido e excelente com extração de dados técnicos
+  // Usa o 2.0-flash por ser estável, rápido e excelente com extração de dados técnicos
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-2.0-flash',
     generationConfig: {
       responseMimeType: 'application/json',
     }
