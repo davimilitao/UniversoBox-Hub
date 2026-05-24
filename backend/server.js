@@ -77,20 +77,20 @@ app.get('/sistema/*',    (req, res) => res.redirect('/spa' + req.path));
 
 app.use(express.static(PUBLIC_DIR));
 app.get('/', (req, res) => res.redirect('/spa/'));
-app.get('/manual', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manual.html')));
-app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')));
-app.get('/pedidos', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'pedidos.html')));
-app.get('/embalagens', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'embalagens.html')));
-app.get('/importar', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'importar.html')));
-app.get('/catalogo', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'catalogo.html')));
-app.get('/compras', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'compras.html')));
-app.get('/financas', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'financas.html')));
-app.get('/bling',   (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'bling.html')));
-app.get('/config',  (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'config.html')));
-app.get('/cadastrar', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'cadastro-produto.html')));
-app.get('/enriquecer-xml', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'enriquecer-xml.html')));
-app.get('/ml-dashboard', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'ml-dashboard.html')));
-app.get('/produto-studio', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'produto-studio.html')));
+app.get('/manual', (req, res) => res.redirect('/spa/expedicao/pedidos'));
+app.get('/admin', (req, res) => res.redirect('/spa/catalogo/admin'));
+app.get('/pedidos', (req, res) => res.redirect('/spa/expedicao/pedidos'));
+app.get('/embalagens', (req, res) => res.redirect('/spa/'));
+app.get('/importar', (req, res) => res.redirect('/spa/'));
+app.get('/catalogo', (req, res) => res.redirect('/spa/catalogo/produtos'));
+app.get('/compras', (req, res) => res.redirect('/spa/expedicao/compras'));
+app.get('/financas', (req, res) => res.redirect('/spa/financeiro/contas'));
+app.get('/bling',   (req, res) => res.redirect('/spa/expedicao/bling'));
+app.get('/config',  (req, res) => res.redirect('/spa/sistema/config'));
+app.get('/cadastrar', (req, res) => res.redirect('/spa/catalogo/automacao'));
+app.get('/enriquecer-xml', (req, res) => res.redirect('/spa/'));
+app.get('/ml-dashboard', (req, res) => res.redirect('/spa/'));
+app.get('/produto-studio', (req, res) => res.redirect('/spa/catalogo/fotos-lote'));
 
 
 // ✅ uploads locais (fotos reais do estoque)
