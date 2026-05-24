@@ -427,24 +427,34 @@ router.post('/clonar', async (req, res, next) => {
     for (const it of itensComSku) {
       const sku = safeTrim(it.sku);
       const p   = prodMap.get(sku);
-      if (!p) { skusFaltando.push(sku); continue; }
-      cart.push({
-        sku,
-        nameShort:  (p.name || it.nome || sku).slice(0, 48),
-        qty:        Number(it.qty || 1),
-        ean:        p.ean    || '',
-        eanBox:     p.eanBox || '',
-        bin:        p.bin    || '',
-        image:      './assets/placeholder.png',
-        images:     p.images || [],
-        checkedQty: 0,
-      });
+      if (!p) {
+        // Fallback: se o produto não estiver no banco, cria o item com os dados do Bling
+        skusFaltando.push(sku);
+        cart.push({
+          sku,
+          nameShort:  (it.nome || sku).slice(0, 48),
+          qty:        Number(it.qty || 1),
+          ean:        '',
+          eanBox:     '',
+          bin:        '',
+          image:      '/assets/placeholder.png',
+          images:     [],
+          checkedQty: 0,
+        });
+      } else {
+        cart.push({
+          sku,
+          nameShort:  (p.name || it.nome || sku).slice(0, 48),
+          qty:        Number(it.qty || 1),
+          ean:        p.ean    || '',
+          eanBox:     p.eanBox || '',
+          bin:        p.bin    || '',
+          image:      '/assets/placeholder.png',
+          images:     p.images || [],
+          checkedQty: 0,
+        });
+      }
     }
-
-    if (!cart.length) return res.status(400).json({
-      error: 'Nenhum produto encontrado no sistema para os SKUs desta NF.',
-      skusFaltando,
-    });
 
     const terminalId  = safeTrim(req.header('x-terminal-id')) || `bling_clone`;
     const createdAtMs = nowMs();

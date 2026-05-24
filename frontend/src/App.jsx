@@ -11,16 +11,9 @@ import { LoginPage }        from './pages/LoginPage';
 import { DashboardPage }    from './pages/DashboardPage';
 import { BlingPedidos }     from './pages/expedicao/BlingPedidos';
 import { AppShell }         from './components/AppShell';
-import GestaoInsumos           from './pages/expedicao/GestaoInsumos';
 import PedidosDoDia            from './pages/expedicao/PedidosDoDia';
-import AutomacaoCadastro       from './pages/catalogo/AutomacaoCadastro';
-import CatalogoPro             from './pages/catalogo/CatalogoPro';
-import AdminProdutos           from './pages/catalogo/AdminProdutos';
-import ImageStudio             from './pages/catalogo/ImageStudio';
-import BatchImageStudio        from './pages/catalogo/BatchImageStudio';
 import ConfiguracoesSistema    from './pages/sistema/ConfiguracoesSistema';
 import Contas                  from './pages/financeiro/Contas';
-import Compras                 from './pages/expedicao/Compras';
 
 export default function App() {
   return (
@@ -37,14 +30,6 @@ export default function App() {
         {/* Expedição */}
         <Route path="/expedicao/bling"     element={<BlingPedidos />} />
         <Route path="/expedicao/pedidos"   element={<PedidosDoDia />} />
-        <Route path="/expedicao/insumos"   element={<GestaoInsumos />} />
-        <Route path="/expedicao/compras"   element={<Compras />} />
-        {/* Catálogo */}
-        <Route path="/catalogo/produtos"   element={<CatalogoPro />} />
-        <Route path="/catalogo/admin"      element={<AdminProdutos />} />
-        <Route path="/catalogo/automacao"  element={<AutomacaoCadastro />} />
-        <Route path="/catalogo/fotos"      element={<ImageStudio />} />
-        <Route path="/catalogo/fotos-lote" element={<BatchImageStudio />} />
         {/* Financeiro */}
         <Route path="/financeiro/despesas"    element={<Contas />} />
         {/* Sistema */}

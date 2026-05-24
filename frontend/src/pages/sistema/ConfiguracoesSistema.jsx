@@ -16,8 +16,9 @@ import {
   FileCode, Receipt, ShoppingBag, FileUp,
   Home, LayoutGrid, FlaskConical,
   Globe, Database, Key, ChevronRight, Copy, Check,
-  RefreshCw, AlertTriangle,
+  RefreshCw, AlertTriangle, Unplug, Plug,
 } from 'lucide-react';
+
 import { auth } from '../../firebase';
 import { getAuthToken } from '../../utils/getAuthToken';
 
@@ -26,20 +27,9 @@ import { getAuthToken } from '../../utils/getAuthToken';
 const MODULOS_UI = [
   // Expedição
   { id: 'pedidos',        label: 'Entregas do Dia',    secao: 'Expedição',  Icon: Package },
-  { id: 'manual',         label: 'Expedir Manual',     secao: 'Expedição',  Icon: ClipboardList },
   { id: 'bling',          label: 'Expedir Bling',      secao: 'Expedição',  Icon: Zap },
-  { id: 'ml-dashboard',   label: 'Dashboard Meli',     secao: 'Expedição',  Icon: BarChart2 },
-  { id: 'insumos',        label: 'Gestão Insumos',     secao: 'Expedição',  Icon: FlaskConical },
-  // Catálogo
-  { id: 'catalogo',       label: 'Catálogo Pro',       secao: 'Catálogo',   Icon: LayoutGrid },
-  { id: 'admin',          label: 'Admin Produtos',     secao: 'Catálogo',   Icon: Settings2 },
-  { id: 'embalagens',     label: 'Embalagens',         secao: 'Catálogo',   Icon: Box },
-  { id: 'cadastrar',      label: 'Cadastro Rápido',    secao: 'Catálogo',   Icon: PlusCircle },
-  { id: 'enriquecer-xml', label: 'Cadastro XML',       secao: 'Catálogo',   Icon: FileCode },
-  { id: 'importar',       label: 'Importar CSV',       secao: 'Catálogo',   Icon: FileUp },
   // Financeiro
-  { id: 'financas',       label: 'Financeiro',         secao: 'Financeiro', Icon: Receipt },
-  { id: 'compras',        label: 'Compras',            secao: 'Financeiro', Icon: ShoppingBag },
+  { id: 'financas',       label: 'Despesas',           secao: 'Financeiro', Icon: Receipt },
   // Sistema
   { id: 'index',          label: 'Painel Principal',   secao: 'Sistema',    Icon: Home },
   { id: 'config',         label: 'Configurações',      secao: 'Sistema',    Icon: SlidersHorizontal },
@@ -156,6 +146,7 @@ export default function ConfiguracoesSistema() {
   const TABS = [
     { id: 'perfis',   label: 'Perfis de Acesso', Icon: Shield },
     { id: 'usuarios', label: 'Usuários',          Icon: Users },
+    { id: 'bling',    label: 'Integração Bling',  Icon: Zap },
     { id: 'sistema',  label: 'Sistema',           Icon: Monitor },
   ];
 
@@ -195,8 +186,10 @@ export default function ConfiguracoesSistema() {
       <div className="flex-1 min-h-0 overflow-hidden">
         {tab === 'perfis'   && <TabPerfis   showToast={showToast} />}
         {tab === 'usuarios' && <TabUsuarios showToast={showToast} />}
+        {tab === 'bling'    && <TabBling    showToast={showToast} />}
         {tab === 'sistema'  && <TabSistema  showToast={showToast} />}
       </div>
+
     </div>
   );
 }
@@ -940,7 +933,6 @@ function TabSistema({ showToast }) {
   return (
     <div className="h-full overflow-y-auto p-5 space-y-4 max-w-xl pb-12">
       <LocalPrinterCard />
-      <GeminiConfigCard showToast={showToast} />
 
       {/* Sessão atual */}
       <SectionCard icon={User} title="Sessão atual">
@@ -1022,3 +1014,384 @@ function TabSistema({ showToast }) {
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB: BLING CONFIGURATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+function TabBling({ showToast }) {
+  const [config, setConfig] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [codeTab, setCodeTab] = useState('node');
+  const [showSecret, setShowSecret] = useState(false);
+  const [copiedText, setCopiedText] = useState(null);
+
+  const loadConfig = async () => {
+    setLoading(true);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch('/api/bling/config', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      setConfig(data);
+    } catch (e) {
+      showToast('Erro ao carregar configurações do Bling', 'err');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  const handleToggleActive = async () => {
+    if (!config) return;
+    setSaving(true);
+    const newActive = !config.active;
+    try {
+      const token = await getAuthToken();
+      const res = await fetch('/api/bling/config', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ active: newActive })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setConfig(prev => ({ ...prev, active: newActive }));
+        showToast(newActive ? 'Integração Bling ativada ✓' : 'Integração Bling desativada ⚠️', newActive ? 'ok' : 'info');
+      }
+    } catch (e) {
+      showToast('Erro ao atualizar status da integração', 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setTesting(true);
+    try {
+      const res = await fetch('/bling/status');
+      const data = await res.json();
+      if (data.authorized) {
+        showToast('Conexão ativa! Bling respondeu com sucesso ✓', 'ok');
+        await loadConfig();
+      } else {
+        showToast('Bling não autorizado. Conecte sua conta ⚠️', 'err');
+      }
+    } catch (e) {
+      showToast('Erro ao testar conexão com o Bling', 'err');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm('Tem certeza de que deseja desconectar a conta do Bling?')) return;
+    try {
+      const res = await fetch('/bling/disconnect', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        showToast('Bling desconectado com sucesso', 'info');
+        loadConfig();
+      }
+    } catch (e) {
+      showToast('Erro ao desconectar Bling', 'err');
+    }
+  };
+
+  const copyToClipboard = (text, key) => {
+    navigator.clipboard.writeText(text);
+    setCopiedText(key);
+    setTimeout(() => setCopiedText(null), 1500);
+  };
+
+  if (loading) {
+    return (
+      <div className="p-8 space-y-4 max-w-2xl">
+        <div className="h-28 bg-white/[0.03] rounded-xl animate-pulse" />
+        <div className="h-44 bg-white/[0.03] rounded-xl animate-pulse" />
+        <div className="h-60 bg-white/[0.03] rounded-xl animate-pulse" />
+      </div>
+    );
+  }
+
+  const isConnected = config?.authorized;
+  const isIntegrationActive = config?.active;
+
+  const nodeCode = `const axios = require('axios');
+
+// Exemplo de chamada para carregar os pedidos no seu sistema
+async function getBlingOrders() {
+  try {
+    const response = await axios.get('https://hub.universobox.com.br/bling/pedidos', {
+      params: {
+        dataInicio: '${new Date().toISOString().split('T')[0]}',
+        dataFim: '${new Date().toISOString().split('T')[0]}'
+      }
+    });
+    console.log(\`Carregados \${response.data.items.length} pedidos do Bling!\\n\`);
+    return response.data.items;
+  } catch (error) {
+    console.error('Erro ao consultar API do Bling no Hub:', error.message);
+  }
+}`;
+
+  const curlCode = `curl -X GET \\
+  "https://hub.universobox.com.br/bling/pedidos?dataInicio=${new Date().toISOString().split('T')[0]}&dataFim=${new Date().toISOString().split('T')[0]}" \\
+  -H "Accept: application/json"`;
+
+  return (
+    <div className="h-full overflow-y-auto p-5 space-y-6 max-w-3xl pb-12 animate-fade-in text-slate-200">
+      {/* Status Hero Card */}
+      <div className="relative overflow-hidden rounded-2xl border border-white/[0.06] bg-slate-900/40 p-6 backdrop-blur-md">
+        {/* Glow Effects */}
+        {isIntegrationActive && isConnected ? (
+          <div className="absolute -right-24 -top-24 w-48 h-48 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none" />
+        ) : (
+          <div className="absolute -right-24 -top-24 w-48 h-48 rounded-full bg-amber-500/10 blur-3xl pointer-events-none" />
+        )}
+
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-slate-900 border border-white/[0.08] flex items-center justify-center relative shadow-inner">
+              <Zap size={20} className={isIntegrationActive && isConnected ? "text-emerald-400" : "text-slate-400"} />
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  isIntegrationActive && isConnected ? "bg-emerald-400" : "bg-amber-400"
+                }`}></span>
+                <span className={`relative inline-flex rounded-full h-3 w-3 ${
+                  isIntegrationActive && isConnected ? "bg-emerald-500" : "bg-amber-500"
+                }`}></span>
+              </span>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-100">Status da Integração</h3>
+                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border tracking-wide uppercase ${
+                  isIntegrationActive && isConnected
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    : isIntegrationActive
+                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                    : "bg-slate-800 text-slate-400 border-white/[0.06]"
+                }`}>
+                  {isIntegrationActive && isConnected ? "Online" : isIntegrationActive ? "Configuração Pendente" : "Inativa"}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                {isIntegrationActive && isConnected
+                  ? `Conectado via Bling API v3. Token atualizado em ${new Date(config.tokenUpdatedAtMs || Date.now()).toLocaleDateString('pt-BR')} às ${new Date(config.tokenUpdatedAtMs || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`
+                  : "Ative a integração e autorize o acesso à sua conta do Bling para sincronizar pedidos."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 bg-slate-950/40 border border-white/[0.04] p-3 rounded-xl shrink-0">
+            <span className="text-[11px] font-semibold text-slate-400">Integração Ativa</span>
+            <button
+              onClick={handleToggleActive}
+              disabled={saving}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                isIntegrationActive ? 'bg-emerald-500' : 'bg-slate-800'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  isIntegrationActive ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Settings Card */}
+      <SectionCard icon={Settings2} title="Configurações de Conexão (OAuth2)">
+        <div className="space-y-4">
+          {/* Client ID */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 py-3 border-b border-white/[0.04]">
+            <div>
+              <p className="text-xs font-bold text-slate-200">Client ID da Aplicação</p>
+              <p className="text-[10px] text-slate-600">Identificador exclusivo do UniversoBox Hub no Bling.</p>
+            </div>
+            <div className="flex items-center gap-2 bg-slate-900/60 border border-white/[0.06] rounded-xl px-3 py-1.5 min-w-[240px]">
+              <span className="text-[11px] font-mono text-slate-400 flex-1 truncate">
+                {showSecret ? config.clientId : `${config.clientId?.slice(0, 8)}****************`}
+              </span>
+              <button
+                onClick={() => setShowSecret(!showSecret)}
+                className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors px-1"
+              >
+                {showSecret ? 'Ocultar' : 'Exibir'}
+              </button>
+              <button
+                onClick={() => copyToClipboard(config.clientId, 'clientId')}
+                className="text-slate-600 hover:text-slate-300 transition-colors border-0 bg-transparent cursor-pointer p-0"
+                title="Copiar Client ID"
+              >
+                {copiedText === 'clientId' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Redirect URI */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 py-3 border-b border-white/[0.04]">
+            <div>
+              <p className="text-xs font-bold text-slate-200">URL de Redirecionamento (Callback)</p>
+              <p className="text-[10px] text-slate-600">Configure exatamente este endereço no painel do desenvolvedor Bling.</p>
+            </div>
+            <div className="flex items-center gap-2 bg-slate-900/60 border border-white/[0.06] rounded-xl px-3 py-1.5 min-w-[240px]">
+              <span className="text-[11px] font-mono text-slate-400 flex-1 truncate select-all">
+                {config.redirectUri}
+              </span>
+              <button
+                onClick={() => copyToClipboard(config.redirectUri, 'redirectUri')}
+                className="text-slate-600 hover:text-slate-300 transition-colors border-0 bg-transparent cursor-pointer p-0"
+                title="Copiar URL"
+              >
+                {copiedText === 'redirectUri' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-3 pt-2">
+            {!isConnected ? (
+              <a
+                href="/bling/auth"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-lg shadow-blue-900/40 hover:scale-[1.02] decoration-none"
+              >
+                <Plug size={13} />
+                Conectar Conta do Bling
+              </a>
+            ) : (
+              <>
+                <button
+                  onClick={handleTestConnection}
+                  disabled={testing}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-white/10 hover:border-white/20 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+                >
+                  {testing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                  Testar Conexão
+                </button>
+                <button
+                  onClick={handleDisconnect}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-red-500/20 text-red-400 hover:bg-red-500/10 text-xs font-bold transition-all ml-auto cursor-pointer"
+                >
+                  <Unplug size={13} />
+                  Desconectar Conta
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Permissions Grid */}
+      <SectionCard icon={Shield} title="Permissões & Escopos Autorizados (Bling API v3)">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {[
+            {
+              scope: 'pedidos.read',
+              name: 'Leitura de Pedidos',
+              desc: 'Permite sincronizar o faturamento e vendas com a expedição local do dia.',
+              active: isConnected,
+            },
+            {
+              scope: 'nfe.read',
+              name: 'Leitura de NF-e',
+              desc: 'Permite obter a chave de acesso, status da DANFE e baixar o arquivo PDF.',
+              active: isConnected,
+            },
+            {
+              scope: 'produtos.read',
+              name: 'Leitura de Produtos',
+              desc: 'Permite carregar as imagens do catálogo de produtos e códigos de barra (GTIN).',
+              active: isConnected,
+            },
+            {
+              scope: 'lojas.read',
+              name: 'Leitura de Canais',
+              desc: 'Permite mapear lojas virtuais (Mercado Livre, Shopee) e rotular os marketplaces.',
+              active: isConnected,
+            },
+          ].map((sc) => (
+            <div
+              key={sc.scope}
+              className="p-4 rounded-xl border border-white/[0.04] bg-slate-900/20 flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-300">{sc.name}</span>
+                  <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 border ${
+                    sc.active
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                      : "bg-slate-800 text-slate-500 border-white/[0.06]"
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${sc.active ? "bg-emerald-400 animate-pulse" : "bg-slate-700"}`} />
+                    {sc.active ? "Aprovado" : "Pendente"}
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-relaxed">{sc.desc}</p>
+              </div>
+              <span className="text-[9px] font-mono text-slate-700 mt-3 select-all">{sc.scope}</span>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
+
+      {/* Code Snippets Sandbox */}
+      <SectionCard icon={FileCode} title="Exemplo de Uso em Desenvolvimento">
+        <div className="space-y-4">
+          <div className="flex border-b border-white/[0.06] -mb-px">
+            <button
+              onClick={() => setCodeTab('node')}
+              className={`px-4 py-2 text-xs font-semibold border-b-2 transition-colors cursor-pointer bg-transparent border-0 ${
+                codeTab === 'node' ? 'text-blue-400 border-blue-400' : 'text-slate-600 border-transparent hover:text-slate-400'
+              }`}
+            >
+              Node.js (Axios)
+            </button>
+            <button
+              onClick={() => setCodeTab('curl')}
+              className={`px-4 py-2 text-xs font-semibold border-b-2 transition-colors cursor-pointer bg-transparent border-0 ${
+                codeTab === 'curl' ? 'text-blue-400 border-blue-400' : 'text-slate-600 border-transparent hover:text-slate-400'
+              }`}
+            >
+              cURL (Terminal)
+            </button>
+            <button
+              onClick={() => copyToClipboard(codeTab === 'node' ? nodeCode : curlCode, 'code')}
+              className="ml-auto text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 px-3 border-0 bg-transparent cursor-pointer"
+            >
+              {copiedText === 'code' ? (
+                <>
+                  <Check size={11} className="text-emerald-400" /> Copiado!
+                </>
+              ) : (
+                <>
+                  <Copy size={11} /> Copiar Código
+                </>
+              )}
+            </button>
+          </div>
+
+          <pre className="text-[11px] font-mono text-slate-400 overflow-x-auto leading-relaxed bg-slate-950/80 rounded-xl p-4 border border-white/[0.05] shadow-inner max-h-72">
+            <code>
+              {codeTab === 'node' ? nodeCode : curlCode}
+            </code>
+          </pre>
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+

@@ -11,7 +11,7 @@
  * @date 2026-04-04
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import {
   RefreshCw, Plus, Loader2, ChevronRight, User, MapPin, X,
   ScanLine, Printer, PackageCheck, SendHorizonal, CircleCheck,
@@ -460,7 +460,7 @@ function CameraOverlay({ onScan, onClose }) {
 }
 
 // ─── Order Card ───────────────────────────────────────────────────────────────
-function OrderCard({ o, tab, active, onClick, onFlexToggle }) {
+const OrderCard = memo(function OrderCard({ o, tab, active, onClick, onFlexToggle }) {
   const its     = Array.isArray(o.items) ? o.items : [];
   const total   = its.reduce((a, it) => a + Number(it.qty || 0), 0);
   const checked = its.reduce((a, it) => a + Number(it.checkedQty || 0), 0);
@@ -539,7 +539,7 @@ function OrderCard({ o, tab, active, onClick, onFlexToggle }) {
       </div>
     </button>
   );
-}
+});
 
 // ─── Scanner Zone ─────────────────────────────────────────────────────────────
 function ScannerZone({ status, hint, inputRef, onManualScan, onCameraToggle, cameraActive }) {
@@ -579,7 +579,7 @@ function ScannerZone({ status, hint, inputRef, onManualScan, onCameraToggle, cam
 }
 
 // ─── Item Row (separação) ─────────────────────────────────────────────────────
-function ItemRow({ it, onCheck, orderId, showToast }) {
+const ItemRow = memo(function ItemRow({ it, onCheck, orderId, showToast }) {
   const qty = Number(it.qty || 0), chk = Number(it.checkedQty || 0);
   const ok  = chk >= qty;
   const foto = it.stockPhotos?.[0] || it.image || null;
@@ -678,7 +678,7 @@ function ItemRow({ it, onCheck, orderId, showToast }) {
       )}
     </div>
   );
-}
+});
 
 // ─── Etiqueta destaque ────────────────────────────────────────────────────────
 function EtiquetaDestaque({ o, large = false }) {
@@ -1073,7 +1073,7 @@ export default function PedidosDoDia() {
       const [p, pi, pk] = await Promise.all([
         api('/orders/list?status=pending&limit=80'),
         api('/orders/list?status=picked&limit=80'),
-        api('/orders/list?status=packed&limit=200'),
+        api('/orders/list?status=packed&limit=30'),
       ]);
       if (!p || !pi || !pk) return;
       const novo = {
