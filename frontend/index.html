@@ -18,9 +18,14 @@
     <link rel="apple-touch-icon" href="/spa/icon-192.svg" />
     <script>
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () =>
-          navigator.serviceWorker.register('/spa/sw.js').catch(() => {})
-        );
+        navigator.serviceWorker.getRegistrations().then(registrations => {
+          for (let r of registrations) r.unregister();
+        }).catch(() => {});
+        if ('caches' in window) {
+          caches.keys().then(keys => {
+            for (let k of keys) caches.delete(k);
+          }).catch(() => {});
+        }
       }
     </script>
   </head>

@@ -28,22 +28,13 @@ import {
 const ROTAS = [
   // Expedição
   { key: 'pedidos',        moduleId: 'pedidos',        label: 'Entregas do Dia',   secao: 'Expedição',  Icon: Package,           react: true,  href: '/expedicao/pedidos'    },
-  { key: 'manual',         moduleId: 'manual',         label: 'Expedir Manual',    secao: 'Expedição',  Icon: ClipboardList,     react: false, href: '/manual',              locked: true },
-  { key: 'ml-dashboard',   moduleId: 'ml-dashboard',   label: 'Dashboard Meli',    secao: 'Expedição',  Icon: BarChart2,         react: false, href: '/ml-dashboard',        locked: true },
   { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,               react: true,  href: '/expedicao/bling'      },
-  { key: 'exp-insumos',    moduleId: 'insumos',        label: 'Gestão Insumos',    secao: 'Expedição',  Icon: FlaskConical,      react: true,  href: '/expedicao/insumos'    },
   // Catálogo
   { key: 'catalogo-pro',   moduleId: 'catalogo',       label: 'Catálogo Pro',      secao: 'Catálogo',   Icon: LayoutGrid,        react: true,  href: '/catalogo/produtos'    },
   { key: 'busca-produto',  moduleId: 'catalogo',       label: 'Busca SKU / EAN',   secao: 'Catálogo',   Icon: Search,            react: true,  href: '/catalogo/automacao'   },
   { key: 'admin',          moduleId: 'admin',          label: 'Admin Produtos',    secao: 'Catálogo',   Icon: Settings2,         react: true,  href: '/catalogo/admin'       },
-  { key: 'embalagens',     moduleId: 'embalagens',     label: 'Embalagens',        secao: 'Catálogo',   Icon: Box,               react: false, href: '/embalagens',          locked: true },
-  { key: 'cadastrar',      moduleId: 'cadastrar',      label: 'Cadastro Rápido',   secao: 'Catálogo',   Icon: PlusCircle,        react: false, href: '/cadastrar',           locked: true },
-  { key: 'enriquecer-xml', moduleId: 'enriquecer-xml', label: 'Cadastro XML',      secao: 'Catálogo',   Icon: FileCode,          react: false, href: '/enriquecer-xml',      locked: true },
-  { key: 'image-studio',   moduleId: 'catalogo',       label: 'Image Studio',      secao: 'Catálogo',   Icon: Camera,            react: true,  href: '/catalogo/fotos'       },
-  { key: 'batch-image-studio', moduleId: 'catalogo',   label: 'Estúdio em Lote',   secao: 'Catálogo',   Icon: Sparkles,          react: true,  href: '/catalogo/fotos-lote'  },
   // Financeiro
   { key: 'fin-contas',     moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/despesas'  },
-  { key: 'compras',        moduleId: 'compras',        label: 'Compras',           secao: 'Expedição',  Icon: ShoppingBag,       react: true,  href: '/expedicao/compras'    },
   // Sistema
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },
   { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal, react: true,  href: '/sistema/config'       },
