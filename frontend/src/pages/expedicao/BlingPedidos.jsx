@@ -2,10 +2,11 @@
  * @file BlingPedidos.jsx
  * @module expedicao
  * @description Pedidos do Bling — NFs de saída autorizadas.
- *              Range picker com presets, filtros por canal e DANFE,
- *              fotos de produto lazy-load, toggle Flex, fluxo para expedição.
- * @version 2.3.0
- * @date 2026-04-03
+ *              Redenhado para layout plano sem collapse (estilo Mercado Livre),
+ *              cabeçalho de estatísticas inteligente agrupado por data/canal,
+ *              carregamento concorrente assíncrono de itens e ações em lote (lote).
+ * @version 3.0.0
+ * @date 2026-05-24
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
@@ -19,11 +20,9 @@ import {
 import { Link } from 'react-router-dom';
 import { getAuthToken } from '../../utils/getAuthToken';
 
-
 // ─── helpers de data ──────────────────────────────────────────────────────────
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-// Usa componentes locais — evita bug de fuso UTC (toISOString sempre retorna UTC)
 function isoHoje() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -31,7 +30,7 @@ function isoHoje() {
 
 function addDias(iso, n) {
   const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + n); // construtor local — sem UTC shift
+  const dt = new Date(y, m - 1, d + n);
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
 
@@ -56,12 +55,19 @@ function isSemDanfe(sit) {
   if (s.includes('cancelada')) return false;
   if (s.includes('sem danfe')) return true;
   if (s.includes('emitida') || s.includes('danfe')) return false;
-  return true; // "autorizada", "pendente", etc. are treated as "Sem DANFE"
+  return true;
 }
+
 function isComDanfe(sit) {
   if (isSemDanfe(sit)) return false;
   const s = (sit || '').toLowerCase();
   return s.includes('emitida') || s.includes('danfe');
+}
+
+function isNotaDisponivel(nf) {
+  const s = (nf.situacao || '').toLowerCase();
+  if (s.includes('cancelada') || s.includes('rejeitada')) return false;
+  return s.includes('autorizada') || s.includes('danfe') || s.includes('emitida') || s.includes('registrada');
 }
 
 // ─── localStorage ─────────────────────────────────────────────────────────────
@@ -69,6 +75,7 @@ function getClonados() {
   try { return new Set(JSON.parse(localStorage.getItem('bling_clonados') || '[]')); }
   catch { return new Set(); }
 }
+
 function addClonado(id) {
   const s = getClonados(); s.add(String(id));
   localStorage.setItem('bling_clonados', JSON.stringify([...s]));
@@ -119,25 +126,32 @@ function canalCor(mkt) {
 function SituacaoBadge({ sit }) {
   const s = (sit || '').toLowerCase();
   if (s.includes('cancelada'))
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-500/10 text-red-400 border border-red-500/25 whitespace-nowrap"><XCircle size={10}/> Cancelada</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/25 uppercase tracking-wider"><XCircle size={9}/> Cancelada</span>;
   if (s === 'autorizada')
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/25 whitespace-nowrap"><Clock size={10}/> Autorizada</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25 uppercase tracking-wider"><Clock size={9}/> Autorizada</span>;
   if (isSemDanfe(sit))
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/25 whitespace-nowrap"><Clock size={10}/> Sem DANFE</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25 uppercase tracking-wider"><Clock size={9}/> Sem DANFE</span>;
   if (isComDanfe(sit))
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 whitespace-nowrap"><CheckCircle2 size={10}/> DANFE OK</span>;
-  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-700 text-slate-400 border border-slate-600 whitespace-nowrap">{sit||'—'}</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 uppercase tracking-wider"><CheckCircle2 size={9}/> DANFE OK</span>;
+  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-700 text-slate-400 border border-slate-600 uppercase tracking-wider">{sit||'—'}</span>;
 }
 
-// ─── Thumbnail de produto — lazy load via Catálogo ────────────────────────────
-const _imgCache = {};
-
+// ─── Thumbnail de produto ─────────────────────────────────────────────────────
 function ProductThumb() {
   return (
-    <div className="shrink-0 w-12 h-12 rounded-xl bg-slate-800 border border-white/5 flex items-center justify-center">
-      <Package size={16} className="text-slate-500" />
+    <div className="shrink-0 w-10 h-10 rounded-lg bg-slate-900 border border-white/5 flex items-center justify-center">
+      <Package size={14} className="text-slate-600" />
     </div>
   );
+}
+
+// ─── Cliente Name Parser ──────────────────────────────────────────────────────
+function parseCliente(clienteNome) {
+  const m = (clienteNome || '').match(/(.*?)\s*\(([^)]+)\)$/);
+  if (m) {
+    return { nome: m[1].trim(), apelido: m[2].trim() };
+  }
+  return { nome: clienteNome || '—', apelido: '' };
 }
 
 // ─── Range Picker ─────────────────────────────────────────────────────────────
@@ -317,7 +331,7 @@ function RangePicker({ ini, fim, onConfirm }) {
   );
 }
 
-// ─── Cards resumo ─────────────────────────────────────────────────────────────
+// ─── Resumo Card ──────────────────────────────────────────────────────────────
 function ResumoCard({ label, valor, sub, cor = 'slate' }) {
   const cores = { slate:'text-slate-300', amber:'text-amber-400', emerald:'text-emerald-400', blue:'text-blue-400' };
   return (
@@ -329,210 +343,260 @@ function ResumoCard({ label, valor, sub, cor = 'slate' }) {
   );
 }
 
-// ─── Row de item (dentro da NF expandida) ─────────────────────────────────────
-function ItemRow({ it }) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl bg-slate-900/70 border border-white/5 p-2.5 hover:border-white/10 transition-colors">
-      {/* Foto */}
-      <ProductThumb produtoId={it.produtoId} />
+// ─── Day Group Card ───────────────────────────────────────────────────────────
+const DayGroupCard = memo(function DayGroupCard({ title, list, color, onBulkImport, onFilterClick }) {
+  const mktGroups = useMemo(() => {
+    const groups = { MERCADO_LIVRE: [], SHOPEE: [], OUTROS: [] };
+    list.forEach(nf => {
+      let m = (nf.marketplace || 'OUTROS').toUpperCase();
+      if (m.includes('MERCADO') || m.includes('MELI')) m = 'MERCADO_LIVRE';
+      else if (m.includes('SHOPEE')) m = 'SHOPEE';
+      else m = 'OUTROS';
+      groups[m].push(nf);
+    });
+    return groups;
+  }, [list]);
 
-      {/* Nome + SKU */}
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-slate-200 leading-snug line-clamp-2">{it.nome || '—'}</p>
-        <div className="mt-1">
-          {it.sku
-            ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                <Tag size={9}/>{it.sku}
-              </span>
-            : <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-orange-500/10 text-orange-400 border border-orange-500/20">
-                <AlertTriangle size={9}/>Sem SKU
-              </span>
-          }
-        </div>
-      </div>
+  const borderColors = {
+    emerald: 'border-emerald-500/20 bg-emerald-950/5',
+    blue: 'border-blue-500/20 bg-blue-950/5',
+    purple: 'border-purple-500/20 bg-purple-950/5',
+  };
 
-      {/* Quantidade — destaque visual */}
-      <div className="shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-xl bg-slate-800 border border-white/5">
-        <span className="text-[10px] text-slate-600 font-medium uppercase tracking-wide leading-none mb-0.5">Qtd</span>
-        <span className="text-2xl font-black text-white tabular-nums leading-none">{it.qty}</span>
-      </div>
+  const textColors = {
+    emerald: 'text-emerald-400',
+    blue: 'text-blue-400',
+    purple: 'text-purple-400',
+  };
 
-      {/* Preço unitário */}
-      <div className="shrink-0 text-right w-20">
-        <p className="text-[10px] text-slate-600 mb-0.5">Unit.</p>
-        <p className="text-sm text-slate-400 tabular-nums">{BRL.format(it.preco)}</p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Row de NF ────────────────────────────────────────────────────────────────
-const NFRow = memo(function NFRow({ nf, clonados, onClonar, onExpand, expandido, detalhe, expandindo, isFlex, onFlexToggle, clonando }) {
-  const jaCriado = clonados.has(String(nf.id));
-  const eClonar  = clonando === nf.id;
+  const badgeColors = {
+    emerald: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    blue: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    purple: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  };
 
   return (
-    <div className={`rounded-xl border transition-all ${expandido ? 'bg-slate-800 border-white/10 shadow-lg' : 'bg-slate-800/50 border-white/5 hover:border-white/10'}`}>
-
-      {/* ── Linha principal ── */}
-      <button className="w-full flex items-center gap-3 px-4 py-3.5 text-left" onClick={() => onExpand(nf.id)}>
-        {/* Número */}
-        <span className="text-xs font-mono text-slate-500 w-16 shrink-0">#{nf.numero}</span>
-
-        {/* Canal */}
-        <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${canalCor(nf.marketplace)}`}>
-          {nf.marketplace || '?'}
+    <div className={`rounded-xl border p-4 ${borderColors[color]} flex flex-col gap-3 backdrop-blur-md`}>
+      <div className="flex items-center justify-between border-b border-white/5 pb-2">
+        <h3 className={`text-xs font-black uppercase tracking-wider ${textColors[color]}`}>{title}</h3>
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeColors[color]}`}>
+          {list.length} {list.length === 1 ? 'Nota' : 'Notas'}
         </span>
+      </div>
+      
+      <div className="flex flex-col gap-2">
+        {Object.entries(mktGroups).map(([mkt, nfs]) => {
+          if (nfs.length === 0) return null;
+          const label = mkt === 'MERCADO_LIVRE' ? 'Mercado Livre' : mkt === 'SHOPEE' ? 'Shopee' : 'Outros / News';
+          const comDanfe = nfs.filter(n => isComDanfe(n.situacao)).length;
+          const semDanfe = nfs.filter(n => isSemDanfe(n.situacao)).length;
 
-        {/* Cliente */}
-        <span className="flex-1 text-sm text-slate-300 truncate font-medium">{nf.cliente?.nome || '—'}</span>
-
-        {/* Valor */}
-        <span className="hidden sm:block text-sm tabular-nums text-slate-400 w-28 text-right shrink-0">
-          {nf.valorTotal ? BRL.format(nf.valorTotal) : detalhe?.valorTotal ? BRL.format(detalhe.valorTotal) : '—'}
-        </span>
-
-        {/* Data */}
-        <span className="hidden md:block text-xs text-slate-600 w-20 text-right shrink-0">{fmtBR(nf.dataEmissao)}</span>
-
-        {/* Status */}
-        <div className="shrink-0"><SituacaoBadge sit={nf.situacao} /></div>
-
-        {/* Já importado */}
-        {jaCriado && (
-          <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            <CheckCircle2 size={10}/> No sistema
-          </span>
-        )}
-
-        {/* Atalho Flex */}
-        {!jaCriado && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onFlexToggle(nf.id);
-            }}
-            title={isFlex ? "Prioridade Flex Ativa" : "Marcar como Prioridade Flex"}
-            className={`shrink-0 p-1.5 rounded-lg border transition-all ${
-              isFlex
-                ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-400 scale-110'
-                : 'bg-slate-800/40 border-white/5 text-slate-600 hover:text-slate-400 hover:border-white/10'
-            }`}
-          >
-            <Flame size={13} />
-          </button>
-        )}
-
-        {/* Chevron */}
-        <div className="shrink-0 text-slate-600 ml-1">
-          {expandindo ? <Loader2 size={15} className="animate-spin"/> : expandido ? <ChevronUp size={15}/> : <ChevronDown size={15}/>}
-        </div>
-      </button>
-
-      {/* ── Painel expandido ── */}
-      {expandido && detalhe && (
-        <div className="border-t border-white/5 px-4 py-4 space-y-4">
-
-          {/* Número do pedido na loja */}
-          {detalhe.numeroPedido && (
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <Hash size={11} className="shrink-0"/>
-              Pedido na loja:
-              <span className="font-mono text-slate-300">{detalhe.numeroPedido}</span>
-            </div>
-          )}
-
-          {/* ── Itens ── */}
-          {detalhe.itens?.length > 0 ? (
-            <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-                <ShoppingBag size={10}/> {detalhe.itens.length} {detalhe.itens.length === 1 ? 'item' : 'itens'}
-              </p>
-              {detalhe.itens.map((it, i) => <ItemRow key={i} it={it} />)}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-600">Nenhum item encontrado nesta NF.</p>
-          )}
-
-          {/* ── Rodapé: total + ações ── */}
-          <div className="flex items-center justify-between gap-3 flex-wrap pt-1 border-t border-white/5">
-
-            {/* Total + Flex */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-xs text-slate-600">Total</span>
-                <span className="text-lg font-bold text-white tabular-nums">
-                  {detalhe.valorTotal ? BRL.format(detalhe.valorTotal) : '—'}
-                </span>
+          return (
+            <div
+              key={mkt}
+              onClick={() => onFilterClick(mkt)}
+              className="group cursor-pointer rounded-lg bg-slate-800/40 hover:bg-slate-800 border border-white/5 hover:border-white/10 p-3 transition-colors flex flex-col gap-1.5"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-300 group-hover:text-slate-100 transition-colors">{label}</span>
+                <span className="text-xs font-black text-white bg-slate-700/80 px-2 py-0.5 rounded">{nfs.length}</span>
               </div>
-
-              {/* Flex toggle */}
-              {!jaCriado && (
+              <div className="flex items-center justify-between text-[10px] text-slate-500">
+                <span>DANFE: {comDanfe} ok · {semDanfe} sem</span>
                 <button
-                  onClick={() => onFlexToggle(nf.id)}
-                  title="Marcar como Flex / Entrega Rápida — sobe para o topo na separação"
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors
-                    ${isFlex
-                      ? 'bg-yellow-500/15 border-yellow-500/40 text-yellow-400'
-                      : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onBulkImport(mkt);
+                  }}
+                  className="text-emerald-400 hover:text-emerald-300 font-bold underline transition-colors text-[10px]"
                 >
-                  <Flame size={12} className={isFlex ? 'text-yellow-400' : ''} />
-                  {isFlex ? 'FLEX — Entrega Rápida' : 'Marcar Flex'}
+                  Expedir Lote
                 </button>
-              )}
-            </div>
-
-            {/* Ação principal */}
-            {jaCriado ? (
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  <CheckCircle2 size={14}/> Pedido criado
-                </span>
-                <a href="/pedidos"
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-slate-700 border border-white/10 text-slate-300 hover:text-white transition-colors">
-                  <ExternalLink size={13}/> Ver na expedição
-                </a>
               </div>
-            ) : (
-              <button
-                onClick={() => onClonar(nf, detalhe)}
-                disabled={!detalhe.itens?.length || eClonar}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-lg shadow-emerald-500/20 transition-all"
-              >
-                {eClonar
-                  ? <><Loader2 size={15} className="animate-spin"/> Criando…</>
-                  : <><PackagePlus size={15}/> Criar Pedido na Expedição</>
-                }
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 });
 
-// ─── Página principal ──────────────────────────────────────────────────────────
+// ─── NF Card Flat (Sem Collapse) ──────────────────────────────────────────────
+const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onClonar, isFlex, onFlexToggle, clonando, selected, onSelectToggle }) {
+  const jaCriado = clonados.has(String(nf.id));
+  const eClonar  = clonando === nf.id;
+  const cli      = parseCliente(nf.cliente?.nome);
+
+  return (
+    <div className={`rounded-xl border transition-all bg-slate-800/30 p-4 flex flex-col gap-3.5
+      ${selected ? 'border-emerald-500/50 bg-slate-800 shadow-lg ring-1 ring-emerald-500/10' : 'border-white/5 hover:border-white/10 hover:bg-slate-800/40'}`}>
+
+      {/* TOP HEADER */}
+      <div className="flex items-center gap-3 flex-wrap justify-between border-b border-white/5 pb-2.5">
+        <div className="flex items-center gap-3 min-w-0">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onSelectToggle}
+            disabled={jaCriado}
+            className="w-4.5 h-4.5 rounded border-white/15 bg-slate-900 text-emerald-500 focus:ring-0 focus:ring-offset-0 disabled:opacity-30 cursor-pointer transition-colors"
+          />
+          <span className="text-xs font-mono text-slate-500 shrink-0">#{nf.numero}</span>
+          <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-black border uppercase tracking-wider whitespace-nowrap ${canalCor(nf.marketplace)}`}>
+            {nf.marketplace || '?'}
+          </span>
+          <span className="text-sm font-bold text-slate-200 truncate">
+            {cli.nome} {cli.apelido && <span className="text-slate-400 font-bold ml-1">({cli.apelido})</span>}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
+          <span>{fmtBR(nf.dataEmissao)}</span>
+          <SituacaoBadge sit={nf.situacao} />
+          {jaCriado && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider">
+              <CheckCircle2 size={10}/> No sistema
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ITEMS LIST (FLAT) */}
+      <div className="flex-1">
+        {detalhe ? (
+          <div className="space-y-2">
+            {detalhe.itens?.map((it, idx) => (
+              <div key={idx} className="flex items-center gap-3 rounded-xl bg-slate-900/35 border border-white/[0.03] p-2 hover:border-white/5 transition-colors">
+                <ProductThumb />
+                
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-slate-200 line-clamp-2 leading-tight">{it.nome || '—'}</p>
+                  <p className="text-[10px] text-slate-500 font-mono mt-1 flex items-center gap-1">
+                    <Tag size={10} /> SKU: {it.sku || 'Sem SKU'}
+                  </p>
+                </div>
+
+                <div className="shrink-0 flex flex-col items-center justify-center w-11 h-11 rounded-lg bg-slate-800 border border-white/5">
+                  <span className="text-[8px] text-slate-500 font-bold uppercase">Qtd</span>
+                  <span className="text-base font-black text-white leading-none">{it.qty}</span>
+                </div>
+
+                <div className="shrink-0 text-right w-20">
+                  <span className="text-[8px] text-slate-500 block">Unitário</span>
+                  <span className="text-xs font-semibold text-slate-300 tabular-nums">{BRL.format(it.preco)}</span>
+                </div>
+              </div>
+            ))}
+            
+            {detalhe.numeroPedido && (
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono pl-1 pt-1">
+                <Hash size={10}/> Pedido na loja: <span className="text-slate-400">{detalhe.numeroPedido}</span>
+              </div>
+            )}
+          </div>
+        ) : loadingDetalhe ? (
+          <div className="space-y-2 py-1">
+            <div className="h-14 rounded-xl bg-slate-900/30 border border-white/5 animate-pulse flex items-center px-4 justify-between">
+              <div className="flex items-center gap-3 flex-1">
+                <div className="w-9 h-9 rounded bg-slate-800 animate-pulse shrink-0" />
+                <div className="space-y-2 flex-1">
+                  <div className="h-3 w-40 bg-slate-800 rounded animate-pulse" />
+                  <div className="h-2.5 w-20 bg-slate-800 rounded animate-pulse" />
+                </div>
+              </div>
+              <div className="w-10 h-10 rounded bg-slate-800 animate-pulse shrink-0" />
+            </div>
+          </div>
+        ) : (
+          <div className="py-2 text-center text-xs text-slate-600 flex items-center justify-center gap-2">
+            <Loader2 size={12} className="animate-spin" /> Carregando produtos...
+          </div>
+        )}
+      </div>
+
+      {/* FOOTER */}
+      <div className="flex items-center justify-between gap-4 pt-3 border-t border-white/5 flex-wrap">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-[10px] text-slate-500 uppercase font-black">Valor Total</span>
+          <span className="text-base font-black text-white tabular-nums">
+            {BRL.format(nf.valorTotal || detalhe?.valorTotal || 0)}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Flex Toggle */}
+          {!jaCriado && (
+            <button
+              onClick={() => onFlexToggle(nf.id)}
+              title="Marcar como FLEX"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors
+                ${isFlex
+                  ? 'bg-yellow-500/15 border-yellow-500/30 text-yellow-400 scale-102'
+                  : 'bg-slate-800 border-white/5 text-slate-500 hover:text-slate-300'}`}
+            >
+              <Flame size={12} className={isFlex ? 'text-yellow-400 fill-yellow-400/20' : ''} />
+              {isFlex ? 'FLEX — Envio Rápido' : 'Marcar Flex'}
+            </button>
+          )}
+
+          {/* Clone Action Button */}
+          {jaCriado ? (
+            <Link
+              to="/pedidos"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-700 border border-white/10 text-slate-300 hover:text-white hover:border-white/20 transition-all"
+            >
+              <ExternalLink size={12}/> Ver na separação
+            </Link>
+          ) : (
+            <button
+              onClick={() => onClonar(nf, detalhe)}
+              disabled={!detalhe || !detalhe.itens?.length || eClonar}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-lg shadow-emerald-500/10 hover:scale-[1.02] active:scale-[0.98] transition-all"
+            >
+              {eClonar ? (
+                <><Loader2 size={12} className="animate-spin" /> Criando...</>
+              ) : (
+                <><PackagePlus size={12} /> Expedir</>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// ─── Página Principal ─────────────────────────────────────────────────────────
 export function BlingPedidos() {
   const defaultRange = calcPreset('hoje');
 
-  const [status,      setStatus]      = useState(null);
-  const [rangeIni,    setRangeIni]    = useState(defaultRange.ini);
-  const [rangeFim,    setRangeFim]    = useState(defaultRange.fim);
-  const [showPicker,  setShowPicker]  = useState(false);
-  const [canalSel,    setCanalSel]    = useState('all');
-  const [situacaoSel, setSituacaoSel] = useState('all');
-  const [nfs,         setNfs]         = useState([]);
-  const [loadingNfs,  setLoadingNfs]  = useState(false);
-  const [erro,        setErro]        = useState(null);
-  const [expandidos,  setExpandidos]  = useState({});
-  const [expandindo,  setExpandindo]  = useState(null);
-  const [clonados,    setClonados]    = useState(getClonados);
-  const [clonando,    setClonando]    = useState(null);
-  const [flexFlags,   setFlexFlags]   = useState({});
-  const [toast,       setToast]       = useState(null);
-  const pollingRef = useRef(null);
+  const [status,                 setStatus]                 = useState(null);
+  const [rangeIni,               setRangeIni]               = useState(defaultRange.ini);
+  const [rangeFim,               setRangeFim]               = useState(defaultRange.fim);
+  const [showPicker,             setShowPicker]             = useState(false);
+  const [canalSel,               setCanalSel]               = useState('all');
+  const [situacaoSel,            setSituacaoSel]            = useState('all');
+  const [nfs,                    setNfs]                    = useState([]);
+  const [loadingNfs,             setLoadingNfs]             = useState(false);
+  const [loadingMsg,             setLoadingMsg]             = useState('');
+  const [erro,                   setErro]                   = useState(null);
+  
+  // Fila de carregamento de detalhes
+  const [nfeDetails,             setNfeDetails]             = useState({});
+  const [detailsLoading,         setDetailsLoading]         = useState({});
+  
+  // Seleção e filtros inteligentes
+  const [selectedIds,            setSelectedIds]            = useState(new Set());
+  const [selectedDayFilter,      setSelectedDayFilter]      = useState('all'); // 'all', 'hoje', 'amanha', 'futuros'
+  const [selectedChannelFilter,  setSelectedChannelFilter]  = useState('all'); // 'all', 'MERCADO_LIVRE', 'SHOPEE', 'OUTROS'
+  
+  const [clonados,               setClonados]               = useState(getClonados);
+  const [clonando,               setClonando]               = useState(null);
+  const [flexFlags,              setFlexFlags]              = useState({});
+  const [toast,                  setToast]                  = useState(null);
+  
   const pickerRef  = useRef(null);
+  const loadedIdsRef = useRef(new Set());
 
   // Fecha picker ao clicar fora
   useEffect(() => {
@@ -543,7 +607,7 @@ export function BlingPedidos() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Status polling
+  // Buscar status (Bling ativo/inativo) - Apenas no mount
   const fetchStatus = useCallback(async () => {
     try {
       const token = await getAuthToken();
@@ -557,7 +621,6 @@ export function BlingPedidos() {
         updatedAtMs: data.tokenUpdatedAtMs
       });
     } catch (e) {
-      // Fallback fallback to local status if auth fails
       try {
         const r = await fetch('/bling/status');
         const localData = await r.json();
@@ -568,9 +631,49 @@ export function BlingPedidos() {
 
   useEffect(() => {
     fetchStatus();
-    pollingRef.current = setInterval(fetchStatus, 30_000);
-    return () => clearInterval(pollingRef.current);
   }, [fetchStatus]);
+
+  // Fila de preloading assíncrono e concorrente (max 4 requests paralelos)
+  const preloadDetails = useCallback(async (list) => {
+    const toLoad = list.filter(nf => {
+      const sit = (nf.situacao || '').toLowerCase();
+      const isValido = sit.includes('autorizada') || sit.includes('danfe') || sit.includes('emitida') || sit.includes('registrada');
+      return isValido && !loadedIdsRef.current.has(nf.id);
+    });
+
+    if (toLoad.length === 0) return;
+
+    // Adiciona imediatamente ao Set para evitar duplicidade de chamadas disparadas por re-renders
+    toLoad.forEach(nf => loadedIdsRef.current.add(nf.id));
+
+    const chunks = [];
+    for (let i = 0; i < toLoad.length; i += 4) {
+      chunks.push(toLoad.slice(i, i + 4));
+    }
+
+    for (const chunk of chunks) {
+      await Promise.all(chunk.map(async (nf) => {
+        setDetailsLoading(prev => ({ ...prev, [nf.id]: true }));
+        try {
+          const token = await getAuthToken();
+          const res = await fetch(`/bling/pedidos/${nf.id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const data = await res.json();
+          if (data.item) {
+            setNfeDetails(prev => ({ ...prev, [nf.id]: data.item }));
+          } else {
+            loadedIdsRef.current.delete(nf.id);
+          }
+        } catch (e) {
+          console.error('Error preloading details for NFe:', nf.id, e);
+          loadedIdsRef.current.delete(nf.id);
+        } finally {
+          setDetailsLoading(prev => ({ ...prev, [nf.id]: false }));
+        }
+      }));
+    }
+  }, []);
 
   // Buscar NFs — canal sempre "all", filtragem local
   const fetchNFs = useCallback(async () => {
@@ -578,7 +681,7 @@ export function BlingPedidos() {
       setNfs([]);
       return;
     }
-    setLoadingNfs(true); setErro(null);
+    setLoadingNfs(true); setErro(null); setLoadingMsg('Buscando notas fiscais no Bling...');
     try {
       const params = new URLSearchParams({ dataInicio: rangeIni, dataFim: rangeFim, loja: 'all' });
       const res  = await fetch(`/bling/pedidos?${params}`);
@@ -586,15 +689,26 @@ export function BlingPedidos() {
       if (data.error === 'bling_not_authorized') {
         setErro('Bling não autorizado. Conecte sua conta.'); setNfs([]); return;
       }
-      setNfs(data.items || []);
-      setExpandidos({});
+      const fetchedNfs = data.items || [];
+      setNfs(fetchedNfs);
+      
+      // Resetar caches locais de detalhes e seleções ao trocar o período
+      setNfeDetails({});
+      setDetailsLoading({});
+      setSelectedIds(new Set());
+      loadedIdsRef.current.clear();
+      
+      // Iniciar preloading assíncrono
+      preloadDetails(fetchedNfs);
     } catch (e) {
       setErro(e.message);
     } finally {
       setLoadingNfs(false);
+      setLoadingMsg('');
     }
-  }, [rangeIni, rangeFim, status]);
+  }, [rangeIni, rangeFim, status, preloadDetails]);
 
+  // Carrega ao mudar o status ou inicializar
   useEffect(() => {
     if (status && status.active !== false) {
       fetchNFs();
@@ -605,28 +719,22 @@ export function BlingPedidos() {
     setRangeIni(ini); setRangeFim(fim); setShowPicker(false);
   }
 
-  async function handleExpand(id) {
-    if (expandidos[id]) { setExpandidos(p => { const n={...p}; delete n[id]; return n; }); return; }
-    setExpandindo(id);
-    try {
-      const res  = await fetch(`/bling/pedidos/${id}`);
-      const data = await res.json();
-      setExpandidos(p => ({ ...p, [id]: data.item }));
-    } catch (e) { showToast(`Erro ao carregar itens: ${e.message}`, 'err'); }
-    finally { setExpandindo(null); }
-  }
-
   function handleFlexToggle(nfId) {
     setFlexFlags(prev => ({ ...prev, [nfId]: !prev[nfId] }));
   }
 
+  // Importar um único pedido
   async function handleClonar(nf, detalhe) {
     setClonando(nf.id);
     try {
       const logistica = flexFlags[nf.id] ? 'flex' : 'agency';
+      const token = await getAuthToken();
       const res  = await fetch('/bling/clonar', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           blingNfId:    nf.id,
           marketplace:  nf.marketplace,
@@ -643,9 +751,122 @@ export function BlingPedidos() {
       let msg = `✅ Pedido ${data.orderId} criado${logistica === 'flex' ? ' — 🔥 FLEX' : ''}!`;
       if (data.skusFaltando?.length) msg += ` ⚠️ SKUs: ${data.skusFaltando.join(', ')}`;
       showToast(msg, 'ok', data.orderId);
+      
+      // Remove do Set de selecionados se estiver lá
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        next.delete(nf.id);
+        return next;
+      });
     } catch (e) { showToast(`Erro: ${e.message}`, 'err'); }
     finally { setClonando(null); }
   }
+
+  // Executar a importação sequencial ou em lote no backend
+  const executeBulkImport = async (listToImport) => {
+    const pendentes = listToImport.filter(nf => !clonados.has(String(nf.id)));
+    if (!pendentes.length) {
+      showToast('Todos os pedidos selecionados já estão no sistema.', 'info');
+      return;
+    }
+
+    setLoadingNfs(true);
+    setLoadingMsg(`Processando lote de ${pendentes.length} pedido(s)...`);
+
+    const payload = [];
+    const token = await getAuthToken();
+
+    for (let i = 0; i < pendentes.length; i++) {
+      const nf = pendentes[i];
+      let det = nfeDetails[nf.id];
+      if (!det) {
+        setLoadingMsg(`Carregando detalhes do pedido ${i + 1}/${pendentes.length}...`);
+        try {
+          const res = await fetch(`/bling/pedidos/${nf.id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const data = await res.json();
+          if (data.item) {
+            det = data.item;
+            setNfeDetails(prev => ({ ...prev, [nf.id]: det }));
+          }
+        } catch (e) {
+          console.error('Falha ao obter detalhe na importação em lote', nf.id, e);
+        }
+      }
+
+      if (det && det.itens?.length) {
+        const logistica = flexFlags[nf.id] ? 'flex' : 'agency';
+        payload.push({
+          blingNfId:    nf.id,
+          marketplace:  nf.marketplace,
+          itens:        det.itens,
+          clienteNome:  nf.cliente?.nome || '',
+          numeroPedido: det.numeroPedido || '',
+          mlOrderId:    det.mlOrderId   || null,
+          logistica,
+        });
+      }
+    }
+
+    if (!payload.length) {
+      showToast('Nenhum pedido válido com itens carregados para importar.', 'err');
+      setLoadingNfs(false);
+      setLoadingMsg('');
+      return;
+    }
+
+    setLoadingMsg(`Salvando ${payload.length} pedido(s) na separação...`);
+    try {
+      const res = await fetch('/bling/clonar-lote', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ pedidos: payload })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro na importação em lote');
+
+      // Marcar como clonados localmente
+      const importedIds = data.orders || [];
+      importedIds.forEach(o => {
+        if (o.blingNfId) addClonado(o.blingNfId);
+      });
+      setClonados(getClonados());
+      
+      showToast(`✅ ${data.createdCount} pedido(s) importado(s) com sucesso!`, 'ok');
+      setSelectedIds(new Set());
+    } catch (e) {
+      showToast(`Erro ao importar em lote: ${e.message}`, 'err');
+    } finally {
+      setLoadingNfs(false);
+      setLoadingMsg('');
+    }
+  };
+
+  // Clique de ação em lote pelo painel estatístico
+  const handleBulkImportFromGroup = async (nfsList, channel) => {
+    const filtered = nfsList.filter(nf => {
+      let m = (nf.marketplace || 'OUTROS').toUpperCase();
+      if (channel === 'MERCADO_LIVRE') return m.includes('MERCADO') || m.includes('MELI');
+      if (channel === 'SHOPEE') return m.includes('SHOPEE');
+      return !m.includes('MERCADO') && !m.includes('MELI') && !m.includes('SHOPEE');
+    });
+
+    if (!filtered.length) {
+      showToast('Nenhum pedido pendente encontrado.', 'info');
+      return;
+    }
+    await executeBulkImport(filtered);
+  };
+
+  // Filtros interativos por click no card de dia/canal
+  const handleFilterClick = (dayFilter, channelFilter) => {
+    setSelectedDayFilter(dayFilter);
+    setSelectedChannelFilter(channelFilter);
+  };
 
   async function handleDisconnect() {
     if (!confirm('Desconectar o Bling?')) return;
@@ -658,16 +879,101 @@ export function BlingPedidos() {
     setTimeout(() => setToast(null), 5000);
   }
 
-  // Filtro local
+  // Estatísticas agrupadas por data e canal para o cabeçalho inteligente
+  const hojeStr = isoHoje();
+  const amanhaStr = addDias(hojeStr, 1);
+
+  const groupedByDay = useMemo(() => {
+    const grupos = { hoje: [], amanha: [], futuros: [] };
+    nfs.forEach(nf => {
+      if (!isNotaDisponivel(nf)) return;
+      const dt = nf.dataEmissao;
+      if (dt <= hojeStr) {
+        grupos.hoje.push(nf);
+      } else if (dt === amanhaStr) {
+        grupos.amanha.push(nf);
+      } else {
+        grupos.futuros.push(nf);
+      }
+    });
+    return grupos;
+  }, [nfs, hojeStr, amanhaStr]);
+
+  // Filtro local composto
   const nfsFiltradas = useMemo(() => {
     let lista = nfs;
-    if (canalSel !== 'all')          lista = lista.filter(n => matchCanal(canalSel, n.marketplace));
-    if (situacaoSel === 'sem_danfe') lista = lista.filter(n => isSemDanfe(n.situacao));
-    if (situacaoSel === 'danfe')     lista = lista.filter(n => isComDanfe(n.situacao));
+    
+    // Canal clássico
+    if (canalSel !== 'all') {
+      lista = lista.filter(n => matchCanal(canalSel, n.marketplace));
+    }
+    
+    // Situação clássica
+    if (situacaoSel === 'sem_danfe') {
+      lista = lista.filter(n => isSemDanfe(n.situacao));
+    } else if (situacaoSel === 'danfe') {
+      lista = lista.filter(n => isComDanfe(n.situacao));
+    }
+    
+    // Filtro inteligente do painel estatístico (Data)
+    if (selectedDayFilter !== 'all') {
+      const hoje = isoHoje();
+      const amanha = addDias(hoje, 1);
+      lista = lista.filter(nf => {
+        if (!isNotaDisponivel(nf)) return false;
+        const dt = nf.dataEmissao;
+        if (selectedDayFilter === 'hoje') return dt <= hoje;
+        if (selectedDayFilter === 'amanha') return dt === amanha;
+        if (selectedDayFilter === 'futuros') return dt > amanha;
+        return true;
+      });
+    }
+    
+    // Filtro inteligente do painel estatístico (Canal)
+    if (selectedChannelFilter !== 'all') {
+      lista = lista.filter(nf => {
+        let m = (nf.marketplace || 'OUTROS').toUpperCase();
+        if (selectedChannelFilter === 'MERCADO_LIVRE') return m.includes('MERCADO') || m.includes('MELI');
+        if (selectedChannelFilter === 'SHOPEE') return m.includes('SHOPEE');
+        if (selectedChannelFilter === 'OUTROS') return !m.includes('MERCADO') && !m.includes('MELI') && !m.includes('SHOPEE');
+        return true;
+      });
+    }
+    
     return lista;
-  }, [nfs, canalSel, situacaoSel]);
+  }, [nfs, canalSel, situacaoSel, selectedDayFilter, selectedChannelFilter]);
 
-  // Resumo
+  // Checkbox de seleção total
+  const unimportedVisibleNfs = useMemo(() => {
+    return nfsFiltradas.filter(nf => !clonados.has(String(nf.id)));
+  }, [nfsFiltradas, clonados]);
+
+  const allSelected = useMemo(() => {
+    if (unimportedVisibleNfs.length === 0) return false;
+    return unimportedVisibleNfs.every(nf => selectedIds.has(nf.id));
+  }, [unimportedVisibleNfs, selectedIds]);
+
+  const handleSelectAllToggle = () => {
+    const next = new Set(selectedIds);
+    if (allSelected) {
+      unimportedVisibleNfs.forEach(nf => next.delete(nf.id));
+    } else {
+      unimportedVisibleNfs.forEach(nf => next.add(nf.id));
+    }
+    setSelectedIds(next);
+  };
+
+  const handleSelectToggle = (id) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedIds(next);
+  };
+
+  // Resumo clássico
   const resumo = useMemo(() => {
     const total      = nfs.length;
     const semDanfe   = nfs.filter(n => isSemDanfe(n.situacao)).length;
@@ -680,22 +986,60 @@ export function BlingPedidos() {
     : `${fmtBR(rangeIni)} → ${fmtBR(rangeFim)}`;
 
   return (
-    <div className="text-slate-100 px-4 py-8 max-w-6xl mx-auto overflow-y-auto flex-1">
+    <div className="text-slate-100 px-4 py-8 max-w-6xl mx-auto overflow-y-auto flex-1 relative">
+
+      {/* Glassmorphism Full Loading Blocker */}
+      {loadingNfs && (
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-md transition-all duration-300">
+          <div className="flex flex-col items-center gap-4 p-8 rounded-2xl bg-slate-900 border border-white/10 shadow-2xl relative overflow-hidden">
+            <div className="absolute -top-12 -left-12 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl animate-pulse" />
+            <Loader2 className="w-12 h-12 text-emerald-400 animate-spin" />
+            <p className="text-sm font-semibold text-slate-200 tracking-wide mt-2">{loadingMsg || 'Buscando dados no Bling...'}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Action Bar for Bulk Import */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] bg-slate-900/90 border border-emerald-500/30 rounded-2xl px-6 py-4 shadow-2xl backdrop-blur-lg flex items-center gap-6 min-w-[320px] max-w-md animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="flex flex-col">
+            <span className="text-sm font-black text-white">{selectedIds.size} selecionado(s)</span>
+            <span className="text-[10px] text-slate-400">Pronto para expedir em lote</span>
+          </div>
+          <div className="flex gap-2 ml-auto">
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="px-3 py-1.5 rounded-lg border border-white/10 text-slate-400 hover:text-slate-200 text-xs font-bold transition-colors"
+            >
+              Limpar
+            </button>
+            <button
+              onClick={() => {
+                const toImport = nfs.filter(nf => selectedIds.has(nf.id));
+                executeBulkImport(toImport);
+              }}
+              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
+            >
+              Expedir Lote
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl text-sm font-medium border max-w-sm
+        <div className={`fixed bottom-6 right-6 z-[100] px-4 py-3 rounded-xl shadow-xl text-sm font-medium border max-w-sm
           ${toast.tipo==='ok' ? 'bg-emerald-900/90 border-emerald-600 text-emerald-300' : 'bg-red-900/90 border-red-600 text-red-300'}`}>
           <p>{toast.msg}</p>
           {toast.tipo === 'ok' && (
-            <a href="/pedidos" className="mt-2 flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 font-semibold text-xs underline">
+            <Link to="/pedidos" className="mt-2 flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 font-semibold text-xs underline">
               <ExternalLink size={11}/> Ir para Pedidos do Dia
-            </a>
+            </Link>
           )}
         </div>
       )}
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2">
@@ -705,10 +1049,10 @@ export function BlingPedidos() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <a href="/pedidos"
+          <Link to="/pedidos"
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-slate-400 text-sm hover:text-slate-200 hover:border-white/20 transition-colors">
             <ExternalLink size={13}/> Pedidos do Dia
-          </a>
+          </Link>
 
           {status && (status.authorized ? (
             <>
@@ -727,17 +1071,16 @@ export function BlingPedidos() {
               </button>
             </>
           ) : (
-            <a href="/bling/auth"
+            <Link to="/bling/auth"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm font-medium hover:bg-yellow-500/20 transition-colors">
               <Plug size={14}/> Conectar Bling
-            </a>
+            </Link>
           ))}
         </div>
       </div>
 
       {status && status.active === false ? (
         <div className="flex flex-col items-center justify-center p-12 mt-8 rounded-2xl border border-white/[0.06] bg-slate-900/30 text-center max-w-xl mx-auto shadow-2xl relative overflow-hidden backdrop-blur-md">
-          {/* Glowing pulse aura in background */}
           <div className="absolute -top-24 -left-24 w-48 h-48 bg-red-500/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
           
@@ -765,7 +1108,59 @@ export function BlingPedidos() {
         </div>
       ) : (
         <>
-          {/* ── Filtros ── */}
+          {/* ── Cabeçalho Estatístico Inteligente ── */}
+          {!erro && nfs.length > 0 && (
+            <div className="bg-slate-900/40 border border-white/[0.06] rounded-2xl p-5 mb-5 backdrop-blur-md shadow-xl relative overflow-hidden">
+              <div className="absolute -top-32 -right-32 w-64 h-64 bg-emerald-500/[0.02] rounded-full blur-3xl pointer-events-none" />
+              
+              <h2 className="text-sm font-bold text-slate-200 mb-3 flex items-center gap-2">
+                <ShoppingBag className="text-emerald-400 animate-pulse" size={16} />
+                Comunicação da Expedição
+              </h2>
+              
+              <p className="text-sm text-slate-400 mb-5 leading-relaxed">
+                Olá! Analisando o período selecionado, identificamos notas disponíveis:
+                {groupedByDay.hoje.length > 0 && <span className="block mt-1 text-slate-300">📦 Total de <strong className="text-emerald-400 font-extrabold">{groupedByDay.hoje.length}</strong> pedidos prontos para <strong>Hoje</strong>.</span>}
+                {groupedByDay.amanha.length > 0 && <span className="block mt-1 text-slate-300">🗓️ Total de <strong className="text-blue-400 font-extrabold">{groupedByDay.amanha.length}</strong> pedidos prontos para <strong>Amanhã</strong>.</span>}
+                {groupedByDay.futuros.length > 0 && <span className="block mt-1 text-slate-300">⏳ Outros <strong className="text-purple-400 font-extrabold">{groupedByDay.futuros.length}</strong> pedidos programados para os <strong>dias seguintes</strong>.</span>}
+                {groupedByDay.hoje.length === 0 && groupedByDay.amanha.length === 0 && groupedByDay.futuros.length === 0 && (
+                  <span className="block text-slate-500 mt-1">Nenhuma nota fiscal disponível encontrada.</span>
+                )}
+              </p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {groupedByDay.hoje.length > 0 && (
+                  <DayGroupCard
+                    title="Hoje"
+                    list={groupedByDay.hoje}
+                    color="emerald"
+                    onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.hoje, mkt)}
+                    onFilterClick={(mkt) => handleFilterClick('hoje', mkt)}
+                  />
+                )}
+                {groupedByDay.amanha.length > 0 && (
+                  <DayGroupCard
+                    title="Amanhã"
+                    list={groupedByDay.amanha}
+                    color="blue"
+                    onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.amanha, mkt)}
+                    onFilterClick={(mkt) => handleFilterClick('amanha', mkt)}
+                  />
+                )}
+                {groupedByDay.futuros.length > 0 && (
+                  <DayGroupCard
+                    title="Dias Seguintes"
+                    list={groupedByDay.futuros}
+                    color="purple"
+                    onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.futuros, mkt)}
+                    onFilterClick={(mkt) => handleFilterClick('futuros', mkt)}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Filtros Clássicos ── */}
           <div className="flex flex-col gap-3 mb-5">
 
             {/* Range + refresh */}
@@ -786,8 +1181,13 @@ export function BlingPedidos() {
                   </div>
                 )}
               </div>
-              <button onClick={fetchNFs} disabled={loadingNfs} title="Atualizar"
-                className="p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors">
+              
+              <button 
+                onClick={() => { fetchStatus(); fetchNFs(); }}
+                disabled={loadingNfs} 
+                title="Atualizar"
+                className="p-1.5 rounded-lg bg-slate-800 border border-white/10 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors"
+              >
                 <RefreshCw size={14} className={loadingNfs ? 'animate-spin' : ''}/>
               </button>
             </div>
@@ -814,13 +1214,31 @@ export function BlingPedidos() {
             </div>
           </div>
 
-          {/* ── Resumo ── */}
+          {/* Filtros Inteligentes Ativos */}
+          {(selectedDayFilter !== 'all' || selectedChannelFilter !== 'all') && (
+            <div className="flex items-center gap-2.5 mb-4 bg-slate-900/40 border border-white/5 rounded-xl px-4 py-2 text-xs">
+              <span className="text-slate-500 font-bold">Filtro do Painel:</span>
+              <span className="font-extrabold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg uppercase tracking-wider">
+                {selectedDayFilter !== 'all' ? `Período: ${selectedDayFilter}` : ''}
+                {selectedDayFilter !== 'all' && selectedChannelFilter !== 'all' ? ' + ' : ''}
+                {selectedChannelFilter !== 'all' ? `Canal: ${selectedChannelFilter.replace('_', ' ')}` : ''}
+              </span>
+              <button
+                onClick={() => { setSelectedDayFilter('all'); setSelectedChannelFilter('all'); }}
+                className="text-red-400 hover:text-red-300 hover:underline font-black ml-auto transition-colors"
+              >
+                Limpar Filtro
+              </button>
+            </div>
+          )}
+
+          {/* ── Resumo Clássico ── */}
           {!loadingNfs && !erro && nfs.length > 0 && (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
               <ResumoCard label="Total NFs"    valor={resumo.total}      cor="slate"/>
               <ResumoCard label="Sem DANFE"    valor={resumo.semDanfe}   cor="amber"   sub="Aguardando emissão"/>
               <ResumoCard label="Importadas"   valor={resumo.importadas} cor="emerald" sub="Pedidos criados"/>
-              <ResumoCard label="Pendentes"    valor={resumo.pendentes}  cor={resumo.pendentes > 0 ? 'amber' : 'slate'} sub="Sem DANFE não importadas"/>
+              <ResumoCard label="Pendentes"    valor={resumo.pendentes}  cor={resumo.pendentes > 0 ? 'amber' : 'slate'} sub="Aguardando importação"/>
             </div>
           )}
 
@@ -831,45 +1249,55 @@ export function BlingPedidos() {
             </div>
           )}
 
-          {/* ── Loading ── */}
-          {loadingNfs && (
-            <div className="space-y-2">
-              {[...Array(6)].map((_,i) => <div key={i} className="h-14 rounded-xl bg-slate-800 border border-white/5 animate-pulse"/>)}
-            </div>
-          )}
-
-          {/* ── Lista ── */}
+          {/* ── Lista de Pedidos (Flat) ── */}
           {!loadingNfs && !erro && (
             nfsFiltradas.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <div className="flex flex-col items-center justify-center py-20 gap-3 bg-slate-900/20 border border-white/[0.03] rounded-2xl">
                 <Inbox size={36} className="text-slate-700"/>
                 <p className="text-slate-500 text-sm">
                   {nfs.length === 0
                     ? `Nenhuma NF no período ${fmtBR(rangeIni)} → ${fmtBR(rangeFim)}.`
-                    : 'Nenhuma NF para os filtros selecionados.'}
+                    : 'Nenhuma NF correspondente aos filtros aplicados.'}
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {/* Header da lista */}
-                <div className="hidden sm:grid grid-cols-[4rem_6rem_1fr_7rem_6rem_8rem_2rem] gap-3 px-4 py-1.5 text-[11px] font-medium text-slate-600 uppercase tracking-wider">
-                  <span>NF</span><span>Canal</span><span>Cliente</span>
-                  <span className="text-right">Valor</span><span className="text-right">Data</span>
-                  <span>Situação</span><span/>
+              <div className="space-y-3.5">
+                
+                {/* List Header com Checkbox Geral */}
+                <div className="flex items-center justify-between px-4 py-2 border border-white/[0.04] bg-slate-900/30 rounded-xl text-xs">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={handleSelectAllToggle}
+                      className="w-4.5 h-4.5 rounded border-white/15 bg-slate-950 text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer transition-colors"
+                    />
+                    <span className="font-extrabold text-slate-500 uppercase tracking-wider">Selecionar Todos</span>
+                  </div>
+                  <span className="font-bold text-slate-600">
+                    Exibindo {nfsFiltradas.length} de {nfs.length} Notas
+                  </span>
                 </div>
 
+                {/* Cards de Notas */}
                 {nfsFiltradas.map(nf => (
-                  <NFRow key={nf.id} nf={nf} clonados={clonados}
-                    onClonar={handleClonar} onExpand={handleExpand}
-                    expandido={!!expandidos[nf.id]} detalhe={expandidos[nf.id] || null}
-                    expandindo={expandindo === nf.id}
-                    isFlex={!!flexFlags[nf.id]} onFlexToggle={handleFlexToggle}
-                    clonando={clonando}/>
+                  <NFCard
+                    key={nf.id}
+                    nf={nf}
+                    detalhe={nfeDetails[nf.id] || null}
+                    loadingDetalhe={!!detailsLoading[nf.id]}
+                    clonados={clonados}
+                    onClonar={handleClonar}
+                    isFlex={!!flexFlags[nf.id]}
+                    onFlexToggle={handleFlexToggle}
+                    clonando={clonando}
+                    selected={selectedIds.has(nf.id)}
+                    onSelectToggle={() => handleSelectToggle(nf.id)}
+                  />
                 ))}
 
                 <p className="text-xs text-slate-700 text-center pt-2">
-                  {nfsFiltradas.length} NF{nfsFiltradas.length !== 1 ? 's' : ''} exibida{nfsFiltradas.length !== 1 ? 's' : ''}
-                  {nfsFiltradas.length !== nfs.length ? ` de ${nfs.length}` : ''}
+                  Fim dos pedidos exibidos.
                 </p>
               </div>
             )
