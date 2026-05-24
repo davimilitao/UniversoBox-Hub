@@ -424,7 +424,7 @@ const DayGroupCard = memo(function DayGroupCard({ title, list, color, onBulkImpo
 });
 
 // ─── NF Card Flat (Sem Collapse) ──────────────────────────────────────────────
-const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onClonar, isFlex, onFlexToggle, clonando, selected, onSelectToggle }) {
+const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onClonar, onReload, isFlex, onFlexToggle, clonando, selected, onSelectToggle }) {
   const jaCriado = clonados.has(String(nf.id));
   const eClonar  = clonando === nf.id;
   const cli      = parseCliente(nf.cliente?.nome);
@@ -467,9 +467,17 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
       <div className="flex-1">
         {detalhe ? (
           detalhe.error ? (
-            <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-medium flex items-center gap-1.5">
-              <AlertTriangle size={12} />
-              <span>{detalhe.message}</span>
+            <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-medium flex items-center justify-between gap-1.5">
+              <span className="flex items-center gap-1">
+                <AlertTriangle size={12} />
+                <span>{detalhe.message}</span>
+              </span>
+              <button
+                onClick={onReload}
+                className="px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/35 text-red-300 hover:text-white font-bold transition-colors uppercase text-[9px] shrink-0"
+              >
+                Recarregar
+              </button>
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -696,6 +704,39 @@ export function BlingPedidos() {
           setDetailsLoading(prev => ({ ...prev, [nf.id]: false }));
         }
       }));
+    }
+  }, []);
+
+  const reloadSingleNfeDetails = useCallback(async (nfId) => {
+    setDetailsLoading(prev => ({ ...prev, [nfId]: true }));
+    setNfeDetails(prev => {
+      const next = { ...prev };
+      delete next[nfId];
+      return next;
+    });
+
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`/bling/pedidos/${nfId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.item) {
+        setNfeDetails(prev => ({ ...prev, [nfId]: data.item }));
+      } else {
+        setNfeDetails(prev => ({
+          ...prev,
+          [nfId]: { error: true, message: data.message || 'Nota fiscal não encontrada no Bling.' }
+        }));
+      }
+    } catch (e) {
+      console.error('Error reloading details for NFe:', nfId, e);
+      setNfeDetails(prev => ({
+        ...prev,
+        [nfId]: { error: true, message: 'Erro de conexão ao buscar produtos.' }
+      }));
+    } finally {
+      setDetailsLoading(prev => ({ ...prev, [nfId]: false }));
     }
   }, []);
 
@@ -1327,6 +1368,7 @@ export function BlingPedidos() {
                       loadingDetalhe={!!detailsLoading[nf.id]}
                       clonados={clonados}
                       onClonar={handleClonar}
+                      onReload={() => reloadSingleNfeDetails(nf.id)}
                       isFlex={!!flexFlags[nf.id]}
                       onFlexToggle={handleFlexToggle}
                       clonando={clonando}
