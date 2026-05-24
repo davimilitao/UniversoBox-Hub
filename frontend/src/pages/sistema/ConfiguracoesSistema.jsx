@@ -887,6 +887,127 @@ function LocalPrinterCard() {
   );
 }
 
+// ─── Gemini AI Key Configuration ──────────────────────────────────────────────
+function GeminiConfigCard({ showToast }) {
+  const [loading, setLoading] = useState(true);
+  const [hasKey, setHasKey] = useState(false);
+  const [fromEnv, setFromEnv] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const fetchConfig = async () => {
+    try {
+      const token = await getAuthToken();
+      const res = await fetch('/api/catalogo/config/gemini', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setHasKey(data.hasKey);
+        setFromEnv(data.fromEnv);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchConfig();
+  }, []);
+
+  const handleSave = async () => {
+    if (!apiKey.trim()) {
+      showToast('Insira uma chave válida', 'err');
+      return;
+    }
+    setSaving(true);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch('/api/catalogo/config/gemini', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ apiKey: apiKey.trim() }),
+      });
+      if (res.ok) {
+        showToast('Chave do Gemini salva com sucesso!', 'ok');
+        setHasKey(true);
+        setApiKey('');
+      } else {
+        const err = await res.json();
+        showToast(err.error || 'Erro ao salvar chave', 'err');
+      }
+    } catch (e) {
+      showToast('Erro de rede ao salvar chave', 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SectionCard icon={Key} title="Inteligência Artificial (Google Gemini API)">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-slate-600">Status da API Key</span>
+          {loading ? (
+            <span className="text-[10px] text-slate-500">Carregando...</span>
+          ) : (
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+              fromEnv
+                ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                : hasKey
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                : 'bg-red-500/10 text-red-400 border-red-500/20'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                fromEnv ? 'bg-blue-400' : hasKey ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'
+              }`} />
+              {fromEnv ? 'Configurada (.env)' : hasKey ? 'Configurada (Firestore)' : 'Não configurada'}
+            </span>
+          )}
+        </div>
+
+        {!fromEnv && (
+          <div className="space-y-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Nova API Key do Gemini</label>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder={hasKey ? '••••••••••••••••••••••••••••••••' : 'Insira a chave do Gemini (AI_Za...)'}
+                  className="flex-1 px-3 py-1.5 rounded-xl bg-slate-800 border border-white/[0.07] text-xs text-slate-200 placeholder-slate-700 focus:outline-none focus:border-blue-500/40 transition-all font-mono"
+                />
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !apiKey.trim()}
+                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold transition-all shrink-0"
+                >
+                  {saving ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </div>
+            <p className="text-[9px] text-slate-700 italic">
+              A chave do Gemini é usada para realizar o auto-preenchimento de produtos através da leitura inteligente de arquivos manuais em PDF.
+            </p>
+          </div>
+        )}
+
+        {fromEnv && (
+          <p className="text-[10px] text-slate-500 bg-slate-900/40 p-2.5 rounded-lg border border-white/[0.04]">
+            A chave do Gemini está definida diretamente no arquivo de variáveis de ambiente do servidor (`.env`). Para alterá-la, edite o ambiente de deploy ou o arquivo de configuração correspondente.
+          </p>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: SISTEMA
 // ─────────────────────────────────────────────────────────────────────────────
@@ -939,6 +1060,7 @@ function TabSistema({ showToast }) {
   return (
     <div className="h-full overflow-y-auto p-5 space-y-4 max-w-xl pb-12">
       <LocalPrinterCard />
+      <GeminiConfigCard showToast={showToast} />
 
       {/* Sessão atual */}
       <SectionCard icon={User} title="Sessão atual">
