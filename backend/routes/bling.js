@@ -315,6 +315,31 @@ router.get('/danfe/:id', async (req, res, next) => {
   }
 });
 
+// ── GET /bling/etiqueta/:nfeId ─────────────────────────────────
+router.get('/etiqueta/:nfeId', async (req, res, next) => {
+  const nfeId = req.params.nfeId;
+  try {
+    const token = await blingEnsureToken();
+    const headers = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+    
+    console.log(`[GET /bling/etiqueta/${nfeId}] Consultando etiquetas no Bling`);
+    const resp = await fetch(`${BLING_API_BASE}/logisticas/etiquetas?idsNfes[]=${nfeId}`, { headers });
+    
+    if (!resp.ok) {
+      const text = await resp.text();
+      return res.status(resp.status).json({ error: `Erro Bling Etiquetas: ${resp.status}`, details: text });
+    }
+    
+    const data = await resp.json();
+    res.json(data);
+  } catch (err) {
+    if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    console.error(`[GET /bling/etiqueta/${nfeId}]`, err.message);
+    next(err);
+  }
+});
+
+
 // ── GET /bling/debug/danfe/:id ──────────────────────────────────
 router.get('/debug/danfe/:id', async (req, res, next) => {
   try {

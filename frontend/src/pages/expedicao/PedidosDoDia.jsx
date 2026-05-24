@@ -273,6 +273,82 @@ async function printShippingLabel(mlOrderId, onStatus) {
   throw new Error('Etiqueta não disponível — verifique se o envio está pronto no ML.');
 }
 
+async function printBlingShippingLabel(blingNfId, onStatus) {
+  onStatus?.('Buscando etiqueta no Bling…');
+  const token = localStorage.getItem('expedicao_token') || '';
+  const res = await fetch(`/bling/etiqueta/${encodeURIComponent(blingNfId)}`, {
+    headers: { authorization: `Bearer ${token}`, 'x-terminal-id': TERMINAL_ID },
+  });
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new Error(data.message || data.error || `Erro ${res.status} ao buscar etiqueta no Bling.`);
+  }
+
+  const labelData = Array.isArray(data.data) ? data.data[0] : (data.data || data);
+  if (!labelData) throw new Error('Nenhuma etiqueta encontrada para esta nota fiscal no Bling.');
+
+  let b64pdf = labelData.pdf || null;
+  let zplStr = labelData.zpl || null;
+  let pdfUrl = labelData.link || labelData.url || null;
+
+  onStatus?.('Imprimindo etiqueta via Agente Local…');
+  let agentOk = false;
+  try {
+    const printer = localStorage.getItem('elgin_printer_name') || '';
+    let agentRes;
+    if (zplStr) {
+      agentRes = await fetch('http://localhost:9000/print-zpl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zpl: zplStr, printer }),
+      });
+    } else if (b64pdf || pdfUrl) {
+      agentRes = await fetch('http://localhost:9000/print-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf: b64pdf || pdfUrl, printer }),
+      });
+    }
+    if (agentRes && agentRes.ok) {
+      agentOk = true;
+    } else if (agentRes) {
+      const errData = await agentRes.json().catch(() => ({}));
+      console.warn('[printBlingShippingLabel] Agente local retornou erro:', errData.error);
+    }
+  } catch (err) {
+    console.warn('[printBlingShippingLabel] Falha ao conectar ao Agente Local:', err.message);
+  }
+
+  if (agentOk) return;
+
+  onStatus?.('Abrindo etiqueta no navegador…');
+  if (b64pdf) {
+    const blob = new Blob([Uint8Array.from(atob(b64pdf), c => c.charCodeAt(0))], { type: 'application/pdf' });
+    const url  = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    return;
+  }
+  if (pdfUrl) {
+    window.open(pdfUrl, '_blank');
+    return;
+  }
+  if (zplStr) {
+    onStatus?.('Baixando arquivo ZPL…');
+    const blob = new Blob([zplStr], { type: 'text/plain' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `etiqueta-bling-${blingNfId}.zpl`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return;
+  }
+
+  throw new Error('Formato de etiqueta não reconhecido ou indisponível.');
+}
+
 async function printBinLabel(orderId, item, onStatus) {
   onStatus?.('Gerando etiqueta ZPL…');
   const r = await api(`/orders/${encodeURIComponent(orderId)}/etiqueta-bin`, {
@@ -1221,13 +1297,37 @@ export default function PedidosDoDia() {
     finally { setConfirmando(null); }
   }
 
+  async function triggerAutoPrint(order) {
+    if (!order || !order.blingNfId) {
+      console.log('[triggerAutoPrint] Sem blingNfId para o pedido, pulando impressão automática');
+      return;
+    }
+
+    showToast('Disparando impressões automáticas…', 'info');
+
+    // 1. Imprimir DANFE
+    printDanfe(order.blingNfId, (msg) => console.log(`[DANFE]`, msg))
+      .catch(e => showToast(`Erro ao imprimir DANFE: ${e.message}`, 'err'));
+
+    // 2. Imprimir Etiqueta
+    if (order.marketplace === 'MERCADO_LIVRE' && order.mlOrderId) {
+      printShippingLabel(order.mlOrderId, (msg) => console.log(`[Etiqueta ML]`, msg))
+        .catch(e => showToast(`Erro ao imprimir etiqueta ML: ${e.message}`, 'err'));
+    } else {
+      printBlingShippingLabel(order.blingNfId, (msg) => console.log(`[Etiqueta Bling]`, msg))
+        .catch(e => showToast(`Erro ao imprimir etiqueta Bling: ${e.message}`, 'err'));
+    }
+  }
+
   async function confirmarExpedicao(proximoId) {
     if (!selOrder) return;
+    const orderToPrint = { ...selOrder };
     setConfirmando(selOrder.id);
     try {
       const r = await api(`/orders/${encodeURIComponent(selOrder.id)}/status`, { method:'POST', body: JSON.stringify({ status:'packed' }) });
       if (r?.ok) {
         beep(true); setModalExp(false); await refreshAll();
+        triggerAutoPrint(orderToPrint);
         if (proximoId) { const prox = orders.picked.find(x => x.id === proximoId); if (prox) { selectOrder(prox); showToast(`✓ Expedido! Próximo: ${proximoId}`, 'ok'); } else { setSelOrder(null); showToast('Pedido EXPEDIDO ✅', 'ok'); } }
         else { setSelOrder(null); showToast('🎉 Todos expedidos!', 'ok'); }
       } else if (r) showToast(r.error || 'Falha ao expedir', 'err');
