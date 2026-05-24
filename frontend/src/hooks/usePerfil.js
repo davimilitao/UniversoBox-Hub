@@ -48,11 +48,10 @@ export function usePerfil() {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (cancelled) return;
 
-      const role = getRoleFromStorage();
-      const nome = user?.displayName || user?.email?.split('@')[0] || 'Usuário';
-
       if (!user) {
-        const p = { role, nome, modulos: DEFAULT_MODULOS[role] || DEFAULT_MODULOS.admin, cor: '#10b981', tema: 'dark' };
+        const role = 'operacao';
+        const nome = 'Visitante';
+        const p = { role, nome, modulos: ['index'], cor: '#10b981', tema: 'dark' };
         applyTheme(p.tema);
         setPerfil(p);
         setLoading(false);
@@ -60,9 +59,22 @@ export function usePerfil() {
       }
 
       try {
-        const token = await user.getIdToken(false);
-        const res   = await fetch(`/api/perfis/${role}`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const tokenResult = await user.getIdTokenResult();
+        const role = tokenResult.claims.role || 'operacao';
+        const tenantId = tokenResult.claims.tenantId || '';
+        const nome = user.displayName || user.email?.split('@')[0] || 'Usuário';
+
+        // Sincroniza informações no localStorage
+        localStorage.setItem('expedicao_user', JSON.stringify({
+          uid: user.uid,
+          email: user.email,
+          role,
+          tenantId,
+        }));
+        localStorage.setItem('expedicao_token', tokenResult.token);
+
+        const res = await fetch(`/api/perfis/${role}`, {
+          headers: { Authorization: `Bearer ${tokenResult.token}` },
         });
         if (!res.ok) throw new Error('perfil-fallback');
         const data = await res.json();
@@ -78,7 +90,10 @@ export function usePerfil() {
           applyTheme(p.tema);
           setPerfil(p);
         }
-      } catch {
+      } catch (err) {
+        console.warn('[usePerfil] erro ao carregar perfil do backend, usando fallback local', err);
+        const role = getRoleFromStorage();
+        const nome = user.displayName || user.email?.split('@')[0] || 'Usuário';
         if (!cancelled) {
           const p = {
             role,
