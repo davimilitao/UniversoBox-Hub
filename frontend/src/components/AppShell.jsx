@@ -20,6 +20,7 @@ import {
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Boxes, Lock,
   FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
+  Sparkles,
 } from 'lucide-react';
 
 // ─── Mapa de módulos ──────────────────────────────────────────────────────────

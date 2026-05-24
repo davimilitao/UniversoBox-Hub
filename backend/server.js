@@ -72,9 +72,11 @@ app.get('/dashboard/:tenantId', (req, res) =>
 // Redireciona rotas React para o SPA
 app.get('/financeiro/*', (req, res) => res.redirect('/spa' + req.path));
 app.get('/expedicao/*',  (req, res) => res.redirect('/spa' + req.path));
+app.get('/catalogo/*',   (req, res) => res.redirect('/spa' + req.path));
+app.get('/sistema/*',    (req, res) => res.redirect('/spa' + req.path));
 
 app.use(express.static(PUBLIC_DIR));
-app.get('/', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+app.get('/', (req, res) => res.redirect('/spa/'));
 app.get('/manual', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'manual.html')));
 app.get('/admin', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'admin.html')));
 app.get('/pedidos', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'pedidos.html')));
