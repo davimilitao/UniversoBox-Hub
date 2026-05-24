@@ -10,12 +10,31 @@ import {
   CreditCard, Plus, AlertTriangle, CheckCircle2, Clock,
   Calendar, Loader2, Wallet, X, RotateCcw, Banknote,
   BarChart2, ShieldCheck, RefreshCw, MessageCircle, Copy,
-  Check, ChevronLeft, ChevronRight,
+  Check, ChevronLeft, ChevronRight, AlertCircle,
 } from 'lucide-react';
 import { useCompras, calcParcelas } from '../../hooks/useCompras';
 import { useMeiosPagamento } from '../../hooks/useMeiosPagamento';
 import MeiosPagamento from './components/MeiosPagamento';
 import { isFirebaseClientReady } from '../../firebase';
+
+import { useFinDespesas, computarStatusEfetivo, extrairMesesFin, labelMesAnoTs } from '../../hooks/useFinDespesas';
+import { FiltrosBar } from './components/FiltrosBar';
+import { ResumoCards } from './components/ResumoCards';
+import { GraficoBarras } from './components/GraficoBarras';
+import { GraficoPizza } from './components/GraficoPizza';
+import { FormLancarDespesa } from './components/FormLancarDespesa';
+import { TabelaDespesas } from './components/TabelaDespesas';
+import { apiFetch } from '../../utils/getAuthToken';
+
+function checkAdmin() {
+  try {
+    const user = localStorage.getItem('expedicao_user');
+    if (!user) return false;
+    return JSON.parse(user).role === 'admin';
+  } catch {
+    return false;
+  }
+}
 
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -495,10 +514,107 @@ function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Contas() {
-  const [aba, setAba] = useState('vencimentos');
+  const [aba, setAba] = useState('despesas');
   const { parcelas, loading, saving, lancarCompra, marcarPago, desfazerPagamento, getResumo, reload } = useCompras();
   const { meios, loading: loadingMeios } = useMeiosPagamento();
   const resumo = getResumo();
+
+  // ─── Dados de Despesas Operacionais (fin_despesas)
+  const { despesas, loading: loadingDesp, error: errorDesp } = useFinDespesas();
+  const [salvando, setSalvando] = useState(false);
+  const [formAberto, setFormAberto] = useState(false);
+  const [mostrarCharts, setMostrarCharts] = useState(false);
+
+  // Filtros (aba Despesas)
+  const [mesAtivo,       setMesAtivo]       = useState('');
+  const [categoriaAtiva, setCategoriaAtiva] = useState('all');
+  const [statusAtivo,    setStatusAtivo]    = useState('all');
+  const [rangeInicio,    setRangeInicio]    = useState(null);
+  const [rangeFim,       setRangeFim]       = useState(null);
+
+  // Computa status efetivo e processa despesas
+  const despesasComStatus = useMemo(() => {
+    if (!despesas) return [];
+    return despesas.map(d => ({ ...d, statusEfetivo: computarStatusEfetivo(d) }));
+  }, [despesas]);
+
+  const meses = useMemo(() => extrairMesesFin(despesasComStatus), [despesasComStatus]);
+  const categorias = useMemo(() => {
+    const set = new Set(despesasComStatus.map(d => d.categoria).filter(Boolean));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [despesasComStatus]);
+
+  const labelMesAtual = useMemo(() => {
+    const hoje = new Date();
+    return `${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
+  }, []);
+
+  const mesEfetivo = mesAtivo || meses.find(m => m.label === labelMesAtual)?.label || meses[0]?.label || '';
+
+  // Filtro de data range ou mês
+  const despesasFiltradas = useMemo(() => {
+    return despesasComStatus.filter(d => {
+      // Categoria
+      if (categoriaAtiva !== 'all' && d.categoria !== categoriaAtiva) return false;
+      // Status
+      if (statusAtivo !== 'all' && d.statusEfetivo !== statusAtivo) return false;
+
+      // Se há range de data ativo, filtra pelo range (timestamp)
+      if (rangeInicio && rangeFim) {
+        return d.timestamp >= rangeInicio && d.timestamp <= rangeFim;
+      }
+      // Caso contrário, filtra pelo mês efetivo
+      if (mesEfetivo) {
+        return labelMesAnoTs(d.timestamp) === mesEfetivo;
+      }
+      return true;
+    });
+  }, [despesasComStatus, categoriaAtiva, statusAtivo, rangeInicio, rangeFim, mesEfetivo]);
+
+  const despesasMes = useMemo(() => {
+    if (!mesEfetivo) return despesasComStatus;
+    return despesasComStatus.filter(d => labelMesAnoTs(d.timestamp) === mesEfetivo);
+  }, [despesasComStatus, mesEfetivo]);
+
+  // Handlers para salvar/toggle/deletar despesas
+  async function handleSalvarDespesa(payload) {
+    setSalvando(true);
+    try {
+      const res = await apiFetch('/api/fin-despesas', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setFormAberto(false);
+    } catch (err) {
+      alert(`Erro ao lançar despesa: ${err.message}`);
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function handleToggleStatusDespesa(id, novaSituacao) {
+    try {
+      const res = await apiFetch(`/api/fin-despesas/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ situacao: novaSituacao }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (err) {
+      alert(`Erro ao atualizar status: ${err.message}`);
+    }
+  }
+
+  async function handleDeleteDespesa(id) {
+    try {
+      const res = await apiFetch(`/api/fin-despesas/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (err) {
+      alert(`Erro ao excluir despesa: ${err.message}`);
+    }
+  }
+
+  const isAdmin = useMemo(() => checkAdmin(), []);
 
   if (!isFirebaseClientReady()) {
     return (
@@ -524,7 +640,8 @@ export default function Contas() {
   }
 
   const ABAS = [
-    { id: 'vencimentos', label: 'Vencimentos',  badge: resumo.vencidas.items.length || null },
+    { id: 'despesas',    label: 'Despesas',     badge: null },
+    { id: 'vencimentos', label: 'Contas a Pagar',  badge: resumo.vencidas.items.length || null },
     { id: 'nova',        label: 'Nova Compra',  badge: null },
     { id: 'cartoes',     label: 'Cartões',       badge: meios.length || null },
   ];
@@ -538,9 +655,9 @@ export default function Contas() {
               <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
                 <Wallet size={15} className="text-emerald-400" />
               </div>
-              <h1 className="text-lg font-black text-white">Contas a Pagar</h1>
+              <h1 className="text-lg font-black text-white">Despesas</h1>
             </div>
-            <p className="text-xs text-slate-600 mt-0.5 ml-10">Compras de mercadoria · parcelamento inteligente · fluxo de caixa</p>
+            <p className="text-xs text-slate-600 mt-0.5 ml-10">Lançamentos de despesas · compras de mercadoria · fluxo de caixa</p>
           </div>
           {aba === 'vencimentos' && (
             <div className="text-right">
@@ -565,6 +682,84 @@ export default function Contas() {
             </button>
           ))}
         </div>
+
+        {aba === 'despesas' && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setFormAberto(v => !v)}
+                className={[
+                  'flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold border transition-all',
+                  formAberto
+                    ? 'bg-emerald-600 border-emerald-500 text-white'
+                    : 'bg-emerald-600/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-600 hover:border-emerald-500 hover:text-white',
+                ].join(' ')}
+              >
+                <Plus size={14} /> {formAberto ? 'Cancelar' : 'Lançar Despesa'}
+              </button>
+              {despesasComStatus.length > 0 && (
+                <button
+                  onClick={() => setMostrarCharts(v => !v)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-white/[0.08] text-slate-500 hover:text-slate-300 hover:border-white/20 transition-all"
+                >
+                  <BarChart2 size={12} /> {mostrarCharts ? 'Ocultar análises' : 'Ver análises'}
+                </button>
+              )}
+            </div>
+
+            {formAberto && (
+              <div className="rounded-xl bg-slate-900 border border-emerald-500/20 p-5">
+                <FormLancarDespesa
+                  categorias={categorias}
+                  onSalvar={handleSalvarDespesa}
+                  salvando={salvando}
+                />
+              </div>
+            )}
+
+            <FiltrosBar
+              meses={meses}
+              mesAtivo={mesEfetivo}
+              onMes={setMesAtivo}
+              categorias={categorias}
+              categoriaAtiva={categoriaAtiva}
+              onCategoria={setCategoriaAtiva}
+              statusAtivo={statusAtivo}
+              onStatus={setStatusAtivo}
+              onRangeChange={(inicio, fim) => {
+                setRangeInicio(inicio);
+                setRangeFim(fim);
+              }}
+            />
+
+            <ResumoCards despesasMes={despesasMes} />
+
+            {mostrarCharts && despesasComStatus.length > 0 && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <GraficoBarras despesas={despesasComStatus} />
+                <GraficoPizza despesasMes={despesasMes} />
+              </div>
+            )}
+
+            {loadingDesp ? (
+              <div className="flex items-center justify-center py-16 gap-2 text-slate-600">
+                <Loader2 size={20} className="animate-spin" /> Carregando despesas…
+              </div>
+            ) : errorDesp ? (
+              <div className="flex items-center gap-3 text-red-400 p-4 border border-red-500/20 rounded-xl bg-red-500/5">
+                <AlertCircle size={20} />
+                <p className="text-sm">Erro ao carregar despesas: {errorDesp}</p>
+              </div>
+            ) : (
+              <TabelaDespesas
+                despesas={despesasFiltradas}
+                isAdmin={isAdmin}
+                onToggleStatus={handleToggleStatusDespesa}
+                onDelete={handleDeleteDespesa}
+              />
+            )}
+          </div>
+        )}
 
         {aba === 'vencimentos' && (
           <PainelVencimentos parcelas={parcelas} loading={loading} marcarPago={marcarPago}

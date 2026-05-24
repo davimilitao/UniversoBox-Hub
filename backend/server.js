@@ -61,7 +61,13 @@ setupTenantProvisioningRoutes(app, db);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SPA_DIR = path.join(PUBLIC_DIR, 'spa');
 // SPA React — serve os assets buildados
-app.use('/spa', express.static(SPA_DIR));
+app.use('/spa', express.static(SPA_DIR, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    }
+  }
+}));
 
 app.get('/spa/*', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
@@ -78,7 +84,13 @@ app.get('/expedicao/*',  (req, res) => res.redirect('/spa' + req.path));
 app.get('/catalogo/*',   (req, res) => res.redirect('/spa' + req.path));
 app.get('/sistema/*',    (req, res) => res.redirect('/spa' + req.path));
 
-app.use(express.static(PUBLIC_DIR));
+app.use(express.static(PUBLIC_DIR, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    }
+  }
+}));
 app.get('/', (req, res) => res.redirect('/spa/'));
 app.get('/manual', (req, res) => res.redirect('/spa/expedicao/pedidos'));
 app.get('/admin', (req, res) => res.redirect('/spa/catalogo/admin'));

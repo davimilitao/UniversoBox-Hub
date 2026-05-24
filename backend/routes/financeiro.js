@@ -1,6 +1,6 @@
 const express = require('express');
 const router  = express.Router();
-const { db }  = require('../config/firebase');
+const { admin, db }  = require('../config/firebase');
 const { requireFirebaseAuth } = require('../middleware/requireFirebaseAuth');
 const { v4: uuidv4 } = require('uuid');
 
@@ -108,6 +108,232 @@ router.get('/compras/bi', async (req, res, next) => {
     res.json({ orders, receipts, transits });
   } catch (err) {
     console.error('[GET /api/compras/bi]', err);
+    next(err);
+  }
+});
+
+// ─── DESPESAS (coleção fin_despesas no Firestore) ─────────────────────────────
+
+// POST /fin-despesas — lança despesa no Firestore
+router.post('/fin-despesas', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { uid, tenantId } = req.auth;
+    const {
+      data, tipo, categoria, fornecedor, descricao, valor, situacao, meioId, comprovante
+    } = req.body;
+
+    if (!data) return res.status(400).json({ error: 'Data obrigatória' });
+    if (!valor || valor <= 0) return res.status(400).json({ error: 'Valor inválido' });
+
+    const docId = `DESP_${yyyymmdd()}_${uuidv4().slice(0, 6).toUpperCase()}`;
+
+    // Converte data "YYYY-MM-DD" ou "DD/MM/YYYY" para Date
+    let dataAlvo;
+    if (String(data).includes('/')) {
+      const [d, m, y] = String(data).split('/');
+      dataAlvo = new Date(Number(y), Number(m) - 1, Number(d));
+    } else {
+      dataAlvo = new Date(data);
+    }
+    dataAlvo.setHours(12, 0, 0, 0); // evita fuso horário
+
+    const payload = {
+      id: docId,
+      uid,
+      tenantId:  tenantId || null,
+      data:      admin.firestore.Timestamp.fromDate(dataAlvo),
+      tipo:      tipo || 'operacional',
+      categoria: categoria || '',
+      fornecedor: fornecedor || '',
+      descricao: descricao || '',
+      valor:     Number(valor),
+      situacao:  situacao || 'pendente',
+      meioId:    meioId || null,
+      comprovante: comprovante || null,
+      createdAt: new Date(),
+    };
+
+    await db.collection('fin_despesas').doc(docId).set(payload);
+    res.json({ ok: true, id: docId });
+  } catch (err) {
+    console.error('[POST /api/fin-despesas]', err);
+    next(err);
+  }
+});
+
+// GET /fin-despesas — lista despesas do Firestore
+router.get('/fin-despesas', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const snap = await db.collection('fin_despesas')
+      .where('tenantId', '==', tenantId)
+      .orderBy('data', 'desc')
+      .limit(200)
+      .get();
+
+    const items = snap.docs.map(doc => {
+      const d = doc.data();
+      const dateObj = d.data?.toDate ? d.data.toDate() : new Date(d.data);
+      const diaStr = dateObj.toLocaleDateString('pt-BR');
+      return {
+        id:         doc.id,
+        data:       diaStr,
+        timestamp:  dateObj.getTime(),
+        tipo:       d.tipo || 'operacional',
+        categoria:  d.categoria || '',
+        nome:       d.categoria || '', // Categoria é mapeada para "nome" no frontend
+        fornecedor: d.fornecedor || '',
+        descricao:  d.descricao || '',
+        valor:      d.valor || 0,
+        situacao:   d.situacao || 'pendente',
+        meioId:     d.meioId || null,
+        comprovante: d.comprovante || null,
+      };
+    });
+
+    res.json({ items });
+  } catch (err) {
+    console.error('[GET /api/fin-despesas]', err);
+    next(err);
+  }
+});
+
+// PATCH /fin-despesas/:id — atualiza situação (pago/pendente)
+router.patch('/fin-despesas/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { situacao } = req.body;
+    const situacaoLower = String(situacao).toLowerCase();
+    if (!['pago', 'pendente'].includes(situacaoLower)) {
+      return res.status(400).json({ error: 'Situação inválida' });
+    }
+
+    await db.collection('fin_despesas').doc(id).update({
+      situacao: situacaoLower,
+      updatedAt: new Date(),
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[PATCH /api/fin-despesas/:id]', err);
+    next(err);
+  }
+});
+
+// DELETE /fin-despesas/:id — admin sempre; owner nas primeiras 24h
+router.delete('/fin-despesas/:id', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { uid, role } = req.auth;
+    const ref = db.collection('fin_despesas').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: 'Despesa não encontrada' });
+    const data = snap.data();
+    const isAdmin = role === 'admin';
+    const isOwner = data.uid === uid;
+    const createdMs = data.createdAt?.toMillis?.() ?? (data.createdAt ? new Date(data.createdAt).getTime() : 0);
+    const dentro24h = Date.now() - createdMs < 86400000;
+    if (!isAdmin && !(isOwner && dentro24h)) {
+      return res.status(403).json({ error: 'Sem permissão para excluir este lançamento' });
+    }
+    await ref.delete();
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/fin-despesas/:id]', err);
+    next(err);
+  }
+});
+
+// GET /fin-contas-unificadas — lista unificada fin_despesas + fin_parcelas
+router.get('/fin-contas-unificadas', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const { mes } = req.query; // YYYY-MM
+
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+
+    function statusItem(vencDate, situacao) {
+      if (situacao === 'pago') return 'pago';
+      const dias = Math.round((vencDate - hoje) / 86400000);
+      return dias < 0 ? 'vencida' : 'pendente';
+    }
+
+    function mesDeData(d) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    const [despSnap, parcSnap] = await Promise.all([
+      db.collection('fin_despesas').where('tenantId', '==', tenantId).get(),
+      db.collection('fin_parcelas').where('tenantId', '==', tenantId).get(),
+    ]);
+
+    const items = [];
+
+    despSnap.forEach(doc => {
+      const d = doc.data();
+      if (d.tipo === 'investimento') return; // coberto por fin_parcelas
+      const venc = d.data?.toDate?.() ?? (d.data ? new Date(d.data) : null);
+      if (!venc) return;
+      if (mes && mesDeData(venc) !== mes) return;
+      const status = statusItem(venc, d.situacao);
+      items.push({
+        id: doc.id, origem: 'despesa',
+        fornecedor: d.fornecedor || d.categoria || '',
+        descricao: d.descricao || '',
+        tipo: d.tipo || 'operacional',
+        categoria: d.categoria || '',
+        valor: Number(d.valor || 0),
+        vencimento: venc.toISOString(),
+        status,
+        diasParaVencer: Math.round((venc - hoje) / 86400000),
+      });
+    });
+
+    parcSnap.forEach(doc => {
+      const d = doc.data();
+      const venc = d.vencimento?.toDate?.() ?? (d.vencimento ? new Date(d.vencimento) : null);
+      if (!venc) return;
+      if (mes && mesDeData(venc) !== mes) return;
+      const status = statusItem(venc, d.status);
+      const parc = d.totalParcelas > 1 ? ` (${d.numeroParcela}/${d.totalParcelas}x)` : '';
+      items.push({
+        id: doc.id, origem: 'parcela',
+        fornecedor: d.fornecedor || '',
+        descricao: `${d.descricao || d.fornecedor || ''}${parc}`,
+        tipo: 'investimento',
+        categoria: d.meioNome || 'Parcela',
+        valor: Number(d.valor || 0),
+        vencimento: venc.toISOString(),
+        status,
+        diasParaVencer: Math.round((venc - hoje) / 86400000),
+        compraId: d.compraId || null,
+        numeroParcela: d.numeroParcela,
+        totalParcelas: d.totalParcelas,
+        meioNome: d.meioNome || '',
+      });
+    });
+
+    // vencida(0) -> pendente(1) -> pago(2)
+    const rank = s => s === 'vencida' ? 0 : s === 'pendente' ? 1 : 2;
+    items.sort((a, b) => {
+      const dr = rank(a.status) - rank(b.status);
+      return dr !== 0 ? dr : a.diasParaVencer - b.diasParaVencer;
+    });
+
+    const soma = filterFn => items.filter(filterFn).reduce((s, i) => s + i.valor, 0);
+
+    res.json({
+      ok: true,
+      items,
+      totais: {
+        total:    soma(() => true),
+        vencida:  soma(i => i.status === 'vencida'),
+        pendente: soma(i => i.status === 'pendente'),
+        pago:     soma(i => i.status === 'pago'),
+      }
+    });
+  } catch (err) {
+    console.error('[GET /api/fin-contas-unificadas]', err);
     next(err);
   }
 });

@@ -10,7 +10,7 @@ import {
   Search, Loader2, Save, CheckCircle, AlertCircle,
   ArrowLeft, Package, Tag, Hash, Truck, Image as ImageIcon,
   RefreshCw, ExternalLink, Plus, Sparkles, BarChart2,
-  Upload,
+  Upload, X,
 } from 'lucide-react';
 import { getAuthToken } from '../../utils/getAuthToken';
 
