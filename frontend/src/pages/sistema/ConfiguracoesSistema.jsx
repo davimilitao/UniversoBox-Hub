@@ -49,6 +49,7 @@ const TEMAS = [
   { id: '99',     label: '99',           dot: '#090800', accent: '#FFD100', desc: 'Amarelo táxi, urbano',     emoji: '🟡' },
   { id: 'marvel', label: 'Marvel',       dot: '#0d0508', accent: '#ED1D24', desc: 'Vermelho + ouro, épico',   emoji: '⚡' },
   { id: 'rick',   label: 'Rick & Morty', dot: '#06080f', accent: '#6FD08C', desc: 'Portal verde, interestelar', emoji: '🌀' },
+  { id: 'clean',  label: 'Clean Light',  dot: '#ffffff', accent: '#2563eb', desc: 'Tema claro, minimalista e limpo', emoji: '☀️' },
 ];
 
 const ROLE_COLORS = {

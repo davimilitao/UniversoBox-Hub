@@ -275,6 +275,9 @@ router.get('/pedidos/:id', async (req, res, next) => {
     res.json({ item });
   } catch(err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    if (err.message && err.message.includes('404')) {
+      return res.status(404).json({ error: 'nfe_not_found', message: 'Nota fiscal não encontrada no Bling.' });
+    }
     console.error('[GET /bling/pedidos/:id]', err);
     next(err);
   }
