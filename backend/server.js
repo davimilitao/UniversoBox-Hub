@@ -63,7 +63,10 @@ const SPA_DIR = path.join(PUBLIC_DIR, 'spa');
 // SPA React — serve os assets buildados
 app.use('/spa', express.static(SPA_DIR));
 
-app.get('/spa/*', (req, res) => res.sendFile(path.join(SPA_DIR, 'index.html')));
+app.get('/spa/*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.sendFile(path.join(SPA_DIR, 'index.html'));
+});
 
 app.get('/login', (req, res) => res.redirect('/spa/login'));
 app.get('/dashboard/:tenantId', (req, res) =>
