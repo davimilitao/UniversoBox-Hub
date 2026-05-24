@@ -111,8 +111,19 @@ export function LoginPage() {
       await user.getIdToken(true);
 
       const fresh = await user.getIdToken();
+      const idTokenResult = await user.getIdTokenResult();
+      const role = idTokenResult.claims.role || 'operacao';
+      const userTenantId = idTokenResult.claims.tenantId || tenantId;
+
       try {
         localStorage.setItem('firebase_id_token', fresh);
+        localStorage.setItem('expedicao_token', fresh);
+        localStorage.setItem('expedicao_user', JSON.stringify({
+          uid: user.uid,
+          email: user.email,
+          role,
+          tenantId: userTenantId,
+        }));
       } catch (_) {
         /* ignore quota */
       }

@@ -41,6 +41,13 @@ router.get('/perfis/:role', requireFirebaseAuth, async (req, res, next) => {
   try {
     const { role } = req.params;
     const tenantId = req.auth.tenantId;
+    const userRole = req.auth.role;
+
+    // Segurança: Não-admin só pode carregar as configurações do seu próprio perfil
+    if (userRole !== 'admin' && userRole !== role) {
+      return res.status(403).json({ error: 'Acesso negado ao perfil solicitado' });
+    }
+
     const doc = await db.collection('perfis').doc(`${tenantId}_${role}`).get();
     if (doc.exists) {
       res.json(doc.data());
