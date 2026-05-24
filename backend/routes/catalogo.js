@@ -291,7 +291,12 @@ router.put('/produto/:id', async (req, res) => {
     });
     res.json({ ok: true });
   } catch (e) {
-    const msg = e.response?.data?.error?.message || e.message;
+    if (e.response?.data) {
+      console.error('[PUT /produto/:id] Bling error details:', JSON.stringify(e.response.data, null, 2));
+    }
+    const fields = e.response?.data?.error?.fields;
+    const detail = fields ? fields.map(f => `${f.element}: ${f.msg}`).join(' | ') : null;
+    const msg = detail ? `${e.response.data.error.message} (${detail})` : (e.response?.data?.error?.message || e.message);
     console.error('[PUT /produto/:id]', msg);
     res.status(500).json({ error: msg });
   }
@@ -309,7 +314,12 @@ router.post('/criar-produto', async (req, res) => {
     });
     res.json({ id: data?.data?.id, ok: true });
   } catch (e) {
-    const msg = e.response?.data?.error?.message || e.message;
+    if (e.response?.data) {
+      console.error('[POST /criar-produto] Bling error details:', JSON.stringify(e.response.data, null, 2));
+    }
+    const fields = e.response?.data?.error?.fields;
+    const detail = fields ? fields.map(f => `${f.element}: ${f.msg}`).join(' | ') : null;
+    const msg = detail ? `${e.response.data.error.message} (${detail})` : (e.response?.data?.error?.message || e.message);
     console.error('[POST /criar-produto]', msg);
     res.status(500).json({ error: msg });
   }
