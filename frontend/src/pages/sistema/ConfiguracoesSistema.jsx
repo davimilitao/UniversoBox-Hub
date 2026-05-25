@@ -466,7 +466,7 @@ function TabPerfis({ showToast }) {
                         ? 'border-blue-500/30 text-blue-300'
                         : 'border-white/[0.06] text-slate-500 hover:border-slate-600 hover:text-slate-300',
                     ].join(' ')}
-                    style={draft.tema === t.id ? { background: `${t.dot}cc` } : { background: 'rgba(30,41,59,0.5)' }}
+                    style={draft.tema === t.id ? { background: `${t.dot}cc` } : { background: 'var(--bg-card)' }}
                   >
                     {/* Color swatch */}
                     <div className="flex -space-x-1 shrink-0">
