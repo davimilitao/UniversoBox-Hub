@@ -648,7 +648,7 @@ export default function Contas() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-5xl mx-auto px-4 py-6 space-y-5">
+      <div className="w-full px-4 py-6 space-y-5">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <div className="flex items-center gap-2">

@@ -216,7 +216,7 @@ function TabPerfis({ showToast }) {
   async function loadPerfis() {
     setLoading(true);
     try {
-      const d = await fetch('/api/perfis').then(r => r.json());
+      const d = await apiFetch('/api/perfis');
       const list = (d.perfis || []).sort((a, b) =>
         a.id === 'admin' ? -1 : b.id === 'admin' ? 1 : a.nome.localeCompare(b.nome)
       );
@@ -570,7 +570,7 @@ function TabUsuarios({ showToast }) {
     try {
       const [u, p] = await Promise.all([
         apiFetch('/api/users'),
-        fetch('/api/perfis').then(r => r.json()),
+        apiFetch('/api/perfis'),
       ]);
       const userList = u.users || [];
       setUsers(userList);
