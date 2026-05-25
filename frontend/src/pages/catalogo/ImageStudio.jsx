@@ -139,7 +139,7 @@ function Sidebar({ q, setQ, buscar, buscando, searchErr, produto }) {
 function ImageCard({ url, idx, onEdit, onRemove }) {
   return (
     <div className="group relative aspect-square rounded-xl overflow-hidden border border-white/[0.07]"
-      style={{ background: '#0f172a' }}>
+      style={{ background: 'var(--bg-surface, #0f172a)' }}>
       <img
         src={url}
         alt={`Foto ${idx + 1}`}
