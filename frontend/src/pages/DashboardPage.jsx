@@ -671,7 +671,7 @@ export function DashboardPage() {
 
   return (
     <div className="h-full overflow-y-auto scrollbar-none">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+      <div className="w-full px-4 sm:px-6 py-6 space-y-5">
 
         {/* ── Top Header ── */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -757,7 +757,7 @@ export function DashboardPage() {
               <div className="bg-slate-900/50 border border-white/[0.05] rounded-2xl p-4 h-[160px] flex flex-col justify-between">
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Resumo Operacional (Fila do Dia)</p>
                 <div className="flex-1 min-h-0">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                     <BarChart data={chartData} margin={{ top: 0, right: 10, left: -25, bottom: 0 }}>
                       <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} />
                       <YAxis stroke="#64748b" fontSize={10} tickLine={false} allowDecimals={false} />

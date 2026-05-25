@@ -659,7 +659,7 @@ export function BlingPedidos() {
     return () => unsub();
   }, [fetchStatus]);
 
-  // Fila de preloading assíncrono e concorrente (max 4 requests paralelos)
+  // Fila de preloading assíncrono sequencial (respeita o rate limit do Bling de 3-5 req/s)
   const preloadDetails = useCallback(async (list) => {
     const toLoad = list.filter(nf => {
       const sit = (nf.situacao || '').toLowerCase();
@@ -672,38 +672,37 @@ export function BlingPedidos() {
     // Adiciona imediatamente ao Set para evitar duplicidade de chamadas disparadas por re-renders
     toLoad.forEach(nf => loadedIdsRef.current.add(nf.id));
 
-    const chunks = [];
-    for (let i = 0; i < toLoad.length; i += 4) {
-      chunks.push(toLoad.slice(i, i + 4));
-    }
-
-    for (const chunk of chunks) {
-      await Promise.all(chunk.map(async (nf) => {
-        setDetailsLoading(prev => ({ ...prev, [nf.id]: true }));
-        try {
-          const token = await getAuthToken();
-          const res = await fetch(`/bling/pedidos/${nf.id}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          const data = await res.json();
-          if (res.ok && data.item) {
-            setNfeDetails(prev => ({ ...prev, [nf.id]: data.item }));
-          } else {
-            setNfeDetails(prev => ({
-              ...prev,
-              [nf.id]: { error: true, message: data.message || 'Nota fiscal não encontrada no Bling.' }
-            }));
-          }
-        } catch (e) {
-          console.error('Error preloading details for NFe:', nf.id, e);
+    for (let i = 0; i < toLoad.length; i++) {
+      const nf = toLoad[i];
+      setDetailsLoading(prev => ({ ...prev, [nf.id]: true }));
+      try {
+        const token = await getAuthToken();
+        const res = await fetch(`/bling/pedidos/${nf.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (res.ok && data.item) {
+          setNfeDetails(prev => ({ ...prev, [nf.id]: data.item }));
+        } else {
           setNfeDetails(prev => ({
             ...prev,
-            [nf.id]: { error: true, message: 'Erro de conexão ao buscar produtos.' }
+            [nf.id]: { error: true, message: data.message || 'Nota fiscal não encontrada no Bling.' }
           }));
-        } finally {
-          setDetailsLoading(prev => ({ ...prev, [nf.id]: false }));
         }
-      }));
+      } catch (e) {
+        console.error('Error preloading details for NFe:', nf.id, e);
+        setNfeDetails(prev => ({
+          ...prev,
+          [nf.id]: { error: true, message: 'Erro de conexão ao buscar produtos.' }
+        }));
+      } finally {
+        setDetailsLoading(prev => ({ ...prev, [nf.id]: false }));
+      }
+
+      // Pequeno atraso de 200ms entre as requisições para evitar rate limit (429) do Bling
+      if (i < toLoad.length - 1) {
+        await new Promise(r => setTimeout(r, 200));
+      }
     }
   }, []);
 
@@ -855,6 +854,11 @@ export function BlingPedidos() {
           }
         } catch (e) {
           console.error('Falha ao obter detalhe na importação em lote', nf.id, e);
+        }
+
+        // Atraso de 200ms para evitar rate limit (429) do Bling
+        if (i < pendentes.length - 1) {
+          await new Promise(r => setTimeout(r, 200));
         }
       }
 
@@ -1049,7 +1053,7 @@ export function BlingPedidos() {
     : `${fmtBR(rangeIni)} → ${fmtBR(rangeFim)}`;
 
   return (
-    <div className="text-slate-100 px-2 py-3 md:px-4 md:py-6 w-full max-w-[1600px] mx-auto overflow-y-auto flex-1 relative">
+    <div className="text-slate-100 px-2 py-3 md:px-4 md:py-6 w-full overflow-y-auto flex-1 relative">
 
       {/* Glassmorphism Full Loading Blocker */}
       {loadingNfs && (

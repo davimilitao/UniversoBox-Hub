@@ -236,8 +236,13 @@ router.get('/pedidos', async (req, res, next) => {
     res.json({ items, total: items.length, dataInicio, dataFim });
   } catch(err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
+    const match = err.message && err.message.match(/Bling (\d+):/);
+    if (match) {
+      const status = parseInt(match[1], 10);
+      return res.status(status).json({ error: `bling_error_${status}`, message: err.message });
+    }
     console.error('[GET /bling/pedidos]', err);
-    next(err);
+    res.status(500).json({ error: 'internal_server_error', message: err.message || 'Erro interno ao listar pedidos do Bling.' });
   }
 });
 
@@ -275,11 +280,19 @@ router.get('/pedidos/:id', async (req, res, next) => {
     res.json({ item });
   } catch(err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
-    if (err.message && err.message.includes('404')) {
-      return res.status(404).json({ error: 'nfe_not_found', message: 'Nota fiscal não encontrada no Bling.' });
+    const match = err.message && err.message.match(/Bling (\d+):/);
+    if (match) {
+      const status = parseInt(match[1], 10);
+      if (status === 404) {
+        return res.status(404).json({ error: 'nfe_not_found', message: 'Nota fiscal não encontrada no Bling.' });
+      }
+      if (status === 429) {
+        return res.status(429).json({ error: 'bling_rate_limit', message: 'Limite de requisições do Bling excedido. Tente novamente em instantes.' });
+      }
+      return res.status(status).json({ error: `bling_error_${status}`, message: err.message });
     }
     console.error('[GET /bling/pedidos/:id]', err);
-    next(err);
+    res.status(500).json({ error: 'internal_server_error', message: err.message || 'Erro ao carregar detalhes do pedido no Bling.' });
   }
 });
 

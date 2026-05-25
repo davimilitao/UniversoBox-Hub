@@ -92,6 +92,14 @@ app.use(express.static(PUBLIC_DIR, {
     }
   }
 }));
+app.get('/favicon.ico', (req, res) => {
+  const favPath = path.join(SPA_DIR, 'icon-192.svg');
+  if (fs.existsSync(favPath)) {
+    res.setHeader('Content-Type', 'image/svg+xml');
+    return res.sendFile(favPath);
+  }
+  res.status(204).end();
+});
 app.get('/', (req, res) => res.redirect('/spa/'));
 app.get('/manual', (req, res) => res.redirect('/spa/expedicao/pedidos'));
 app.get('/admin', (req, res) => res.redirect('/spa/catalogo/admin'));

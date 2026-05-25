@@ -382,7 +382,7 @@ export default function BatchImageStudio() {
       </div>
 
       {/* ── Main Area ── */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-7xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 w-full">
         
         {/* ── Dropzone Area ── */}
         <div

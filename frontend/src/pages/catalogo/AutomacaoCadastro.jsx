@@ -499,7 +499,7 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
 
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 space-y-4">
+    <div className="w-full px-4 py-6 space-y-4">
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
