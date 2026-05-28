@@ -4,10 +4,9 @@
  * @version 3.0.0
  */
 
-import { useState, useMemo } from 'react';
 import {
   ArrowUp, ArrowDown, CheckCircle2, Clock, Trash2, Inbox,
-  MessageCircle, Copy, X, Check, Loader2,
+  MessageCircle, Copy, X, Check, Loader2, Edit,
 } from 'lucide-react';
 
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -21,7 +20,9 @@ function fmtWhats(despesas) {
   return `*Despesas selecionadas*\n${linhas.join('\n')}\n\n*Total: ${BRL.format(total)}*`;
 }
 
-export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) {
+import { useState, useMemo } from 'react';
+
+export function TabelaDespesas({ despesas, isAdmin, onDelete, onDeleteCompra, onToggleStatus, onEdit }) {
   const [ordem,        setOrdem]        = useState('desc');
   const [deletando,    setDeletando]    = useState(null);
   const [toggling,     setToggling]     = useState(null);
@@ -71,19 +72,26 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
     setTimeout(() => setCopiado(false), 2000);
   }
 
-  async function handleToggle(id, situacaoAtual) {
+  async function handleToggle(id, situacaoAtual, origem) {
     if (!onToggleStatus) return;
     const nova = situacaoAtual?.toLowerCase().includes('pago') ? 'Pendente' : 'Pago';
     setToggling(id);
-    await onToggleStatus(id, nova);
+    await onToggleStatus(id, nova, origem);
     setToggling(null);
   }
 
-  async function handleDelete(id, label) {
-    if (!confirm(`Apagar "${label}"?\n\nRemove a linha da planilha permanentemente.`)) return;
-    setDeletando(id);
-    await onDelete(id);
-    setDeletando(null);
+  async function handleDelete(id, label, origem, compraId) {
+    if (origem === 'parcela') {
+      if (!confirm(`Excluir esta parcela e TODA a compra vinculada de "${label}"?`)) return;
+      setDeletando(id);
+      await onDeleteCompra(compraId);
+      setDeletando(null);
+    } else {
+      if (!confirm(`Apagar despesa "${label}"?`)) return;
+      setDeletando(id);
+      await onDelete(id);
+      setDeletando(null);
+    }
     setSelecionados(prev => { const n = new Set(prev); n.delete(id); return n; });
   }
 
@@ -139,7 +147,16 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
                         className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer" />
                     </td>
                     <td className="px-4 py-3 text-slate-400 whitespace-nowrap font-mono text-xs">{d.data || '—'}</td>
-                    <td className="px-4 py-3 text-slate-300 font-medium max-w-[160px] truncate">{d.nome || '—'}</td>
+                    <td className="px-4 py-3 text-slate-300 font-medium max-w-[180px]">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {d.origem === 'parcela' ? (
+                          <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">Compra</span>
+                        ) : (
+                          <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">Despesa</span>
+                        )}
+                        <span className="truncate">{d.nome || '—'}</span>
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-slate-500 max-w-[220px] truncate">{d.descricao || '—'}</td>
                     <td className="px-4 py-3 text-right font-semibold text-slate-200 whitespace-nowrap tabular-nums">
                       {BRL.format(d.valor)}
@@ -150,13 +167,13 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
                           <Loader2 size={11} className="animate-spin" /> …
                         </span>
                       ) : isPago ? (
-                        <button onClick={() => handleToggle(d.id, d.situacao)}
+                        <button onClick={() => handleToggle(d.id, d.situacao, d.origem)}
                           title="Clique para marcar como Pendente"
                           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-orange-500/10 hover:text-orange-400 hover:border-orange-500/20 transition-colors cursor-pointer">
                           <CheckCircle2 size={11}/> Pago
                         </button>
                       ) : (
-                        <button onClick={() => handleToggle(d.id, d.situacao)}
+                        <button onClick={() => handleToggle(d.id, d.situacao, d.origem)}
                           title="Clique para marcar como Pago"
                           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/20 transition-colors cursor-pointer">
                           <Clock size={11}/> Pendente
@@ -164,11 +181,16 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onToggleStatus }) 
                       )}
                     </td>
                     {isAdmin && (
-                      <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => handleDelete(d.id, d.descricao || d.nome)}
+                      <td className="px-4 py-3 text-center whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => onEdit?.(d)}
+                          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-emerald-400 transition-all mr-2.5"
+                          title="Editar lançamento">
+                          <Edit size={14} />
+                        </button>
+                        <button onClick={() => handleDelete(d.id, d.descricao || d.nome, d.origem, d.compraId)}
                           disabled={deletando === d.id}
                           className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all disabled:opacity-40"
-                          title="Apagar despesa">
+                          title="Apagar lançamento">
                           {deletando === d.id ? <span className="text-xs">...</span> : <Trash2 size={14} />}
                         </button>
                       </td>

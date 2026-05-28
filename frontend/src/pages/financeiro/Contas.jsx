@@ -25,6 +25,9 @@ import { GraficoPizza } from './components/GraficoPizza';
 import { FormLancarDespesa } from './components/FormLancarDespesa';
 import { TabelaDespesas } from './components/TabelaDespesas';
 import { apiFetch } from '../../utils/getAuthToken';
+import { doc, updateDoc, Timestamp } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { ModalEditarLancamento } from './components/ModalEditarLancamento';
 
 function checkAdmin() {
   try {
@@ -514,35 +517,117 @@ function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Contas() {
-  const [aba, setAba] = useState('despesas');
-  const { parcelas, loading, saving, lancarCompra, marcarPago, desfazerPagamento, getResumo, reload } = useCompras();
+  const [aba, setAba] = useState('contas'); // 'contas' | 'novo' | 'cartoes'
+  const [tipoForm, setTipoForm] = useState('despesa'); // 'despesa' | 'compra'
+  const [editingItem, setEditingItem] = useState(null);
+  const [origemFiltro, setOrigemFiltro] = useState('all'); // 'all' | 'despesa' | 'parcela'
+  const [mostrarCharts, setMostrarCharts] = useState(false);
+
+  const { parcelas, loading, saving, lancarCompra, marcarPago, desfazerPagamento, reload } = useCompras();
   const { meios, loading: loadingMeios } = useMeiosPagamento();
-  const resumo = getResumo();
 
   // ─── Dados de Despesas Operacionais (fin_despesas)
   const { despesas, loading: loadingDesp, error: errorDesp } = useFinDespesas();
   const [salvando, setSalvando] = useState(false);
-  const [formAberto, setFormAberto] = useState(false);
-  const [mostrarCharts, setMostrarCharts] = useState(false);
 
-  // Filtros (aba Despesas)
+  // Filtros
   const [mesAtivo,       setMesAtivo]       = useState('');
   const [categoriaAtiva, setCategoriaAtiva] = useState('all');
   const [statusAtivo,    setStatusAtivo]    = useState('all');
   const [rangeInicio,    setRangeInicio]    = useState(null);
   const [rangeFim,       setRangeFim]       = useState(null);
 
-  // Computa status efetivo e processa despesas
-  const despesasComStatus = useMemo(() => {
+  // Normalização de dados
+  const normalizedDespesas = useMemo(() => {
     if (!despesas) return [];
-    return despesas.map(d => ({ ...d, statusEfetivo: computarStatusEfetivo(d) }));
+    return despesas.map(d => ({
+      ...d,
+      origem: 'despesa',
+      data: d.data, // string "DD/MM/YYYY"
+      timestamp: d.timestamp, // numeric ts
+      situacao: d.situacao, // 'pago' / 'pendente'
+      tipo: d.tipo || 'operacional',
+    }));
   }, [despesas]);
 
-  const meses = useMemo(() => extrairMesesFin(despesasComStatus), [despesasComStatus]);
+  const normalizedParcelas = useMemo(() => {
+    if (!parcelas) return [];
+    return parcelas.map(p => {
+      const vencDate = tsToDate(p.vencimento);
+      const dataString = vencDate ? vencDate.toLocaleDateString('pt-BR') : '';
+      const labelParcela = p.totalParcelas > 1 ? ` (${p.numeroParcela}/${p.totalParcelas}x)` : '';
+      return {
+        id: p.id,
+        compraId: p.compraId,
+        data: dataString,
+        timestamp: vencDate ? vencDate.getTime() : 0,
+        tipo: 'investimento',
+        categoria: p.meioNome || 'Compra',
+        nome: p.fornecedor || 'Compra',
+        fornecedor: p.fornecedor || '',
+        descricao: `${p.descricao || ''}${labelParcela}`,
+        valor: p.valor || 0,
+        situacao: p.status || 'pendente',
+        origem: 'parcela',
+        meioId: p.meioId || '',
+      };
+    });
+  }, [parcelas]);
+
+  // Status efetivo para exibição
+  function computarStatusEfetivoLancamento(item) {
+    if (item.situacao === 'pago') return 'pago';
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    return item.timestamp < hoje.getTime() ? 'vencido' : 'pendente';
+  }
+
+  // Unifica e calcula o status efetivo
+  const contasUnificadas = useMemo(() => {
+    return [...normalizedDespesas, ...normalizedParcelas].map(item => ({
+      ...item,
+      statusEfetivo: computarStatusEfetivoLancamento(item),
+    }));
+  }, [normalizedDespesas, normalizedParcelas]);
+
+  // KPIs Unificados
+  const kpisUnificados = useMemo(() => {
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const amanha = new Date(hoje); amanha.setDate(amanha.getDate() + 1);
+    const semAte = new Date(hoje); semAte.setDate(semAte.getDate() + 7);
+
+    const pendentes = contasUnificadas.filter(c => c.situacao === 'pendente');
+    const tsMs = c => c.timestamp;
+
+    const vencidas  = pendentes.filter(c => tsMs(c) < hoje.getTime());
+    const hoje_arr  = pendentes.filter(c => { const t = tsMs(c); return t >= hoje.getTime() && t < amanha.getTime(); });
+    const semana_arr = pendentes.filter(c => { const t = tsMs(c); return t >= hoje.getTime() && t <= semAte.getTime(); });
+
+    const soma = arr => arr.reduce((s, c) => s + (c.valor || 0), 0);
+    const totalPago = contasUnificadas.filter(c => c.situacao === 'pago').reduce((s, c) => s + (c.valor || 0), 0);
+
+    return {
+      vencidas: { total: soma(vencidas), count: vencidas.length },
+      hoje: { total: soma(hoje_arr), count: hoje_arr.length },
+      semana: { total: soma(semana_arr), count: semana_arr.length },
+      totalPago,
+    };
+  }, [contasUnificadas]);
+
+  const totalPendentesCount = useMemo(() => {
+    return contasUnificadas.filter(c => c.statusEfetivo === 'vencido' || c.statusEfetivo === 'pendente').length;
+  }, [contasUnificadas]);
+
+  const meses = useMemo(() => extrairMesesFin(contasUnificadas), [contasUnificadas]);
+
   const categorias = useMemo(() => {
-    const set = new Set(despesasComStatus.map(d => d.categoria).filter(Boolean));
+    const set = new Set(contasUnificadas.map(d => d.categoria).filter(Boolean));
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [despesasComStatus]);
+  }, [contasUnificadas]);
+
+  const categoriasDespesas = useMemo(() => {
+    const set = new Set(normalizedDespesas.map(d => d.categoria).filter(Boolean));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [normalizedDespesas]);
 
   const labelMesAtual = useMemo(() => {
     const hoje = new Date();
@@ -551,15 +636,25 @@ export default function Contas() {
 
   const mesEfetivo = mesAtivo || meses.find(m => m.label === labelMesAtual)?.label || meses[0]?.label || '';
 
-  // Filtro de data range ou mês
-  const despesasFiltradas = useMemo(() => {
-    return despesasComStatus.filter(d => {
+  // Filtro consolidado
+  const contasFiltradas = useMemo(() => {
+    return contasUnificadas.filter(d => {
       // Categoria
       if (categoriaAtiva !== 'all' && d.categoria !== categoriaAtiva) return false;
+      
       // Status
-      if (statusAtivo !== 'all' && d.statusEfetivo !== statusAtivo) return false;
+      if (statusAtivo !== 'all') {
+        if (statusAtivo === 'pendente') {
+          if (d.statusEfetivo !== 'pendente' && d.statusEfetivo !== 'vencido') return false;
+        } else {
+          if (d.statusEfetivo !== statusAtivo) return false;
+        }
+      }
 
-      // Se há range de data ativo, filtra pelo range (timestamp)
+      // Origem
+      if (origemFiltro !== 'all' && d.origem !== origemFiltro) return false;
+
+      // Se há range de data ativo, filtra pelo range
       if (rangeInicio && rangeFim) {
         return d.timestamp >= rangeInicio && d.timestamp <= rangeFim;
       }
@@ -569,14 +664,14 @@ export default function Contas() {
       }
       return true;
     });
-  }, [despesasComStatus, categoriaAtiva, statusAtivo, rangeInicio, rangeFim, mesEfetivo]);
+  }, [contasUnificadas, categoriaAtiva, statusAtivo, origemFiltro, rangeInicio, rangeFim, mesEfetivo]);
 
-  const despesasMes = useMemo(() => {
-    if (!mesEfetivo) return despesasComStatus;
-    return despesasComStatus.filter(d => labelMesAnoTs(d.timestamp) === mesEfetivo);
-  }, [despesasComStatus, mesEfetivo]);
+  const contasMes = useMemo(() => {
+    if (!mesEfetivo) return contasUnificadas;
+    return contasUnificadas.filter(d => labelMesAnoTs(d.timestamp) === mesEfetivo);
+  }, [contasUnificadas, mesEfetivo]);
 
-  // Handlers para salvar/toggle/deletar despesas
+  // Handlers para salvar/toggle/deletar
   async function handleSalvarDespesa(payload) {
     setSalvando(true);
     try {
@@ -585,7 +680,7 @@ export default function Contas() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await res.text());
-      setFormAberto(false);
+      setAba('contas');
     } catch (err) {
       alert(`Erro ao lançar despesa: ${err.message}`);
     } finally {
@@ -593,24 +688,90 @@ export default function Contas() {
     }
   }
 
-  async function handleToggleStatusDespesa(id, novaSituacao) {
+  async function handleToggleStatusUnified(id, novaSituacao, origem) {
     try {
-      const res = await apiFetch(`/api/fin-despesas/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ situacao: novaSituacao }),
-      });
-      if (!res.ok) throw new Error(await res.text());
+      if (origem === 'despesa') {
+        const res = await apiFetch(`/api/fin-despesas/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ situacao: novaSituacao.toLowerCase() }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+      } else {
+        if (novaSituacao.toLowerCase() === 'pago') {
+          await marcarPago(id);
+        } else {
+          await desfazerPagamento(id);
+        }
+      }
     } catch (err) {
       alert(`Erro ao atualizar status: ${err.message}`);
     }
   }
 
-  async function handleDeleteDespesa(id) {
+  async function handleDeleteUnified(id, origem) {
     try {
-      const res = await apiFetch(`/api/fin-despesas/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await res.text());
+      if (origem === 'despesa') {
+        const res = await apiFetch(`/api/fin-despesas/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+      } else {
+        await reload();
+      }
     } catch (err) {
-      alert(`Erro ao excluir despesa: ${err.message}`);
+      alert(`Erro ao excluir: ${err.message}`);
+    }
+  }
+
+  async function handleDeleteCompra(compraId) {
+    try {
+      await deletarCompra(compraId);
+    } catch (err) {
+      alert(`Erro ao excluir compra: ${err.message}`);
+    }
+  }
+
+  async function handleSalvarEdicao(itemEditado) {
+    try {
+      if (itemEditado.origem === 'despesa') {
+        const ref = doc(db, 'fin_despesas', itemEditado.id);
+        const [y, m, d] = itemEditado.dataISO.split('-');
+        const dateObj = new Date(y, m - 1, d, 12, 0, 0);
+
+        await updateDoc(ref, {
+          data: Timestamp.fromDate(dateObj),
+          categoria: itemEditado.categoria,
+          descricao: itemEditado.descricao,
+          valor: parseFloat(itemEditado.valor) || 0,
+          situacao: itemEditado.situacao,
+          updatedAt: new Date(),
+        });
+      } else {
+        const ref = doc(db, 'fin_parcelas', itemEditado.id);
+        const [y, m, d] = itemEditado.vencISO.split('-');
+        const dateObj = new Date(y, m - 1, d, 12, 0, 0);
+
+        const updates = {
+          vencimento: Timestamp.fromDate(dateObj),
+          fornecedor: itemEditado.fornecedor,
+          descricao: itemEditado.descricao,
+          valor: parseFloat(itemEditado.valor) || 0,
+          status: itemEditado.situacao,
+        };
+
+        if (itemEditado.meioId) {
+          const meio = meios.find(m => m.id === itemEditado.meioId);
+          if (meio) {
+            updates.meioId = meio.id;
+            updates.meioNome = meio.nome;
+            updates.meioBandeira = meio.bandeira;
+          }
+        }
+
+        await updateDoc(ref, updates);
+        reload();
+      }
+      setEditingItem(null);
+    } catch (err) {
+      alert(`Erro ao salvar alterações: ${err.message}`);
     }
   }
 
@@ -640,10 +801,9 @@ export default function Contas() {
   }
 
   const ABAS = [
-    { id: 'despesas',    label: 'Despesas',     badge: null },
-    { id: 'vencimentos', label: 'Contas a Pagar',  badge: resumo.vencidas.items.length || null },
-    { id: 'nova',        label: 'Nova Compra',  badge: null },
-    { id: 'cartoes',     label: 'Cartões',       badge: meios.length || null },
+    { id: 'contas',  label: 'Contas & Lançamentos', badge: totalPendentesCount || null },
+    { id: 'novo',    label: 'Novo Lançamento',      badge: null },
+    { id: 'cartoes', label: 'Cartões & Contas',     badge: meios.length || null },
   ];
 
   return (
@@ -655,49 +815,56 @@ export default function Contas() {
               <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
                 <Wallet size={15} className="text-emerald-400" />
               </div>
-              <h1 className="text-lg font-black text-white">Despesas</h1>
+              <h1 className="text-lg font-black text-white">Fluxo Financeiro</h1>
             </div>
-            <p className="text-xs text-slate-600 mt-0.5 ml-10">Lançamentos de despesas · compras de mercadoria · fluxo de caixa</p>
+            <p className="text-xs text-slate-600 mt-0.5 ml-10">Lançamentos de despesas · compras de mercadoria · fluxo de caixa unificado</p>
           </div>
-          {aba === 'vencimentos' && (
-            <div className="text-right">
-              <p className="text-[10px] text-slate-600 uppercase tracking-wider">Total pendente</p>
-              <p className="text-xl font-black tabular-nums text-white">{brl(resumo.totalPendente)}</p>
-            </div>
-          )}
         </div>
 
         <div className="flex bg-slate-900 border border-white/[0.05] rounded-2xl p-1 gap-1">
           {ABAS.map(a => (
             <button key={a.id} onClick={() => setAba(a.id)}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-bold transition-all ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold transition-all ${
                 aba === a.id ? 'bg-white/[0.07] text-slate-100' : 'text-slate-600 hover:text-slate-400'
               }`}>
               {a.label}
               {a.badge ? (
-                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${
-                  a.id === 'vencimentos' && resumo.vencidas.items.length ? 'bg-red-500 text-white' : 'bg-slate-700 text-slate-400'
-                }`}>{a.badge}</span>
+                <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-red-500 text-white shrink-0">
+                  {a.badge}
+                </span>
               ) : null}
             </button>
           ))}
         </div>
 
-        {aba === 'despesas' && (
+        {aba === 'contas' && (
           <div className="space-y-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => setFormAberto(v => !v)}
-                className={[
-                  'flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold border transition-all',
-                  formAberto
-                    ? 'bg-emerald-600 border-emerald-500 text-white'
-                    : 'bg-emerald-600/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-600 hover:border-emerald-500 hover:text-white',
-                ].join(' ')}
-              >
-                <Plus size={14} /> {formAberto ? 'Cancelar' : 'Lançar Despesa'}
-              </button>
-              {despesasComStatus.length > 0 && (
+            {/* KPIs Unificados */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <KpiCard label="Vencidos"     value={brl(kpisUnificados.vencidas.total)}  sub={`${kpisUnificados.vencidas.count} item(ns)`}  color="red"     Icon={AlertTriangle} />
+              <KpiCard label="Vence Hoje"  value={brl(kpisUnificados.hoje.total)}      sub={`${kpisUnificados.hoje.count} item(ns)`}      color="yellow"  Icon={Clock} />
+              <KpiCard label="Próx. 7 dias" value={brl(kpisUnificados.semana.total)}   sub={`${kpisUnificados.semana.count} item(ns)`}    color="blue"    Icon={Calendar} />
+              <KpiCard label="Total Pago"   value={brl(kpisUnificados.totalPago)}       sub="Histórico"                                     color="emerald" Icon={CheckCircle2} />
+            </div>
+
+            {/* Toggle de gráficos / filtros de origem */}
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex bg-slate-900 border border-white/[0.05] rounded-xl p-0.5 gap-0.5">
+                {[
+                  { id: 'all',     label: 'Todos Lançamentos' },
+                  { id: 'despesa', label: 'Apenas Despesas' },
+                  { id: 'parcela', label: 'Apenas Compras/Cartão' }
+                ].map(o => (
+                  <button key={o.id} onClick={() => setOrigemFiltro(o.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                      origemFiltro === o.id ? 'bg-white/[0.08] text-slate-100' : 'text-slate-600 hover:text-slate-400'
+                    }`}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+
+              {contasUnificadas.length > 0 && (
                 <button
                   onClick={() => setMostrarCharts(v => !v)}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-white/[0.08] text-slate-500 hover:text-slate-300 hover:border-white/20 transition-all"
@@ -706,16 +873,6 @@ export default function Contas() {
                 </button>
               )}
             </div>
-
-            {formAberto && (
-              <div className="rounded-xl bg-slate-900 border border-emerald-500/20 p-5">
-                <FormLancarDespesa
-                  categorias={categorias}
-                  onSalvar={handleSalvarDespesa}
-                  salvando={salvando}
-                />
-              </div>
-            )}
 
             <FiltrosBar
               meses={meses}
@@ -732,18 +889,18 @@ export default function Contas() {
               }}
             />
 
-            <ResumoCards despesasMes={despesasMes} />
+            <ResumoCards despesasMes={contasMes} />
 
-            {mostrarCharts && despesasComStatus.length > 0 && (
+            {mostrarCharts && contasUnificadas.length > 0 && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <GraficoBarras despesas={despesasComStatus} />
-                <GraficoPizza despesasMes={despesasMes} />
+                <GraficoBarras despesas={contasUnificadas} />
+                <GraficoPizza despesasMes={contasMes} />
               </div>
             )}
 
-            {loadingDesp ? (
+            {loadingDesp || loading ? (
               <div className="flex items-center justify-center py-16 gap-2 text-slate-600">
-                <Loader2 size={20} className="animate-spin" /> Carregando despesas…
+                <Loader2 size={20} className="animate-spin" /> Carregando contas…
               </div>
             ) : errorDesp ? (
               <div className="flex items-center gap-3 text-red-400 p-4 border border-red-500/20 rounded-xl bg-red-500/5">
@@ -752,35 +909,77 @@ export default function Contas() {
               </div>
             ) : (
               <TabelaDespesas
-                despesas={despesasFiltradas}
+                despesas={contasFiltradas}
                 isAdmin={isAdmin}
-                onToggleStatus={handleToggleStatusDespesa}
-                onDelete={handleDeleteDespesa}
+                onToggleStatus={handleToggleStatusUnified}
+                onDelete={(id) => handleDeleteUnified(id, 'despesa')}
+                onDeleteCompra={handleDeleteCompra}
+                onEdit={setEditingItem}
               />
             )}
           </div>
         )}
 
-        {aba === 'vencimentos' && (
-          <PainelVencimentos parcelas={parcelas} loading={loading} marcarPago={marcarPago}
-            desfazerPagamento={desfazerPagamento} getResumo={getResumo} reload={reload} meios={meios} />
-        )}
-        {aba === 'nova' && (
-          meios.length === 0 && !loadingMeios ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-slate-600">
-              <CreditCard size={36} className="opacity-30" />
-              <p className="text-sm">Cadastre um cartão ou conta primeiro</p>
-              <button onClick={() => setAba('cartoes')}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-colors">
-                <Plus size={14} /> Cadastrar Cartão / Conta
+        {aba === 'novo' && (
+          <div className="space-y-5 max-w-2xl mx-auto">
+            {/* Seletor do tipo de lançamento */}
+            <div className="flex bg-slate-900 border border-white/[0.05] rounded-xl p-1 gap-1">
+              <button
+                onClick={() => setTipoForm('despesa')}
+                className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${
+                  tipoForm === 'despesa'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-500 hover:text-slate-400'
+                }`}
+              >
+                Despesa Operacional (Luz, Aluguel, Prolabore...)
+              </button>
+              <button
+                onClick={() => setTipoForm('compra')}
+                className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${
+                  tipoForm === 'compra'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-500 hover:text-slate-400'
+                }`}
+              >
+                Compra de Produtos / Estoque (Cartão, Boleto...)
               </button>
             </div>
-          ) : (
-            <FormNovaCompra meios={meios} lancarCompra={lancarCompra} saving={saving} onSucesso={() => setAba('vencimentos')} />
-          )
+
+            {tipoForm === 'despesa' ? (
+              <FormLancarDespesa
+                categorias={categoriasDespesas}
+                onSalvar={handleSalvarDespesa}
+                salvando={salvando}
+              />
+            ) : (
+              meios.length === 0 && !loadingMeios ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-slate-600 bg-slate-900/50 border border-white/5 rounded-2xl">
+                  <CreditCard size={36} className="opacity-30" />
+                  <p className="text-sm">Cadastre um cartão ou conta primeiro</p>
+                  <button onClick={() => setAba('cartoes')}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-colors">
+                    <Plus size={14} /> Cadastrar Cartão / Conta
+                  </button>
+                </div>
+              ) : (
+                <FormNovaCompra meios={meios} lancarCompra={lancarCompra} saving={saving} onSucesso={() => { setAba('contas'); reload(); }} />
+              )
+            )}
+          </div>
         )}
+
         {aba === 'cartoes' && <MeiosPagamento />}
       </div>
+
+      {editingItem && (
+        <ModalEditarLancamento
+          item={editingItem}
+          meios={meios}
+          onClose={() => setEditingItem(null)}
+          onSave={handleSalvarEdicao}
+        />
+      )}
     </div>
   );
 }

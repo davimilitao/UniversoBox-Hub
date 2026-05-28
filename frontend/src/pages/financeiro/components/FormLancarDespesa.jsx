@@ -29,6 +29,18 @@ function isoParaBR(iso) {
   return `${d}/${m}/${y}`;
 }
 
+function Campo({ label, icon: Icon, children }) {
+  return (
+    <div>
+      <label className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
+        <Icon size={12} className="text-slate-600" />
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
 export function FormLancarDespesa({ categorias, onSalvar, salvando }) {
   const [form, setForm] = useState({
     data:     hojeISO(),
@@ -60,17 +72,6 @@ export function FormLancarDespesa({ categorias, onSalvar, salvando }) {
 
   const inputCls = "w-full rounded-lg bg-slate-900 border border-white/10 text-slate-200 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 placeholder-slate-600 [color-scheme:dark]";
 
-  function Campo({ label, icon: Icon, children }) {
-    return (
-      <div>
-        <label className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
-          <Icon size={12} className="text-slate-600" />
-          {label}
-        </label>
-        {children}
-      </div>
-    );
-  }
 
   return (
     <form onSubmit={handleSubmit} className="rounded-xl bg-slate-800 border border-white/5 p-5 flex flex-col gap-4">

@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   collection, addDoc, getDocs, doc, updateDoc, query,
-  orderBy, serverTimestamp, Timestamp, writeBatch,
+  orderBy, serverTimestamp, Timestamp, writeBatch, where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -248,6 +248,37 @@ export function useCompras() {
     };
   }
 
+  // ── Exclui compra e todas as suas parcelas ─────────────────────────────────
+  async function deletarCompra(compraId) {
+    if (!db) return { ok: false, error: 'Firebase não configurado.' };
+    setSaving(true); setErro('');
+    try {
+      const batch = writeBatch(db);
+      
+      // Deleta cabeçalho
+      batch.delete(doc(db, 'fin_compras', compraId));
+      
+      // Busca parcelas da compra
+      const q = query(collection(db, 'fin_parcelas'), where('compraId', '==', compraId));
+      const snap = await getDocs(q);
+      snap.forEach(pDoc => {
+        batch.delete(pDoc.ref);
+      });
+      
+      await batch.commit();
+      
+      // Reload
+      await Promise.all([loadParcelas(), loadCompras()]);
+      return { ok: true };
+    } catch (e) {
+      console.error('[useCompras] deletarCompra', e);
+      setErro('Erro ao excluir compra: ' + e.message);
+      return { ok: false, error: e.message };
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return {
     parcelas,
     compras,
@@ -258,6 +289,7 @@ export function useCompras() {
     marcarPago,
     desfazerPagamento,
     getResumo,
+    deletarCompra,
     reload: () => { loadParcelas(); loadCompras(); },
     calcParcelas,
   };
