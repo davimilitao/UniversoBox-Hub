@@ -1095,6 +1095,163 @@ function Vazio({ icon, titulo, sub }) {
   );
 }
 
+function checkAdmin() {
+  try {
+    const user = localStorage.getItem('expedicao_user');
+    if (!user) return false;
+    return JSON.parse(user).role === 'admin';
+  } catch {
+    return false;
+  }
+}
+
+function ModalReconciliacaoAdmin({ orders, onConfirm, onFechar, salvando }) {
+  const [selecionados, setSelecionados] = useState(() => {
+    const map = {};
+    orders.forEach(o => { map[o.id] = true; });
+    return map;
+  });
+  const [motivos, setMotivos] = useState({});
+
+  function toggle(id) {
+    setSelecionados(prev => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function handleMotivo(id, val) {
+    setMotivos(prev => ({ ...prev, [id]: val }));
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    const updates = orders.map(o => {
+      const isChecked = selecionados[o.id] !== false;
+      return {
+        id: o.id,
+        status: isChecked ? 'packed' : 'not_shipped',
+        motivo: isChecked ? null : (motivos[o.id] || 'Não expedido (outros)'),
+      };
+    });
+    onConfirm(updates);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in"
+      onClick={e => e.target === e.currentTarget && onFechar()}>
+      <div className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between flex-shrink-0">
+          <div>
+            <h3 className="text-sm font-black text-white uppercase tracking-wider">Conciliação de Pedidos (+24h)</h3>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">
+              Assumir expedição ou dar baixa com justificativa
+            </p>
+          </div>
+          <button onClick={onFechar} disabled={salvando} className="p-1.5 rounded-lg text-slate-400 hover:bg-white/5 hover:text-white transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* List */}
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 scrollbar-thin">
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Como administrador, você pode aprovar em lote os pedidos pendentes antigos, pulando as etapas de bipe. Desmarque os pedidos que NÃO foram enviados e informe o motivo.
+          </p>
+          <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+            {orders.map(o => {
+              const checked = selecionados[o.id] !== false;
+              const tempo = o.createdAtMs ? Math.round((Date.now() - o.createdAtMs) / 3600000) : null;
+              
+              return (
+                <div key={o.id} className={`p-3 rounded-xl border transition-all ${
+                  checked ? 'bg-slate-800/40 border-white/5' : 'bg-red-500/[0.03] border-red-500/20'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(o.id)}
+                      disabled={salvando}
+                      className="w-4 h-4 accent-amber-500 cursor-pointer shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-200">{o.id}</span>
+                        {o.numeroPedido && (
+                          <span className="text-[9px] text-slate-500 font-mono">#{o.numeroPedido}</span>
+                        )}
+                        {tempo !== null && (
+                          <span className="text-[9px] text-amber-500 font-semibold">{tempo}h atrás</span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400 truncate mt-0.5">{o.clienteNome || 'Cliente final'}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
+                        o.logistica === 'flex' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                      }`}>
+                        {o.logistica || 'agency'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Campo de justificativa se estiver desmarcado */}
+                  {!checked && (
+                    <div className="mt-3 pt-3 border-t border-white/5 flex gap-2 animate-fade-in">
+                      <select
+                        value={motivos[o.id] || ''}
+                        onChange={e => handleMotivo(o.id, e.target.value)}
+                        disabled={salvando}
+                        required
+                        className="flex-1 bg-slate-950 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 outline-none focus:border-red-500/40"
+                      >
+                        <option value="">Selecione o motivo...</option>
+                        <option value="Falta de estoque">Falta de estoque</option>
+                        <option value="Etiqueta/DANFE com erro">Etiqueta/DANFE com erro</option>
+                        <option value="Cancelado pelo cliente">Cancelado pelo cliente</option>
+                        <option value="Aguardando fornecedor">Aguardando fornecedor</option>
+                        <option value="Outros">Outros (especifique ao lado)</option>
+                      </select>
+                      {motivos[o.id] === 'Outros' && (
+                        <input
+                          type="text"
+                          placeholder="Outro motivo..."
+                          onChange={e => handleMotivo(o.id, e.target.value)}
+                          disabled={salvando}
+                          required
+                          className="flex-1 bg-slate-950 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 outline-none focus:border-red-500/40"
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-3 pt-3 border-t border-white/5 mt-4">
+            <button
+              type="button"
+              onClick={onFechar}
+              disabled={salvando}
+              className="flex-1 py-2.5 rounded-lg border border-white/10 text-slate-300 text-sm font-semibold hover:bg-white/5 transition-colors disabled:opacity-40"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={salvando}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors disabled:opacity-40"
+            >
+              {salvando ? 'Processando...' : 'Confirmar Conciliação'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Página principal ──────────────────────────────────────────────────────────
 export default function PedidosDoDia() {
   const [tab,          setTab]         = useState('pending');
@@ -1112,6 +1269,33 @@ export default function PedidosDoDia() {
   const [cameraOpen,   setCameraOpen]  = useState(false);
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [newBadge,     setNewBadge]    = useState(0); // badge de novos pedidos
+  const [modalReconcile, setModalReconcile] = useState(false);
+  const [reconciling,    setReconciling]    = useState(false);
+
+  const isAdmin = useMemo(() => checkAdmin(), []);
+
+  const olderOrders = useMemo(() => {
+    const list = [...orders.pending, ...orders.picked];
+    const threshold = Date.now() - 24 * 60 * 60 * 1000;
+    return list.filter(o => o.createdAtMs && o.createdAtMs < threshold);
+  }, [orders]);
+
+  async function executarReconciliacao(updates) {
+    setReconciling(true);
+    try {
+      await api('/orders/bulk-reconcile', {
+        method: 'POST',
+        body: JSON.stringify({ updates }),
+      });
+      showToast('Conciliação realizada com sucesso!', 'ok');
+      setModalReconcile(false);
+      await refreshAll();
+    } catch (err) {
+      showToast(`Erro ao conciliar: ${err.message}`, 'err');
+    } finally {
+      setReconciling(false);
+    }
+  }
 
   const scanBuf      = useRef('');
   const scanTimer    = useRef(null);
@@ -1434,6 +1618,27 @@ export default function PedidosDoDia() {
               );
             })}
           </div>
+
+          {/* Banner Conciliação Admin (+24h) */}
+          {isAdmin && olderOrders.length > 0 && (
+            <div className="mx-3 mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex flex-col gap-2 animate-fade-in shrink-0">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={15} className="text-amber-400 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-200">Pedidos antigos (+24h)</p>
+                  <p className="text-[10px] text-slate-400 leading-normal">{olderOrders.length} pedido(s) pendente(s) há mais de 1 dia.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalReconcile(true)}
+                className="w-full py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition-colors"
+              >
+                Conciliação Rápida
+              </button>
+            </div>
+          )}
+
           {/* Search */}
           <div className="px-3 py-2 border-b border-white/5 flex-shrink-0">
             <input id="filterInput" value={filter} onChange={e => setFilter(e.target.value)}
@@ -1671,6 +1876,14 @@ export default function PedidosDoDia() {
       {modalExp && (
         <ModalExpedicao order={selOrder} proximo={proximoPedido}
           onConfirmar={confirmarExpedicao} onFechar={() => setModalExp(false)} confirmando={!!confirmando} />
+      )}
+      {modalReconcile && (
+        <ModalReconciliacaoAdmin
+          orders={olderOrders}
+          onConfirm={executarReconciliacao}
+          onFechar={() => setModalReconcile(false)}
+          salvando={reconciling}
+        />
       )}
     </div>
   );

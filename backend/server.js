@@ -180,7 +180,7 @@ function assertMarketplace(v) {
 }
 
 function assertStatus(v) {
-  const ok = ['pending', 'picked', 'packed'];
+  const ok = ['pending', 'picked', 'packed', 'not_shipped'];
   if (!ok.includes(v)) {
     const e = new Error(`Invalid status. Use one of: ${ok.join(' | ')}`);
     e.statusCode = 400;
@@ -614,6 +614,57 @@ app.post('/orders/:id/priority', async (req, res, next) => {
     res.json({ ok: true, isPriority: !!isPriority, logistica: isPriority ? 'flex' : 'agency' });
   } catch (err) {
     console.error('[/orders/:id/priority] error:', err);
+    next(err);
+  }
+});
+
+// --- ROTA DE CONCILIAÇÃO EM MASSA (ADMIN) ---
+app.post('/orders/bulk-reconcile', requireFirebaseAuth, requireFirebaseRole(['admin']), async (req, res, next) => {
+  try {
+    const { updates } = req.body;
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ error: 'updates must be a non-empty array' });
+    }
+
+    const batch = db.writeBatch();
+    const ts = nowMs();
+
+    for (const item of updates) {
+      const orderId = safeTrim(item.id);
+      const status = safeTrim(item.status);
+      const motivo = safeTrim(item.motivo) || null;
+
+      if (!['packed', 'not_shipped'].includes(status)) {
+        return res.status(400).json({ error: `Invalid reconciliation status: ${status}` });
+      }
+
+      const orderRef = db.collection('orders').doc(orderId);
+      const updateFields = {
+        status,
+        updatedAtMs: ts,
+      };
+
+      if (status === 'not_shipped' && motivo) {
+        updateFields.motivoNaoExpedido = motivo;
+      }
+
+      batch.update(orderRef, updateFields);
+    }
+
+    const logRef = db.collection('audit_logs').doc();
+    batch.set(logRef, {
+      timestamp: ts,
+      action: 'orders_bulk_reconciliation',
+      uid: req.auth.uid,
+      tenantId: req.auth.tenantId || null,
+      role: req.auth.role,
+      updates: updates,
+    });
+
+    await batch.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[/orders/bulk-reconcile] error:', err);
     next(err);
   }
 });
