@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   collection, addDoc, getDocs, doc, updateDoc, query,
-  orderBy, serverTimestamp, Timestamp, writeBatch,
+  orderBy, serverTimestamp, Timestamp, writeBatch, where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -69,9 +69,16 @@ export function useCompras() {
     }
     setLoading(true);
     try {
+      const stored = localStorage.getItem('expedicao_user');
+      let tenantId = '';
+      try {
+        if (stored) tenantId = JSON.parse(stored).tenantId || '';
+      } catch (e) {}
+
       const q = query(collection(db, 'fin_parcelas'), orderBy('vencimento', 'asc'));
       const snap = await getDocs(q);
-      setParcelas(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setParcelas(items.filter(p => !p.tenantId || p.tenantId === tenantId));
     } catch (e) {
       console.error('[useCompras] loadParcelas', e);
       setErro('Erro ao carregar parcelas: ' + e.message);
@@ -84,9 +91,16 @@ export function useCompras() {
   const loadCompras = useCallback(async () => {
     if (!db) return;
     try {
+      const stored = localStorage.getItem('expedicao_user');
+      let tenantId = '';
+      try {
+        if (stored) tenantId = JSON.parse(stored).tenantId || '';
+      } catch (e) {}
+
       const q = query(collection(db, 'fin_compras'), orderBy('createdAt', 'desc'));
       const snap = await getDocs(q);
-      setCompras(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setCompras(items.filter(c => !c.tenantId || c.tenantId === tenantId));
     } catch (e) {
       console.error('[useCompras] loadCompras', e);
     }
@@ -102,6 +116,12 @@ export function useCompras() {
     if (!db) return { ok: false, error: 'Firebase não configurado.' };
     setSaving(true); setErro('');
     try {
+      const stored = localStorage.getItem('expedicao_user');
+      let tenantId = '';
+      try {
+        if (stored) tenantId = JSON.parse(stored).tenantId || '';
+      } catch (e) {}
+
       const n = dados.numeroParcelas || 1;
       const { totalComJuros, valorBase, resto } = calcParcelas(
         dados.totalBruto, n, dados.taxaJuros
@@ -109,6 +129,7 @@ export function useCompras() {
 
       // 1. Cabeçalho da compra
       const compraRef = await addDoc(collection(db, 'fin_compras'), {
+        tenantId,
         fornecedor:      dados.fornecedor,
         descricao:       dados.descricao,
         totalBruto:      dados.totalBruto,
@@ -134,6 +155,7 @@ export function useCompras() {
         const venc  = calcVencimento(dados.diaVencimento, mesBase, i);
         const pRef  = doc(collection(db, 'fin_parcelas'));
         batch.set(pRef, {
+          tenantId,
           compraId:       compraRef.id,
           fornecedor:     dados.fornecedor,
           descricao:      dados.descricao,
@@ -226,6 +248,37 @@ export function useCompras() {
     };
   }
 
+  // ── Exclui compra e todas as suas parcelas ─────────────────────────────────
+  async function deletarCompra(compraId) {
+    if (!db) return { ok: false, error: 'Firebase não configurado.' };
+    setSaving(true); setErro('');
+    try {
+      const batch = writeBatch(db);
+      
+      // Deleta cabeçalho
+      batch.delete(doc(db, 'fin_compras', compraId));
+      
+      // Busca parcelas da compra
+      const q = query(collection(db, 'fin_parcelas'), where('compraId', '==', compraId));
+      const snap = await getDocs(q);
+      snap.forEach(pDoc => {
+        batch.delete(pDoc.ref);
+      });
+      
+      await batch.commit();
+      
+      // Reload
+      await Promise.all([loadParcelas(), loadCompras()]);
+      return { ok: true };
+    } catch (e) {
+      console.error('[useCompras] deletarCompra', e);
+      setErro('Erro ao excluir compra: ' + e.message);
+      return { ok: false, error: e.message };
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return {
     parcelas,
     compras,
@@ -236,6 +289,7 @@ export function useCompras() {
     marcarPago,
     desfazerPagamento,
     getResumo,
+    deletarCompra,
     reload: () => { loadParcelas(); loadCompras(); },
     calcParcelas,
   };
