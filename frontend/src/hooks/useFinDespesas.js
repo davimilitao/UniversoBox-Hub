@@ -69,6 +69,12 @@ export function useFinDespesas() {
       return;
     }
 
+    const stored = localStorage.getItem('expedicao_user');
+    let tenantId = '';
+    try {
+      if (stored) tenantId = JSON.parse(stored).tenantId || '';
+    } catch (e) {}
+
     const q = query(
       collection(db, 'fin_despesas'),
       orderBy('data', 'desc'),
@@ -82,6 +88,7 @@ export function useFinDespesas() {
           const ts = d.data?.toDate ? d.data.toDate().getTime() : 0;
           return {
             id:         doc.id,
+            tenantId:   d.tenantId   || null,
             data:       fmtData(d.data),
             timestamp:  ts,
             tipo:       d.tipo       || 'operacional',
@@ -95,7 +102,7 @@ export function useFinDespesas() {
             compraId:   d.compraId   || null,
             comprovante: d.comprovante || null,
           };
-        });
+        }).filter(d => !d.tenantId || d.tenantId === tenantId);
         setDespesas(items);
         setLoading(false);
       },
