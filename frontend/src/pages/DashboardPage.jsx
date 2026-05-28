@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { auth } from '../firebase';
+import { apiFetch } from '../utils/getAuthToken';
 import {
   Package, Zap, Building2, Boxes,
   Clock, RefreshCw, Wifi, WifiOff,
@@ -642,10 +643,7 @@ export function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const token = await getToken();
-      const res   = await fetch('/api/ml/dashboard', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await apiFetch('/api/ml/dashboard');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setData(await res.json());
     } catch (e) {

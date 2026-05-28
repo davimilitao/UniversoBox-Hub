@@ -100,6 +100,14 @@ app.get('/favicon.ico', (req, res) => {
   }
   res.status(204).end();
 });
+app.get('/print-agent.js', (req, res) => {
+  const agentPath = path.join(__dirname, 'scripts', 'print-agent.js');
+  if (fs.existsSync(agentPath)) {
+    res.setHeader('Content-Type', 'application/javascript');
+    return res.sendFile(agentPath);
+  }
+  res.status(404).send('Print agent script not found');
+});
 app.get('/', (req, res) => res.redirect('/spa/'));
 app.get('/manual', (req, res) => res.redirect('/spa/expedicao/pedidos'));
 app.get('/admin', (req, res) => res.redirect('/spa/catalogo/admin'));
