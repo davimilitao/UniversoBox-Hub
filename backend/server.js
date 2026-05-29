@@ -626,7 +626,7 @@ app.post('/orders/bulk-reconcile', requireFirebaseAuth, requireFirebaseRole(['ad
       return res.status(400).json({ error: 'updates must be a non-empty array' });
     }
 
-    const batch = db.writeBatch();
+    const batch = db.batch();
     const ts = nowMs();
 
     for (const item of updates) {
