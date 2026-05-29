@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const axios   = require('axios');
 const { db }  = require('../config/firebase');
+const { requireFirebaseAuth } = require('../middleware/requireFirebaseAuth');
 
 const BLING_CLIENT_ID     = process.env.BLING_CLIENT_ID     || '';
 const BLING_CLIENT_SECRET = process.env.BLING_CLIENT_SECRET || '';
@@ -247,7 +248,7 @@ router.get('/pedidos', async (req, res, next) => {
 });
 
 // ── DETALHES DE UMA NF (com itens) ───────────────────────────────
-router.get('/pedidos/:id', async (req, res, next) => {
+router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
   try {
     const resp = await blingFetch(`/nfe/${req.params.id}`);
     const n    = resp.data || resp;
@@ -255,6 +256,7 @@ router.get('/pedidos/:id', async (req, res, next) => {
     const numeroPedido = n.numeroPedidoLoja || n.numeroPedido || null;
     const mkt2         = detectarMkt(n);
     const mlOrderId2   = (mkt2 === 'MERCADO_LIVRE' && numeroPedido) ? String(numeroPedido) : null;
+    const sitDesc      = getSituacaoDescricao(n.situacao);
 
     const item = {
       id:           n.id,
@@ -262,7 +264,7 @@ router.get('/pedidos/:id', async (req, res, next) => {
       numeroPedido,
       mlOrderId:    mlOrderId2,
       dataEmissao:  n.dataEmissao,
-      situacao:     getSituacaoDescricao(n.situacao),
+      situacao:     sitDesc,
       cliente:      { nome: n.contato?.nome || '', email: n.contato?.email || '' },
       marketplace:  mkt2,
       valorTotal:   n.valorTotal || n.totalProdutos || 0,
@@ -276,6 +278,62 @@ router.get('/pedidos/:id', async (req, res, next) => {
         preco: Number(it.valor ?? it.valorUnitario ?? 0),
       })),
     };
+
+    // Coleta de dados da Inteligência de Vendas (BI)
+    const isDisponivel = sitDesc.toLowerCase().includes('autorizada') ||
+                         sitDesc.toLowerCase().includes('danfe') ||
+                         sitDesc.toLowerCase().includes('emitida') ||
+                         sitDesc.toLowerCase().includes('registrada');
+
+    if (isDisponivel) {
+      const { tenantId } = req.auth;
+      const docId = `${tenantId}_${n.id}`;
+
+      // Parsing de valores e dados de destino
+      const valorTotal = Number(n.valorTotal || n.totalProdutos || 0);
+      const valorFrete = Number(n.transporte?.frete || 0);
+      const cidade = n.contato?.endereco?.municipio || n.contato?.endereco?.cidade || '';
+      const uf = n.contato?.endereco?.uf || '';
+
+      // Parsing de datas e horários (sazonalidade)
+      const dtStr = n.dataEmissao || '';
+      const dateOnly = dtStr.substring(0, 10);
+      let hora = 12; // padrão
+      let diaSemana = 1; // padrão (segunda)
+      
+      if (dtStr.includes(' ')) {
+        const timePart = dtStr.split(' ')[1];
+        if (timePart) {
+          const hPart = timePart.split(':')[0];
+          if (hPart) hora = parseInt(hPart, 10);
+        }
+      }
+      if (dateOnly) {
+        const parsedDate = new Date(dateOnly + 'T12:00:00');
+        diaSemana = parsedDate.getDay();
+      }
+
+      const reportData = {
+        id: String(n.id),
+        tenantId,
+        numero: String(n.numero),
+        dataEmissao: dtStr,
+        dateOnly,
+        hora,
+        diaSemana,
+        valorTotal,
+        valorFrete,
+        cidade,
+        uf,
+        marketplace: mkt2,
+        itens: item.itens,
+        updatedAtMs: Date.now()
+      };
+
+      // Gravação assíncrona em background
+      db.collection('sales_intelligence').doc(docId).set(reportData, { merge: true })
+        .catch(err => console.error('[SalesIntelligence] Erro ao salvar telemetria:', err));
+    }
 
     res.json({ item });
   } catch(err) {

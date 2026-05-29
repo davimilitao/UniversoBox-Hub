@@ -549,6 +549,130 @@ function TabPerfis({ showToast }) {
   );
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPONENT: FORM NOVO COLABORADOR
+// ─────────────────────────────────────────────────────────────────────────────
+function FormNovoColaborador({ perfis, onSuccess, onCancel, showToast }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [role, setRole] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    if (!email.trim() || !password || !role) {
+      showToast('Por favor, preencha E-mail, Senha e Perfil.', 'err');
+      return;
+    }
+    if (password.length < 6) {
+      showToast('A senha deve ter pelo menos 6 caracteres.', 'err');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await apiFetch('/api/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          displayName: displayName.trim() || null,
+          role,
+        })
+      });
+      showToast('Colaborador criado com sucesso! ✓');
+      onSuccess();
+    } catch (e) {
+      showToast('Erro: ' + e.message, 'err');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleCreate} className="rounded-xl border border-blue-500/20 bg-blue-500/[0.02] p-4 space-y-3 animate-fade-in">
+      <div className="flex items-center justify-between border-b border-white/5 pb-2">
+        <h3 className="text-xs font-black uppercase tracking-wider text-blue-400">Criar Novo Colaborador</h3>
+        <button type="button" onClick={onCancel} className="text-slate-500 hover:text-slate-300">
+          <X size={14} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+        <div className="flex flex-col gap-1">
+          <label className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">Nome Completo</label>
+          <input
+            value={displayName}
+            onChange={e => setDisplayName(e.target.value)}
+            placeholder="Ex: João Silva"
+            className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.07] text-slate-200 outline-none focus:border-blue-500/30"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">E-mail de Acesso *</label>
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="Ex: joao@empresa.com"
+            required
+            className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.07] text-slate-200 outline-none focus:border-blue-500/30"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">Senha Inicial (mín 6 chars) *</label>
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Ex: 123456"
+            required
+            className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.07] text-slate-200 outline-none focus:border-blue-500/30"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">Perfil de Acesso *</label>
+          <select
+            value={role}
+            onChange={e => setRole(e.target.value)}
+            required
+            className="px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.07] text-slate-200 outline-none focus:border-blue-500/30"
+          >
+            <option value="">Selecione…</option>
+            {perfis.map(p => (
+              <option key={p.id} value={p.id}>{p.nome} ({p.id})</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-4 py-2 rounded-xl border border-white/[0.07] hover:bg-white/[0.04] text-slate-400 text-xs font-semibold"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          disabled={saving}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all disabled:opacity-50 active:scale-95 shadow-md shadow-blue-950/20"
+        >
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          Criar Colaborador
+        </button>
+      </div>
+    </form>
+  );
+}
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: USUÁRIOS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -562,6 +686,7 @@ function TabUsuarios({ showToast }) {
   const [roleMap,  setRoleMap]  = useState({});
   const [saving,   setSaving]   = useState({});
   const [query,    setQuery]    = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
 
   useEffect(() => { load(); }, []); // eslint-disable-line
 
@@ -633,7 +758,7 @@ function TabUsuarios({ showToast }) {
         </div>
       </div>
 
-      {/* Search + refresh */}
+      {/* Search + refresh + Add Collaborator */}
       <div className="flex gap-2">
         <div className="relative flex-1">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -644,11 +769,29 @@ function TabUsuarios({ showToast }) {
             className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-white/[0.07] text-[12px] text-slate-200 placeholder-slate-700 focus:outline-none focus:border-blue-500/30 transition-all"
           />
         </div>
+        <button onClick={() => setShowAddForm(prev => !prev)}
+          className={`px-3 py-2 rounded-xl border text-[11px] font-bold transition-all flex items-center gap-1 hover:bg-blue-600/10 hover:border-blue-500/30 active:scale-95 ${showAddForm ? 'border-blue-500 bg-blue-500/10 text-blue-400' : 'border-white/[0.07] text-slate-300'}`}>
+          <Plus size={12} />
+          Novo Colaborador
+        </button>
         <button onClick={load} disabled={loading}
           className="p-2 rounded-xl border border-white/[0.07] text-slate-600 hover:text-slate-300 hover:bg-white/[0.04] transition-colors disabled:opacity-30">
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
+
+      {/* Formulario de Novo Colaborador */}
+      {showAddForm && (
+        <FormNovoColaborador
+          perfis={perfis}
+          onSuccess={() => {
+            setShowAddForm(false);
+            load();
+          }}
+          onCancel={() => setShowAddForm(false)}
+          showToast={showToast}
+        />
+      )}
 
       {/* Loading */}
       {loading && (
@@ -882,6 +1025,87 @@ function LocalPrinterCard() {
 }
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPONENT: FORM ALTERAR SENHA
+// ─────────────────────────────────────────────────────────────────────────────
+function FormAlterarSenha({ showToast }) {
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function handlePasswordChange(e) {
+    e.preventDefault();
+    if (!newPassword) {
+      showToast('Por favor, informe a nova senha.', 'err');
+      return;
+    }
+    if (newPassword.length < 6) {
+      showToast('A senha deve ter no mínimo 6 caracteres.', 'err');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showToast('As senhas não coincidem.', 'err');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await apiFetch('/api/users/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ newPassword }),
+      });
+      showToast('Senha alterada com sucesso! ✓');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (e) {
+      showToast('Erro ao alterar senha: ' + e.message, 'err');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <SectionCard icon={Key} title="Alterar minha senha">
+      <form onSubmit={handlePasswordChange} className="space-y-3 text-xs">
+        <div className="flex flex-col gap-1">
+          <label className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">Nova Senha</label>
+          <input
+            type="password"
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            placeholder="Nova senha (mín 6 chars)"
+            required
+            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.07] text-slate-200 outline-none focus:border-blue-500/30"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">Confirmar Nova Senha</label>
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            placeholder="Confirme a nova senha"
+            required
+            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.07] text-slate-200 outline-none focus:border-blue-500/30"
+          />
+        </div>
+        <div className="flex justify-end pt-1">
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all disabled:opacity-50 active:scale-95 shadow-md shadow-blue-950/20"
+          >
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+            Atualizar Senha
+          </button>
+        </div>
+      </form>
+    </SectionCard>
+  );
+}
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: SISTEMA
 // ─────────────────────────────────────────────────────────────────────────────
@@ -965,6 +1189,11 @@ function TabSistema({ showToast }) {
           <p className="text-xs text-slate-600">Não autenticado</p>
         )}
       </SectionCard>
+
+      {/* Alterar Senha */}
+      {user && (
+        <FormAlterarSenha showToast={showToast} />
+      )}
 
       {/* Claims JSON */}
       {claimsFiltered && Object.keys(claimsFiltered).length > 0 && (
