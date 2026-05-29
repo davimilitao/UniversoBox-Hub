@@ -14,6 +14,7 @@ import { AppShell }         from './components/AppShell';
 import PedidosDoDia            from './pages/expedicao/PedidosDoDia';
 import ConfiguracoesSistema    from './pages/sistema/ConfiguracoesSistema';
 import Contas                  from './pages/financeiro/Contas';
+import InteligenciaBI          from './pages/financeiro/InteligenciaBI';
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/expedicao/pedidos"   element={<PedidosDoDia />} />
         {/* Financeiro */}
         <Route path="/financeiro/despesas"    element={<Contas />} />
+        <Route path="/financeiro/inteligencia" element={<InteligenciaBI />} />
         {/* Sistema */}
         <Route path="/sistema/config"      element={<ConfiguracoesSistema />} />
       </Route>

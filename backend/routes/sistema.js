@@ -206,6 +206,80 @@ router.patch('/users/:uid/role', requireFirebaseAuth, async (req, res, next) => 
   }
 });
 
+// POST /api/users - Create a new user (collaborator)
+router.post('/users', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    if (req.auth.role !== 'admin') {
+      return res.status(403).json({ error: 'Exige perfil admin' });
+    }
+
+    const { email, password, displayName, role } = req.body;
+    const tenantId = req.auth.tenantId;
+
+    if (!email || !password || !role) {
+      return res.status(400).json({ error: 'Campos email, password e role são obrigatórios.' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
+    }
+
+    // 1. Criar no Firebase Auth
+    const userRecord = await admin.auth().createUser({
+      email: email.trim(),
+      password,
+      displayName: displayName ? displayName.trim() : undefined,
+    });
+
+    // 2. Setar Custom Claims (tenantId + role)
+    await admin.auth().setCustomUserClaims(userRecord.uid, { tenantId, role });
+
+    // 3. Cadastrar na subcoleção do tenant no Firestore
+    await db.collection('tenants')
+      .doc(tenantId)
+      .collection('members')
+      .doc(userRecord.uid)
+      .set({
+        email: email.trim(),
+        role,
+        createdAtMs: Date.now()
+      });
+
+    res.json({
+      ok: true,
+      user: {
+        uid: userRecord.uid,
+        email: userRecord.email,
+        displayName: userRecord.displayName || userRecord.email.split('@')[0],
+        role,
+      }
+    });
+  } catch (err) {
+    console.error('[POST /api/users]', err);
+    next(err);
+  }
+});
+
+// POST /api/users/change-password - Change current user's password
+router.post('/users/change-password', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { newPassword } = req.body;
+    const { uid } = req.auth;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
+    }
+
+    await admin.auth().updateUser(uid, { password: newPassword });
+
+    res.json({ ok: true, message: 'Senha alterada com sucesso.' });
+  } catch (err) {
+    console.error('[POST /api/users/change-password]', err);
+    next(err);
+  }
+});
+
+
 // GET /api/bling/config - Get Bling API Integration Config & Status
 router.get('/bling/config', requireFirebaseAuth, async (req, res, next) => {
   try {

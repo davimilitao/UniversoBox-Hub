@@ -20,7 +20,7 @@ import {
   Home, SlidersHorizontal, ChevronLeft, ChevronRight,
   Menu, X, LogOut, Boxes, Lock,
   FlaskConical, Search, LayoutGrid, FileUp, Truck, Camera, Wallet,
-  Sparkles,
+  Sparkles
 } from 'lucide-react';
 
 // ─── Mapa de módulos ──────────────────────────────────────────────────────────
@@ -31,6 +31,7 @@ const ROTAS = [
   { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,               react: true,  href: '/expedicao/bling'      },
   // Financeiro
   { key: 'fin-contas',     moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/despesas'  },
+  { key: 'inteligencia',   moduleId: 'financas',       label: 'Inteligência (BI)', secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/inteligencia' },
   // Sistema
   { key: 'index',          moduleId: 'index',          label: 'Painel Principal',  secao: 'Sistema',    Icon: Home,              react: true,  href: '/'                         },
   { key: 'config',         moduleId: 'config',         label: 'Configurações',     secao: 'Sistema',    Icon: SlidersHorizontal, react: true,  href: '/sistema/config'       },

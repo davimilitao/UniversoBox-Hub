@@ -338,4 +338,130 @@ router.get('/fin-contas-unificadas', requireFirebaseAuth, async (req, res, next)
   }
 });
 
+// GET /api/sales-intelligence/summary — Aggregates sales intelligence reports for BI
+router.get('/sales-intelligence/summary', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { tenantId } = req.auth;
+    const { dataInicio, dataFim } = req.query; // YYYY-MM-DD
+
+    let query = db.collection('sales_intelligence')
+      .where('tenantId', '==', tenantId);
+
+    if (dataInicio) {
+      query = query.where('dateOnly', '>=', dataInicio);
+    }
+    if (dataFim) {
+      query = query.where('dateOnly', '<=', dataFim);
+    }
+
+    const snap = await query.get();
+    const reports = [];
+    const skusSet = new Set();
+
+    snap.forEach(doc => {
+      const data = doc.data();
+      reports.push(data);
+      if (Array.isArray(data.itens)) {
+        data.itens.forEach(it => {
+          if (it.sku) skusSet.add(it.sku);
+        });
+      }
+    });
+
+    // Fetch product costs
+    const prodCosts = {};
+    if (skusSet.size > 0) {
+      const skusArr = Array.from(skusSet);
+      const refs = skusArr.map(sku => db.collection('products').doc(sku));
+      
+      const batchSize = 100;
+      for (let i = 0; i < refs.length; i += batchSize) {
+        const chunk = refs.slice(i, i + batchSize);
+        const chunkSnaps = await db.getAll(...chunk);
+        chunkSnaps.forEach(s => {
+          if (s.exists) {
+            prodCosts[s.id] = Number(s.data().precoCusto || 0);
+          }
+        });
+      }
+    }
+
+    // Perform aggregations
+    const ufSummary = {};
+    const channelSummary = {};
+    const hourSummary = Array(24).fill(0);
+    const weekdaySummary = Array(7).fill(0);
+    let totalRevenue = 0;
+    let totalFreight = 0;
+    let totalCost = 0;
+    let totalOrders = reports.length;
+
+    reports.forEach(r => {
+      const uf = (r.uf || 'OUTROS').toUpperCase();
+      const ch = r.marketplace || 'OUTROS';
+      const rev = Number(r.valorTotal || 0);
+      const frt = Number(r.valorFrete || 0);
+
+      totalRevenue += rev;
+      totalFreight += frt;
+
+      let orderCost = 0;
+      if (Array.isArray(r.itens)) {
+        r.itens.forEach(it => {
+          const itemCost = prodCosts[it.sku] || 0;
+          orderCost += (it.qty || 1) * itemCost;
+        });
+      }
+      totalCost += orderCost;
+
+      // Group by UF
+      if (!ufSummary[uf]) {
+        ufSummary[uf] = { uf, orders: 0, revenue: 0, freight: 0, cost: 0 };
+      }
+      ufSummary[uf].orders += 1;
+      ufSummary[uf].revenue += rev;
+      ufSummary[uf].freight += frt;
+      ufSummary[uf].cost += orderCost;
+
+      // Group by Channel
+      if (!channelSummary[ch]) {
+        channelSummary[ch] = { channel: ch, orders: 0, revenue: 0, freight: 0, cost: 0 };
+      }
+      channelSummary[ch].orders += 1;
+      channelSummary[ch].revenue += rev;
+      channelSummary[ch].freight += frt;
+      channelSummary[ch].cost += orderCost;
+
+      // Sazonalidade hora
+      const h = Number(r.hora ?? 12);
+      if (h >= 0 && h < 24) hourSummary[h] += 1;
+
+      // Sazonalidade dia
+      const d = Number(r.diaSemana ?? 1);
+      if (d >= 0 && d < 7) weekdaySummary[d] += 1;
+    });
+
+    res.json({
+      summary: {
+        totalOrders,
+        totalRevenue,
+        totalFreight,
+        totalCost,
+        totalProfit: totalRevenue - totalCost - totalFreight,
+      },
+      uf: Object.values(ufSummary),
+      channel: Object.values(channelSummary),
+      hour: hourSummary.map((count, hr) => ({ label: `${String(hr).padStart(2, '0')}h`, count })),
+      weekday: weekdaySummary.map((count, wday) => {
+        const labels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+        return { label: labels[wday], count };
+      }),
+    });
+  } catch (err) {
+    console.error('[GET /api/sales-intelligence/summary]', err);
+    next(err);
+  }
+});
+
 module.exports = router;
+
