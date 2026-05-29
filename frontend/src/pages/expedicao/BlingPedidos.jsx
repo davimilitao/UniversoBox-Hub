@@ -38,7 +38,8 @@ function addDias(iso, n) {
 
 function fmtBR(iso) {
   if (!iso) return '—';
-  const [y, m, d] = iso.split('-');
+  const clean = iso.substring(0, 10);
+  const [y, m, d] = clean.split('-');
   return `${d}/${m}/${y}`;
 }
 
@@ -954,7 +955,8 @@ export function BlingPedidos() {
     const grupos = { hoje: [], amanha: [], futuros: [] };
     nfs.forEach(nf => {
       if (!isNotaDisponivel(nf)) return;
-      const dt = nf.dataEmissao;
+      const dt = (nf.dataEmissao || '').substring(0, 10);
+      if (!dt) return;
       if (dt <= hojeStr) {
         grupos.hoje.push(nf);
       } else if (dt === amanhaStr) {
@@ -988,7 +990,8 @@ export function BlingPedidos() {
       const amanha = addDias(hoje, 1);
       lista = lista.filter(nf => {
         if (!isNotaDisponivel(nf)) return false;
-        const dt = nf.dataEmissao;
+        const dt = (nf.dataEmissao || '').substring(0, 10);
+        if (!dt) return false;
         if (selectedDayFilter === 'hoje') return dt <= hoje;
         if (selectedDayFilter === 'amanha') return dt === amanha;
         if (selectedDayFilter === 'futuros') return dt > amanha;
