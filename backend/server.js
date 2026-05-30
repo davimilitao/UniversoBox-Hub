@@ -171,7 +171,7 @@ function getTerminalId(req) {
 }
 
 function assertMarketplace(v) {
-  const ok = ['MERCADO_LIVRE', 'SHOPEE', 'OUTROS'];
+  const ok = ['MERCADO_LIVRE', 'SHOPEE', 'MAGALU', 'TIKTOK', 'OUTROS'];
   if (!ok.includes(v)) {
     const e = new Error(`Invalid marketplace. Use one of: ${ok.join(' | ')}`);
     e.statusCode = 400;

@@ -901,3 +901,29 @@ html, body, #root {
   color: #16a34a !important;
 }
 
+/* Custom channel badge overrides for clean theme (accessibility & contrast) */
+[data-theme="clean"] .text-yellow-400        { color: #b45309 !important; } /* Amber/Brown for contrast */
+[data-theme="clean"] .bg-yellow-500\/10      { background-color: rgba(217, 119, 6, 0.08) !important; }
+[data-theme="clean"] .border-yellow-500\/30  { border-color: rgba(217, 119, 6, 0.20) !important; }
+[data-theme="clean"] .bg-yellow-500\/15      { background-color: rgba(217, 119, 6, 0.12) !important; }
+
+[data-theme="clean"] .text-blue-400          { color: #1d4ed8 !important; } /* Darker blue */
+[data-theme="clean"] .bg-blue-500\/10        { background-color: rgba(37, 99, 235, 0.08) !important; }
+[data-theme="clean"] .border-blue-500\/30    { border-color: rgba(37, 99, 235, 0.20) !important; }
+
+[data-theme="clean"] .text-orange-400        { color: #c2410c !important; } /* Darker orange */
+[data-theme="clean"] .bg-orange-500\/10      { background-color: rgba(234, 88, 12, 0.08) !important; }
+[data-theme="clean"] .border-orange-500\/30  { border-color: rgba(234, 88, 12, 0.20) !important; }
+
+[data-theme="clean"] .text-purple-400        { color: #6d28d9 !important; } /* Darker purple/violet */
+[data-theme="clean"] .bg-purple-500\/10      { background-color: rgba(124, 58, 237, 0.08) !important; }
+[data-theme="clean"] .border-purple-500\/30  { border-color: rgba(124, 58, 237, 0.20) !important; }
+
+[data-theme="clean"] .text-pink-400          { color: #be185d !important; } /* Darker pink */
+[data-theme="clean"] .bg-pink-500\/10        { background-color: rgba(236, 72, 153, 0.08) !important; }
+[data-theme="clean"] .border-pink-500\/30    { border-color: rgba(236, 72, 153, 0.20) !important; }
+
+[data-theme="clean"] .border-slate-600       { border-color: rgba(15, 23, 42, 0.15) !important; }
+[data-theme="clean"] .bg-slate-700\/80       { background-color: rgba(15, 23, 42, 0.08) !important; }
+
+

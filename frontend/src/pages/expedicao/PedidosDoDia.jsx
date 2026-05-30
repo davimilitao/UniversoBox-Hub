@@ -373,16 +373,15 @@ async function printBinLabel(orderId, item, onStatus) {
     throw new Error('Agente de Impressão Local offline ou com erro: ' + err.message);
   }
 }
-
 // ─── Marketplace Logos ────────────────────────────────────────────────────────
 function MktLogo({ mkt, size = 'sm' }) {
   const lg = size === 'lg';
-  const base = `inline-flex items-center gap-1 font-black rounded-lg leading-none select-none ${lg ? 'px-3 py-1.5 text-sm gap-1.5' : 'px-2 py-1 text-[10px]'}`;
+  const base = `inline-flex items-center gap-1.5 font-bold rounded-lg leading-none select-none ${lg ? 'px-3 py-1.5 text-sm gap-1.5' : 'px-2 py-1 text-[11px]'}`;
 
   if (mkt === 'MERCADO_LIVRE') {
     return (
       <span title="Mercado Livre" className={base} style={{ background: '#FFE600', color: '#1a2060' }}>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width={lg?14:10} height={lg?14:10}>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width={lg?14:11} height={lg?14:11}>
           <path d="M12 1C5.925 1 1 5.925 1 12s4.925 11 11 11 11-4.925 11-11S18.075 1 12 1zm-1 6h2v2h-2V7zm0 4h2v6h-2v-6z"/>
         </svg>
         <span>Mercado Livre</span>
@@ -392,16 +391,33 @@ function MktLogo({ mkt, size = 'sm' }) {
   if (mkt === 'SHOPEE') {
     return (
       <span title="Shopee" className={base} style={{ background: '#EE4D2D', color: '#fff' }}>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width={lg?14:10} height={lg?14:10}>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width={lg?14:11} height={lg?14:11}>
           <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zm6 3a3 3 0 0 1 3 3H9a3 3 0 0 1 3-3z"/>
         </svg>
         <span>Shopee</span>
       </span>
     );
   }
+  if (mkt === 'MAGALU') {
+    return (
+      <span title="Magalu" className={base} style={{ background: '#0086FF', color: '#fff' }}>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width={lg?14:11} height={lg?14:11}>
+          <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14h-2v-4h2zm0-6h-2V8h2z"/>
+        </svg>
+        <span>Magalu</span>
+      </span>
+    );
+  }
+  if (mkt === 'TIKTOK') {
+    return (
+      <span title="TikTok" className={base} style={{ background: '#000000', color: '#fff', border: '1px solid rgba(255,255,255,0.2)' }}>
+        <span>TikTok</span>
+      </span>
+    );
+  }
   return (
     <span className={`${base} bg-slate-700 border border-slate-600 text-slate-300`}>
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width={lg?14:10} height={lg?14:10}>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width={lg?14:11} height={lg?14:11}>
         <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
       </svg>
       {mkt || 'OUTROS'}
@@ -1030,7 +1046,7 @@ function RelatorioDia({ orders }) {
 
   if (packed.length === 0) return null;
 
-  const mktOrder = ['MERCADO_LIVRE', 'SHOPEE', 'OUTROS'];
+  const mktOrder = ['MERCADO_LIVRE', 'SHOPEE', 'MAGALU', 'TIKTOK', 'OUTROS'];
 
   return (
     <div className="mx-4 mb-3 rounded-2xl border border-white/8 overflow-hidden bg-slate-900/60 flex-shrink-0">
@@ -1054,13 +1070,13 @@ function RelatorioDia({ orders }) {
             ].map((m, i) => (
               <div key={i} className="flex flex-col items-center gap-0.5 p-2.5 rounded-xl bg-slate-800/60 border border-white/5">
                 <span className={`font-black text-xl leading-none ${m.color}`}>{m.value}</span>
-                <span className="text-[10px] text-slate-600 font-medium text-center leading-tight">{m.label}</span>
+                <span className="text-[11px] text-slate-600 font-medium text-center leading-tight">{m.label}</span>
               </div>
             ))}
           </div>
           {/* Por marketplace */}
           <div className="space-y-1.5">
-            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Por canal</p>
+            <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Por canal</p>
             {mktOrder.filter(m => stats.byMkt[m]).map(m => {
               const n = stats.byMkt[m];
               const pct = Math.round((n / stats.total) * 100);
@@ -1069,7 +1085,7 @@ function RelatorioDia({ orders }) {
                   <div className="w-24 shrink-0"><MktLogo mkt={m} /></div>
                   <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
                     <div className="h-full rounded-full transition-all"
-                      style={{ width: `${pct}%`, background: m==='MERCADO_LIVRE'?'#ca8a04':m==='SHOPEE'?'#ea580c':'#475569' }} />
+                      style={{ width: `${pct}%`, background: m === 'MERCADO_LIVRE' ? '#ca8a04' : m === 'SHOPEE' ? '#ea580c' : m === 'MAGALU' ? '#0086ff' : m === 'TIKTOK' ? '#d01c60' : '#475569' }} />
                   </div>
                   <span className="font-mono text-xs font-bold text-slate-400 w-8 text-right">{n}</span>
                 </div>

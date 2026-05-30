@@ -125,18 +125,26 @@ function canalCor(mkt) {
   return COR_CANAL.slate;
 }
 
+const mktLabels = {
+  MERCADO_LIVRE: 'Mercado Livre',
+  SHOPEE: 'Shopee',
+  MAGALU: 'Magalu',
+  TIKTOK: 'TikTok',
+  OUTROS: 'Outros'
+};
+
 // ─── Badge situação ───────────────────────────────────────────────────────────
 function SituacaoBadge({ sit }) {
   const s = (sit || '').toLowerCase();
   if (s.includes('cancelada'))
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/25 uppercase tracking-wider"><XCircle size={9}/> Cancelada</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-500/10 text-red-400 border border-red-500/25 uppercase tracking-wider"><XCircle size={11}/> Cancelada</span>;
   if (s === 'autorizada')
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25 uppercase tracking-wider"><Clock size={9}/> Autorizada</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25 uppercase tracking-wider"><Clock size={11}/> Autorizada</span>;
   if (isSemDanfe(sit))
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25 uppercase tracking-wider"><Clock size={9}/> Sem DANFE</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25 uppercase tracking-wider"><Clock size={11}/> Sem DANFE</span>;
   if (isComDanfe(sit))
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 uppercase tracking-wider status-success"><CheckCircle2 size={9}/> DANFE OK</span>;
-  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-700 text-slate-400 border border-slate-600 uppercase tracking-wider">{sit||'—'}</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 uppercase tracking-wider status-success"><CheckCircle2 size={11}/> DANFE OK</span>;
+  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-slate-700 text-slate-400 border border-slate-600 uppercase tracking-wider">{sit||'—'}</span>;
 }
 
 // ─── Thumbnail de produto ─────────────────────────────────────────────────────
@@ -144,6 +152,54 @@ function ProductThumb() {
   return (
     <div className="shrink-0 w-10 h-10 rounded-lg bg-slate-900 border border-white/5 flex items-center justify-center">
       <Package size={14} className="text-slate-600" />
+    </div>
+  );
+}
+
+// ─── Card List Skeleton Loader ────────────────────────────────────────────────
+function NFCardListSkeleton() {
+  return (
+    <div className="space-y-2.5 animate-pulse">
+      {/* Header skeleton */}
+      <div className="flex items-center justify-between px-3 py-2 border border-white/[0.04] bg-slate-900/30 rounded-lg">
+        <div className="w-28 h-4 bg-slate-800 rounded" />
+        <div className="w-20 h-4 bg-slate-800 rounded" />
+      </div>
+      
+      {/* Cards skeletons */}
+      {Array(3).fill(0).map((_, i) => (
+        <div key={i} className="rounded-xl border border-white/5 bg-slate-800/10 p-3 flex flex-col gap-3">
+          <div className="flex items-center justify-between border-b border-white/5 pb-2">
+            <div className="flex items-center gap-2 flex-1">
+              <div className="w-4 h-4 rounded bg-slate-800" />
+              <div className="w-16 h-3.5 bg-slate-800 rounded" />
+              <div className="w-16 h-4 bg-slate-800 rounded-full" />
+              <div className="w-32 h-4 bg-slate-800 rounded" />
+            </div>
+            <div className="w-16 h-3.5 bg-slate-800 rounded" />
+          </div>
+          
+          <div className="space-y-2 py-1">
+            <div className="flex items-center gap-2.5 rounded-lg bg-slate-900/10 p-1.5 border border-white/[0.02]">
+              <div className="w-9 h-9 rounded bg-slate-800" />
+              <div className="flex-1 space-y-1.5">
+                <div className="w-3/4 h-3 bg-slate-800 rounded" />
+                <div className="w-1/4 h-2.5 bg-slate-800 rounded" />
+              </div>
+              <div className="w-10 h-10 rounded bg-slate-800" />
+              <div className="w-16 h-6 bg-slate-800 rounded" />
+            </div>
+          </div>
+          
+          <div className="flex items-center justify-between pt-2 border-t border-white/5">
+            <div className="w-16 h-4 bg-slate-800 rounded" />
+            <div className="flex gap-1.5">
+              <div className="w-14 h-6 bg-slate-800 rounded-lg" />
+              <div className="w-16 h-6 bg-slate-800 rounded-lg" />
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -349,11 +405,13 @@ function ResumoCard({ label, valor, sub, cor = 'slate' }) {
 // ─── Day Group Card ───────────────────────────────────────────────────────────
 const DayGroupCard = memo(function DayGroupCard({ title, list, color, onBulkImport, onFilterClick }) {
   const mktGroups = useMemo(() => {
-    const groups = { MERCADO_LIVRE: [], SHOPEE: [], OUTROS: [] };
+    const groups = { MERCADO_LIVRE: [], SHOPEE: [], MAGALU: [], TIKTOK: [], OUTROS: [] };
     list.forEach(nf => {
       let m = (nf.marketplace || 'OUTROS').toUpperCase();
       if (m.includes('MERCADO') || m.includes('MELI')) m = 'MERCADO_LIVRE';
       else if (m.includes('SHOPEE')) m = 'SHOPEE';
+      else if (m.includes('MAGALU')) m = 'MAGALU';
+      else if (m.includes('TIKTOK')) m = 'TIKTOK';
       else m = 'OUTROS';
       groups[m].push(nf);
     });
@@ -382,7 +440,7 @@ const DayGroupCard = memo(function DayGroupCard({ title, list, color, onBulkImpo
     <div className={`rounded-xl border p-4 ${borderColors[color]} flex flex-col gap-3 backdrop-blur-md`}>
       <div className="flex items-center justify-between border-b border-white/5 pb-2">
         <h3 className={`text-xs font-black uppercase tracking-wider ${textColors[color]}`}>{title}</h3>
-        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeColors[color]}`}>
+        <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${badgeColors[color]}`}>
           {list.length} {list.length === 1 ? 'Nota' : 'Notas'}
         </span>
       </div>
@@ -390,7 +448,7 @@ const DayGroupCard = memo(function DayGroupCard({ title, list, color, onBulkImpo
       <div className="flex flex-col gap-2">
         {Object.entries(mktGroups).map(([mkt, nfs]) => {
           if (nfs.length === 0) return null;
-          const label = mkt === 'MERCADO_LIVRE' ? 'Mercado Livre' : mkt === 'SHOPEE' ? 'Shopee' : 'Outros / News';
+          const label = mktLabels[mkt] || mkt;
           const comDanfe = nfs.filter(n => isComDanfe(n.situacao)).length;
           const semDanfe = nfs.filter(n => isSemDanfe(n.situacao)).length;
 
@@ -404,14 +462,14 @@ const DayGroupCard = memo(function DayGroupCard({ title, list, color, onBulkImpo
                 <span className="text-xs font-bold text-slate-300 group-hover:text-slate-100 transition-colors">{label}</span>
                 <span className="text-xs font-black text-white bg-slate-700/80 px-2 py-0.5 rounded">{nfs.length}</span>
               </div>
-              <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <div className="flex items-center justify-between text-[11px] text-slate-500">
                 <span>DANFE: {comDanfe} ok · {semDanfe} sem</span>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     onBulkImport(mkt);
                   }}
-                  className="text-emerald-400 hover:text-emerald-300 font-bold underline transition-colors text-[10px]"
+                  className="text-emerald-400 hover:text-emerald-300 font-bold underline transition-colors text-xs"
                 >
                   Expedir Lote
                 </button>
@@ -444,21 +502,21 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
             disabled={jaCriado}
             className="w-4 h-4 rounded border-white/15 bg-slate-900 text-emerald-500 focus:ring-0 focus:ring-offset-0 disabled:opacity-30 cursor-pointer transition-colors"
           />
-          <span className="text-[10px] font-mono text-slate-500 shrink-0">#{nf.numero}</span>
-          <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-black border uppercase tracking-wider whitespace-nowrap ${canalCor(nf.marketplace)}`}>
-            {nf.marketplace || '?'}
+          <span className="text-xs font-mono text-slate-500 shrink-0">#{nf.numero}</span>
+          <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-black border uppercase tracking-wider whitespace-nowrap ${canalCor(nf.marketplace)}`}>
+            {mktLabels[nf.marketplace] || nf.marketplace || '?'}
           </span>
-          <span className="text-xs font-bold text-slate-200 truncate">
+          <span className="text-sm font-bold text-slate-200 truncate">
             {cli.nome} {cli.apelido && <span className="text-slate-400 font-bold ml-1">({cli.apelido})</span>}
           </span>
         </div>
 
-        <div className="flex items-center gap-2 text-[10px] text-slate-500 shrink-0">
+        <div className="flex items-center gap-2 text-xs text-slate-500 shrink-0">
           <span>{fmtBR(nf.dataEmissao)}</span>
           <SituacaoBadge sit={nf.situacao} />
           {jaCriado && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider status-success">
-              <CheckCircle2 size={9}/> No sistema
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider status-success">
+              <CheckCircle2 size={10}/> No sistema
             </span>
           )}
         </div>
@@ -468,14 +526,14 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
       <div className="flex-1">
         {detalhe ? (
           detalhe.error ? (
-            <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-medium flex items-center justify-between gap-1.5">
+            <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium flex items-center justify-between gap-1.5">
               <span className="flex items-center gap-1">
-                <AlertTriangle size={12} />
+                <AlertTriangle size={13} />
                 <span>{detalhe.message}</span>
               </span>
               <button
                 onClick={onReload}
-                className="px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/35 text-red-300 hover:text-white font-bold transition-colors uppercase text-[9px] shrink-0"
+                className="px-2.5 py-1 rounded bg-red-500/20 hover:bg-red-500/35 text-red-300 hover:text-white font-bold transition-colors uppercase text-[11px] shrink-0"
               >
                 Recarregar
               </button>
@@ -483,53 +541,58 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
           ) : (
             <div className="space-y-1.5">
               {detalhe.itens?.map((it, idx) => (
-                <div key={idx} className="flex items-center gap-2 rounded-lg bg-slate-900/35 border border-white/[0.03] p-1.5 hover:border-white/5 transition-colors">
-                  <div className="shrink-0 w-8 h-8 rounded bg-slate-900 border border-white/5 flex items-center justify-center">
-                    <Package size={12} className="text-slate-600" />
+                <div key={idx} className="flex items-center gap-2.5 rounded-lg bg-slate-900/35 border border-white/[0.03] p-1.5 hover:border-white/5 transition-colors">
+                  <div className="shrink-0 w-9 h-9 rounded bg-slate-900 border border-white/5 flex items-center justify-center overflow-hidden">
+                    <img 
+                      src={it.image || '/assets/placeholder.png'} 
+                      onError={e => { e.target.src = '/assets/placeholder.png'; }} 
+                      className="w-full h-full object-cover"
+                      alt={it.nome || 'Produto'}
+                    />
                   </div>
                   
                   <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-semibold text-slate-200 line-clamp-1 leading-tight">{it.nome || '—'}</p>
-                    <p className="text-[9px] text-slate-500 font-mono mt-0.5 flex items-center gap-1">
-                      <Tag size={9} /> {it.sku || 'Sem SKU'}
+                    <p className="text-xs font-bold text-slate-200 line-clamp-1 leading-tight">{it.nome || '—'}</p>
+                    <p className="text-[11px] text-slate-500 font-mono mt-0.5 flex items-center gap-1">
+                      <Tag size={10} /> {it.sku || 'Sem SKU'}
                     </p>
                   </div>
 
-                  <div className="shrink-0 flex flex-col items-center justify-center w-9 h-9 rounded bg-slate-800 border border-white/5">
-                    <span className="text-[7px] text-slate-500 font-bold uppercase leading-none">Qtd</span>
-                    <span className="text-xs font-black text-white leading-none mt-0.5">{it.qty}</span>
+                  <div className="shrink-0 flex flex-col items-center justify-center w-10 h-10 rounded bg-slate-800 border border-white/5">
+                    <span className="text-[11px] text-slate-500 font-bold uppercase leading-none">Qtd</span>
+                    <span className="text-sm font-black text-white leading-none mt-0.5">{it.qty}</span>
                   </div>
 
-                  <div className="shrink-0 text-right w-16">
-                    <span className="text-[7px] text-slate-500 block leading-none">Unitário</span>
-                    <span className="text-[10px] font-semibold text-slate-300 tabular-nums leading-none mt-1.5 block">{BRL.format(it.preco)}</span>
+                  <div className="shrink-0 text-right w-20">
+                    <span className="text-[11px] text-slate-500 block leading-none">Unitário</span>
+                    <span className="text-xs font-semibold text-slate-300 tabular-nums leading-none mt-1 block">{BRL.format(it.preco)}</span>
                   </div>
                 </div>
               ))}
               
               {detalhe.numeroPedido && (
-                <div className="flex items-center gap-1 text-[9px] text-slate-500 font-mono pl-1 pt-0.5">
-                  <Hash size={9}/> Pedido na loja: <span className="text-slate-400">{detalhe.numeroPedido}</span>
+                <div className="flex items-center gap-1 text-[11px] text-slate-500 font-mono pl-1 pt-0.5">
+                  <Hash size={10}/> Pedido na loja: <span className="text-slate-400">{detalhe.numeroPedido}</span>
                 </div>
               )}
             </div>
           )
         ) : loadingDetalhe ? (
           <div className="space-y-1.5 py-0.5">
-            <div className="h-10 rounded-lg bg-slate-900/30 border border-white/5 animate-pulse flex items-center px-3 justify-between">
+            <div className="h-12 rounded-lg bg-slate-900/30 border border-white/5 animate-pulse flex items-center px-3 justify-between">
               <div className="flex items-center gap-2 flex-1">
-                <div className="w-7 h-7 rounded bg-slate-800 animate-pulse shrink-0" />
+                <div className="w-8 h-8 rounded bg-slate-800 animate-pulse shrink-0" />
                 <div className="space-y-1.5 flex-1">
-                  <div className="h-2.5 w-32 bg-slate-800 rounded animate-pulse" />
-                  <div className="h-2 w-16 bg-slate-800 rounded animate-pulse" />
+                  <div className="h-3 w-32 bg-slate-800 rounded animate-pulse" />
+                  <div className="h-2.5 w-16 bg-slate-800 rounded animate-pulse" />
                 </div>
               </div>
               <div className="w-8 h-8 rounded bg-slate-800 animate-pulse shrink-0" />
             </div>
           </div>
         ) : (
-          <div className="py-1.5 text-center text-[10px] text-slate-600 flex items-center justify-center gap-1.5">
-            <Loader2 size={10} className="animate-spin" /> Carregando produtos...
+          <div className="py-1.5 text-center text-xs text-slate-600 flex items-center justify-center gap-1.5">
+            <Loader2 size={12} className="animate-spin" /> Carregando produtos...
           </div>
         )}
       </div>
@@ -537,8 +600,8 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
       {/* FOOTER */}
       <div className="flex items-center justify-between gap-3 pt-2 border-t border-white/5 flex-wrap">
         <div className="flex items-baseline gap-1">
-          <span className="text-[8px] text-slate-500 uppercase font-black">Total</span>
-          <span className="text-xs font-black text-white tabular-nums">
+          <span className="text-[11px] text-slate-500 uppercase font-black">Total</span>
+          <span className="text-sm font-black text-white tabular-nums">
             {BRL.format(nf.valorTotal || detalhe?.valorTotal || 0)}
           </span>
         </div>
@@ -549,12 +612,12 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
             <button
               onClick={() => onFlexToggle(nf.id)}
               title="Marcar como FLEX"
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors
+              className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors
                 ${isFlex
                   ? 'bg-yellow-500/15 border-yellow-500/30 text-yellow-400 scale-102'
                   : 'bg-slate-800 border-white/5 text-slate-500 hover:text-slate-300'}`}
             >
-              <Flame size={10} className={isFlex ? 'text-yellow-400 fill-yellow-400/20' : ''} />
+              <Flame size={12} className={isFlex ? 'text-yellow-400 fill-yellow-400/20' : ''} />
               {isFlex ? 'FLEX — Rápido' : 'Flex'}
             </button>
           )}
@@ -563,20 +626,20 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
           {jaCriado ? (
             <Link
               to="/expedicao/pedidos"
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-700 border border-white/10 text-slate-300 hover:text-white hover:border-white/20 transition-all"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-700 border border-white/10 text-slate-300 hover:text-white hover:border-white/20 transition-all"
             >
-              <ExternalLink size={10}/> Separar
+              <ExternalLink size={12}/> Separar
             </Link>
           ) : (
             <button
               onClick={() => onClonar(nf, detalhe)}
               disabled={!detalhe || detalhe.error || !detalhe.itens?.length || eClonar}
-              className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-[10px] font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-lg shadow-emerald-500/10 hover:scale-[1.02] active:scale-[0.98] transition-all"
+              className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white shadow-lg shadow-emerald-500/10 hover:scale-[1.02] active:scale-[0.98] transition-all"
             >
               {eClonar ? (
-                <><Loader2 size={10} className="animate-spin" /> Salvando...</>
+                <><Loader2 size={12} className="animate-spin" /> Salvando...</>
               ) : (
-                <><PackagePlus size={10} /> Expedir</>
+                <><PackagePlus size={12} /> Expedir</>
               )}
             </button>
           )}
@@ -920,7 +983,9 @@ export function BlingPedidos() {
       let m = (nf.marketplace || 'OUTROS').toUpperCase();
       if (channel === 'MERCADO_LIVRE') return m.includes('MERCADO') || m.includes('MELI');
       if (channel === 'SHOPEE') return m.includes('SHOPEE');
-      return !m.includes('MERCADO') && !m.includes('MELI') && !m.includes('SHOPEE');
+      if (channel === 'MAGALU') return m.includes('MAGALU');
+      if (channel === 'TIKTOK') return m.includes('TIKTOK');
+      return !m.includes('MERCADO') && !m.includes('MELI') && !m.includes('SHOPEE') && !m.includes('MAGALU') && !m.includes('TIKTOK');
     });
 
     if (!filtered.length) {
@@ -1005,7 +1070,9 @@ export function BlingPedidos() {
         let m = (nf.marketplace || 'OUTROS').toUpperCase();
         if (selectedChannelFilter === 'MERCADO_LIVRE') return m.includes('MERCADO') || m.includes('MELI');
         if (selectedChannelFilter === 'SHOPEE') return m.includes('SHOPEE');
-        if (selectedChannelFilter === 'OUTROS') return !m.includes('MERCADO') && !m.includes('MELI') && !m.includes('SHOPEE');
+        if (selectedChannelFilter === 'MAGALU') return m.includes('MAGALU');
+        if (selectedChannelFilter === 'TIKTOK') return m.includes('TIKTOK');
+        if (selectedChannelFilter === 'OUTROS') return !m.includes('MERCADO') && !m.includes('MELI') && !m.includes('SHOPEE') && !m.includes('MAGALU') && !m.includes('TIKTOK');
         return true;
       });
     }
@@ -1057,17 +1124,6 @@ export function BlingPedidos() {
 
   return (
     <div className="text-slate-100 px-2 py-3 md:px-4 md:py-6 w-full overflow-y-auto flex-1 relative">
-
-      {/* Glassmorphism Full Loading Blocker */}
-      {loadingNfs && (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/85 backdrop-blur-md transition-all duration-300">
-          <div className="flex flex-col items-center gap-4 p-6 rounded-2xl bg-slate-900 border border-white/10 shadow-2xl relative overflow-hidden">
-            <div className="absolute -top-12 -left-12 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl animate-pulse" />
-            <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
-            <p className="text-xs font-semibold text-slate-200 tracking-wide mt-2">{loadingMsg || 'Buscando dados no Bling...'}</p>
-          </div>
-        </div>
-      )}
 
       {/* Floating Action Bar for Bulk Import */}
       {selectedIds.size > 0 && (
@@ -1158,24 +1214,24 @@ export function BlingPedidos() {
                   <RefreshCw size={12} className={loadingNfs ? 'animate-spin' : ''}/>
                 </button>
               </div>
-              <p className="text-[10px] text-slate-500 leading-tight">NFs de saída autorizadas — importe para a fila de separação</p>
+              <p className="text-[11px] text-slate-500 leading-tight">NFs de saída autorizadas — importe para a fila de separação</p>
               
               <div className="flex items-center justify-between gap-1.5 pt-2 border-t border-white/5 flex-wrap">
                 {status && (status.authorized ? (
-                  <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                  <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"/>
                     Bling ativo
                   </div>
                 ) : (
                   <Link to="/bling/auth"
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-[10px] font-bold hover:bg-yellow-500/20 transition-colors">
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-bold hover:bg-yellow-500/20 transition-colors">
                     <Plug size={10}/> Conectar
                   </Link>
                 ))}
                 
                 <div className="flex items-center gap-1">
                   <Link to="/expedicao/pedidos"
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 border border-white/10 text-slate-400 text-[10px] hover:text-slate-200 hover:border-white/20 transition-colors">
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 border border-white/10 text-slate-400 text-xs hover:text-slate-200 hover:border-white/20 transition-colors">
                     <ExternalLink size={10}/> Pedidos do Dia
                   </Link>
                   {status && status.authorized && (
@@ -1190,13 +1246,13 @@ export function BlingPedidos() {
 
             {/* Calendário e Filtros de Canais */}
             <div className="bg-slate-900/40 border border-white/[0.06] rounded-xl p-3 shadow-md flex flex-col gap-2.5">
-              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Período & Canais</span>
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Período & Canais</span>
               
               {/* Date button */}
               <div className="relative" ref={pickerRef}>
                 <button
                   onClick={() => setShowPicker(v => !v)}
-                  className={`w-full flex items-center justify-between px-2.5 py-1 rounded-lg text-[11px] border transition-colors
+                  className={`w-full flex items-center justify-between px-2.5 py-1 rounded-lg text-xs border transition-colors
                     ${showPicker ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-white/10 text-slate-300 hover:border-white/20'}`}
                 >
                   <span className="flex items-center gap-1.5 truncate">
@@ -1216,7 +1272,7 @@ export function BlingPedidos() {
               <div className="flex flex-wrap gap-1">
                 {CANAIS.map(c => (
                   <button key={c.id} onClick={() => setCanalSel(c.id)}
-                    className={`px-2 py-0.5 rounded-full text-[9px] font-bold border transition-colors
+                    className={`px-2.5 py-1 rounded-full text-xs font-bold border transition-colors
                       ${canalSel === c.id
                         ? c.id === 'all' ? 'bg-slate-600 border-slate-500 text-white' : COR_CANAL[c.cor]
                         : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
@@ -1229,7 +1285,7 @@ export function BlingPedidos() {
               <div className="flex gap-0.5 border-t border-white/5 pt-2">
                 {[{id:'all',label:'Todas'},{id:'sem_danfe',label:'Sem DANFE'},{id:'danfe',label:'Com DANFE'}].map(s => (
                   <button key={s.id} onClick={() => setSituacaoSel(s.id)}
-                    className={`flex-1 text-center py-1 rounded-md text-[9px] font-bold border transition-colors
+                    className={`flex-1 text-center py-1.5 rounded-md text-xs font-bold border transition-colors
                       ${situacaoSel === s.id ? 'bg-slate-600 border-slate-500 text-white' : 'bg-slate-800 border-white/10 text-slate-500 hover:text-slate-300'}`}>
                     {s.label}
                   </button>
@@ -1252,7 +1308,7 @@ export function BlingPedidos() {
               <div className="bg-slate-900/40 border border-white/[0.06] rounded-xl p-3 shadow-md flex flex-col gap-2">
                 <div className="flex items-center gap-1.5 border-b border-white/5 pb-1.5">
                   <ShoppingBag className="text-emerald-400" size={13} />
-                  <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-200">Coletas Programadas</h2>
+                  <h2 className="text-xs font-black uppercase tracking-wider text-slate-200">Coletas Programadas</h2>
                 </div>
                 
                 <div className="flex flex-col gap-1.5 font-sans">
@@ -1284,7 +1340,7 @@ export function BlingPedidos() {
                     />
                   )}
                   {groupedByDay.hoje.length === 0 && groupedByDay.amanha.length === 0 && groupedByDay.futuros.length === 0 && (
-                    <span className="text-[10px] text-slate-500 text-center py-2">Nenhuma coleta identificada.</span>
+                    <span className="text-[11px] text-slate-500 text-center py-2">Nenhuma coleta identificada.</span>
                   )}
                 </div>
               </div>
@@ -1321,19 +1377,21 @@ export function BlingPedidos() {
             )}
 
             {/* Listagem principal */}
-            {!loadingNfs && !erro && (
+            {loadingNfs ? (
+              <NFCardListSkeleton />
+            ) : !erro && (
               !hasFetched ? (
                 <div className="flex flex-col items-center justify-center py-16 px-4 gap-4 bg-slate-900/20 border border-white/[0.04] rounded-xl text-center">
                   <Inbox size={36} className="text-slate-600"/>
                   <div>
                     <h3 className="text-xs font-bold text-slate-300">Pronto para carregar</h3>
-                    <p className="text-slate-500 text-[10px] mt-1 max-w-xs mx-auto">
+                    <p className="text-slate-500 text-[11px] mt-1 max-w-xs mx-auto">
                       Selecione o período desejado no painel ao lado e clique em buscar para carregar as notas autorizadas.
                     </p>
                   </div>
                   <button
                     onClick={() => { fetchStatus(); fetchNFs(); }}
-                    className="px-5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition-all shadow-md active:scale-95"
+                    className="px-5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md active:scale-95"
                   >
                     Buscar Notas Fiscais
                   </button>
@@ -1351,7 +1409,7 @@ export function BlingPedidos() {
                 <div className="space-y-2">
                   
                   {/* List Header com Checkbox Geral */}
-                  <div className="flex items-center justify-between px-3 py-1.5 border border-white/[0.04] bg-slate-900/30 rounded-lg text-[10px]">
+                  <div className="flex items-center justify-between px-3 py-1.5 border border-white/[0.04] bg-slate-900/30 rounded-lg text-xs">
                     <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -1359,9 +1417,9 @@ export function BlingPedidos() {
                         onChange={handleSelectAllToggle}
                         className="w-4 h-4 rounded border-white/15 bg-slate-950 text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer transition-colors"
                       />
-                      <span className="font-extrabold text-slate-500 uppercase tracking-wider">Selecionar Todos</span>
+                      <span className="font-extrabold text-slate-500 uppercase tracking-wider text-xs">Selecionar Todos</span>
                     </div>
-                    <span className="font-bold text-slate-600">
+                    <span className="font-bold text-slate-600 text-xs">
                       Exibindo {nfsFiltradas.length} de {nfs.length} Notas
                     </span>
                   </div>
@@ -1384,9 +1442,9 @@ export function BlingPedidos() {
                     />
                   ))}
 
-                  <p className="text-[10px] text-slate-700 text-center pt-2">
-                    Fim dos pedidos exibidos.
-                  </p>
+                   <p className="text-xs text-slate-700 text-center pt-2">
+                     Fim dos pedidos exibidos.
+                   </p>
                 </div>
               )
             )}

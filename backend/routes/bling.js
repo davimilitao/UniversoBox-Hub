@@ -87,6 +87,8 @@ function detectarMkt(nf) {
   const nome = (nf.contato?.nome || '').toLowerCase();
   if (loja.includes('mercado') || loja.includes('meli') || loja.includes('mlb')) return 'MERCADO_LIVRE';
   if (loja.includes('shopee')) return 'SHOPEE';
+  if (loja.includes('magalu') || loja.includes('magazine') || loja.includes('luiza')) return 'MAGALU';
+  if (loja.includes('tiktok') || loja.includes('tik tok')) return 'TIKTOK';
   if (nome.match(/\([a-z0-9._-]+\)$/)) return 'MERCADO_LIVRE';
   return 'OUTROS';
 }
@@ -250,6 +252,18 @@ router.get('/pedidos', async (req, res, next) => {
 // ── DETALHES DE UMA NF (com itens) ───────────────────────────────
 router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
   try {
+    const { tenantId } = req.auth;
+    const cacheDocId = `${tenantId}_${req.params.id}`;
+
+    // Tentar ler do cache
+    const cacheDoc = await db.collection('bling_nfe_cache').doc(cacheDocId).get();
+    if (cacheDoc.exists) {
+      const cacheData = cacheDoc.data();
+      if (cacheData.item && cacheData.item.detalhado) {
+        return res.json({ item: cacheData.item });
+      }
+    }
+
     const resp = await blingFetch(`/nfe/${req.params.id}`);
     const n    = resp.data || resp;
 
@@ -257,6 +271,32 @@ router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
     const mkt2         = detectarMkt(n);
     const mlOrderId2   = (mkt2 === 'MERCADO_LIVRE' && numeroPedido) ? String(numeroPedido) : null;
     const sitDesc      = getSituacaoDescricao(n.situacao);
+
+    const baseItens = (n.itens || []).map(it => ({
+      sku:   safeTrim(it.codigo || it.produto?.codigo || ''),
+      nome:  safeTrim(it.descricao || it.produto?.descricao || ''),
+      qty:   Number(it.quantidade ?? it.qty ?? 1),
+      preco: Number(it.valor ?? it.valorUnitario ?? 0),
+    }));
+
+    // Buscar imagens do catálogo local (Firestore) em paralelo
+    const itensComImagens = await Promise.all(
+      baseItens.map(async it => {
+        let image = null;
+        if (it.sku) {
+          try {
+            const pDoc = await db.collection('products').doc(it.sku).get();
+            if (pDoc.exists) {
+              const pData = pDoc.data();
+              image = pData.image || (pData.images && pData.images[0]) || null;
+            }
+          } catch (e) {
+            console.error(`[NfeDetail] Erro ao buscar imagem para SKU ${it.sku}:`, e.message);
+          }
+        }
+        return { ...it, image };
+      })
+    );
 
     const item = {
       id:           n.id,
@@ -271,23 +311,21 @@ router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
       linkDanfe:    n.linkDanfe || null,
       linkPDF:      n.linkPDF || null,
       detalhado:    true,
-      itens: (n.itens || []).map(it => ({
-        sku:   safeTrim(it.codigo || it.produto?.codigo || ''),
-        nome:  safeTrim(it.descricao || it.produto?.descricao || ''),
-        qty:   Number(it.quantidade ?? it.qty ?? 1),
-        preco: Number(it.valor ?? it.valorUnitario ?? 0),
-      })),
+      itens:        itensComImagens,
     };
 
-    // Coleta de dados da Inteligência de Vendas (BI)
+    // Coleta de dados da Inteligência de Vendas (BI) e Caching
     const isDisponivel = sitDesc.toLowerCase().includes('autorizada') ||
                          sitDesc.toLowerCase().includes('danfe') ||
                          sitDesc.toLowerCase().includes('emitida') ||
                          sitDesc.toLowerCase().includes('registrada');
 
     if (isDisponivel) {
-      const { tenantId } = req.auth;
       const docId = `${tenantId}_${n.id}`;
+
+      // Gravação assíncrona do cache
+      db.collection('bling_nfe_cache').doc(docId).set({ item, cachedAt: Date.now() }, { merge: true })
+        .catch(err => console.error('[NfeCache] Erro ao salvar cache local:', err));
 
       // Parsing de valores e dados de destino
       const valorTotal = Number(n.valorTotal || n.totalProdutos || 0);
@@ -330,7 +368,7 @@ router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
         updatedAtMs: Date.now()
       };
 
-      // Gravação assíncrona em background
+      // Gravação assíncrona do BI
       db.collection('sales_intelligence').doc(docId).set(reportData, { merge: true })
         .catch(err => console.error('[SalesIntelligence] Erro ao salvar telemetria:', err));
     }
