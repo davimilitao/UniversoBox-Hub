@@ -279,24 +279,81 @@ router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
       preco: Number(it.valor ?? it.valorUnitario ?? 0),
     }));
 
-    // Buscar imagens do catálogo local (Firestore) em paralelo
+    // Buscar imagens e preços de custo do catálogo local (Firestore) em paralelo
     const itensComImagens = await Promise.all(
       baseItens.map(async it => {
         let image = null;
+        let precoCusto = 0;
         if (it.sku) {
           try {
             const pDoc = await db.collection('products').doc(it.sku).get();
             if (pDoc.exists) {
               const pData = pDoc.data();
               image = pData.image || (pData.images && pData.images[0]) || null;
+              precoCusto = Number(pData.precoCusto || 0);
             }
           } catch (e) {
-            console.error(`[NfeDetail] Erro ao buscar imagem para SKU ${it.sku}:`, e.message);
+            console.error(`[NfeDetail] Erro ao buscar produto para SKU ${it.sku}:`, e.message);
           }
         }
-        return { ...it, image };
+        return { ...it, image, precoCusto };
       })
     );
+
+    // Buscar dados reais do pedido de venda no Bling para obter tarifas
+    let realCommission = 0;
+    let realShipping = 0;
+    const orderNum = n.numeroPedidoLoja || n.numeroPedido;
+    if (orderNum) {
+      try {
+        const orderRes = await blingFetch(`/pedidos/vendas?numero=${orderNum}`);
+        const orders = orderRes.data || [];
+        if (orders.length > 0) {
+          const orderId = orders[0].id;
+          const orderDetailRes = await blingFetch(`/pedidos/vendas/${orderId}`);
+          const orderDetail = orderDetailRes.data || orderDetailRes;
+          realCommission = Number(orderDetail.desconto || 0);
+          realShipping = Number(orderDetail.valorFrete || orderDetail.transporte?.frete || 0);
+        }
+      } catch (e) {
+        console.error(`[NfeDetail] Erro ao buscar pedido de venda (${orderNum}):`, e.message);
+      }
+    }
+
+    // Estimativas de comissão e frete com base nas regras do canal
+    let expectedCommission = 0;
+    let expectedShipping = 16.15;
+    const valorTotalNF = Number(n.valorTotal || n.totalProdutos || 0);
+
+    if (mkt2 === 'MERCADO_LIVRE') {
+      const rate = 0.165;
+      const fixed = valorTotalNF < 79 ? 6.00 : 0;
+      expectedCommission = Number((valorTotalNF * rate + fixed).toFixed(2));
+      expectedShipping = valorTotalNF >= 79 ? 23.65 : 0;
+    } else if (mkt2 === 'SHOPEE') {
+      expectedCommission = Number((valorTotalNF * 0.20).toFixed(2));
+      expectedShipping = 0;
+    } else if (mkt2 === 'MAGALU') {
+      expectedCommission = Number((valorTotalNF * 0.16).toFixed(2));
+      expectedShipping = valorTotalNF >= 79 ? 19.90 : 0;
+    } else if (mkt2 === 'TIKTOK') {
+      expectedCommission = Number((valorTotalNF * 0.15).toFixed(2));
+      expectedShipping = 0;
+    } else {
+      expectedCommission = Number((valorTotalNF * 0.15).toFixed(2));
+      expectedShipping = 0;
+    }
+
+    const aliquotaImposto = 0.072;
+    const impostoEstimado = Number((valorTotalNF * aliquotaImposto).toFixed(2));
+    const custoProdutos = itensComImagens.reduce((sum, it) => sum + (it.precoCusto * it.qty), 0);
+
+    const finalCommission = realCommission > 0 ? realCommission : expectedCommission;
+    const finalShipping = realShipping > 0 ? realShipping : expectedShipping;
+
+    const margemContribReal = Number((valorTotalNF - custoProdutos - finalCommission - finalShipping - impostoEstimado).toFixed(2));
+    const margemContribRealPct = valorTotalNF > 0 ? Number(((margemContribReal / valorTotalNF) * 100).toFixed(2)) : 0;
+    const temDivergencia = Math.abs(finalShipping - expectedShipping) > 1.00 || Math.abs(finalCommission - expectedCommission) > 1.00;
 
     const item = {
       id:           n.id,
@@ -307,11 +364,22 @@ router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
       situacao:     sitDesc,
       cliente:      { nome: n.contato?.nome || '', email: n.contato?.email || '' },
       marketplace:  mkt2,
-      valorTotal:   n.valorTotal || n.totalProdutos || 0,
+      valorTotal:   valorTotalNF,
       linkDanfe:    n.linkDanfe || null,
       linkPDF:      n.linkPDF || null,
       detalhado:    true,
       itens:        itensComImagens,
+      financeiro: {
+        custoProdutos,
+        impostoEstimado,
+        expectedCommission,
+        expectedShipping,
+        realCommission: finalCommission,
+        realShipping: finalShipping,
+        margemContribReal,
+        margemContribRealPct,
+        temDivergencia
+      }
     };
 
     // Coleta de dados da Inteligência de Vendas (BI) e Caching
@@ -328,7 +396,7 @@ router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
         .catch(err => console.error('[NfeCache] Erro ao salvar cache local:', err));
 
       // Parsing de valores e dados de destino
-      const valorTotal = Number(n.valorTotal || n.totalProdutos || 0);
+      const valorTotal = valorTotalNF;
       const valorFrete = Number(n.transporte?.frete || 0);
       const cidade = n.contato?.endereco?.municipio || n.contato?.endereco?.cidade || '';
       const uf = n.contato?.endereco?.uf || '';

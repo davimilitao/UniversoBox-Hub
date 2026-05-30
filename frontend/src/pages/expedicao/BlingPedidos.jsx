@@ -487,6 +487,7 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
   const jaCriado = clonados.has(String(nf.id));
   const eClonar  = clonando === nf.id;
   const cli      = parseCliente(nf.cliente?.nome);
+  const [showFinanceiro, setShowFinanceiro] = useState(false);
 
   return (
     <div className={`rounded-xl border transition-all bg-slate-800/30 p-2.5 md:p-3 flex flex-col gap-2
@@ -597,6 +598,111 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
         )}
       </div>
 
+      {/* SEÇÃO COLLAPSIBLE FINANCEIRO & AUDITORIA */}
+      {showFinanceiro && detalhe && detalhe.financeiro && (
+        <div className="mt-1 p-2.5 rounded-lg bg-slate-900/40 border border-white/5 flex flex-col gap-2.5 transition-all animate-fadeIn">
+          <div className="flex items-center justify-between border-b border-white/5 pb-1.5">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+              Resumo Financeiro &amp; Auditoria
+            </span>
+            {detalhe.financeiro.temDivergencia && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-black bg-red-500/15 text-red-400 border border-red-500/20 uppercase animate-pulse">
+                <AlertTriangle size={11} /> Divergência
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {/* Você Pagou / CMV */}
+            <div className="rounded bg-slate-900/20 p-1.5 border border-white/[0.02] flex flex-col justify-between">
+              <span className="text-[11px] text-slate-500 leading-none mb-1">Você Pagou (CMV)</span>
+              <span className="text-xs font-bold text-slate-200 tabular-nums">
+                {BRL.format(detalhe.financeiro.custoProdutos)}
+              </span>
+            </div>
+
+            {/* Custo Tributário */}
+            <div className="rounded bg-slate-900/20 p-1.5 border border-white/[0.02] flex flex-col justify-between">
+              <span className="text-[11px] text-slate-500 leading-none mb-1">Imposto Estimado (7.2%)</span>
+              <span className="text-xs font-bold text-slate-200 tabular-nums">
+                {BRL.format(detalhe.financeiro.impostoEstimado)}
+              </span>
+            </div>
+
+            {/* Taxa do Marketplace */}
+            <div className="col-span-2 rounded bg-slate-900/20 p-2 border border-white/[0.02] flex flex-col gap-1.5">
+              <div className="flex justify-between items-center text-[11px] text-slate-500">
+                <span>Comissão da Loja</span>
+                <span className="font-mono text-slate-400">
+                  Esperado: {BRL.format(detalhe.financeiro.expectedCommission)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-bold text-slate-300">Cobrado Real</span>
+                <span className={`font-black tabular-nums ${
+                  Math.abs(detalhe.financeiro.realCommission - detalhe.financeiro.expectedCommission) > 1.00
+                    ? 'text-red-400 font-bold'
+                    : 'text-slate-200'
+                }`}>
+                  {BRL.format(detalhe.financeiro.realCommission)}
+                </span>
+              </div>
+            </div>
+
+            {/* Frete do Canal */}
+            <div className="col-span-2 rounded bg-slate-900/20 p-2 border border-white/[0.02] flex flex-col gap-1.5">
+              <div className="flex justify-between items-center text-[11px] text-slate-500">
+                <span>Frete do Canal</span>
+                <span className="font-mono text-slate-400">
+                  Esperado: {BRL.format(detalhe.financeiro.expectedShipping)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-bold text-slate-300">Cobrado Real</span>
+                <span className={`font-black tabular-nums ${
+                  Math.abs(detalhe.financeiro.realShipping - detalhe.financeiro.expectedShipping) > 1.00
+                    ? 'text-red-400 font-bold'
+                    : 'text-slate-200'
+                }`}>
+                  {BRL.format(detalhe.financeiro.realShipping)}
+                </span>
+              </div>
+            </div>
+
+            {/* Margem de Contribuição / Ganho Real */}
+            <div className={`col-span-2 rounded p-2 border flex justify-between items-center ${
+              detalhe.financeiro.margemContribRealPct >= 15
+                ? 'bg-green-500/10 border-green-500/20 text-green-500'
+                : detalhe.financeiro.margemContribRealPct > 0
+                  ? 'bg-amber-500/10 border-amber-500/20 text-amber-500'
+                  : 'bg-red-500/10 border-red-500/20 text-red-500'
+            }`}>
+              <div className="flex flex-col">
+                <span className="text-[11px] text-slate-500 leading-none mb-1 font-bold">Margem Líquida Real</span>
+                <span className="text-xs font-black tabular-nums">
+                  {BRL.format(detalhe.financeiro.margemContribReal)}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-sm font-black tracking-wide tabular-nums">
+                  {detalhe.financeiro.margemContribRealPct}%
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Banner de alerta de divergência */}
+          {detalhe.financeiro.temDivergencia && (
+            <div className="p-2 rounded bg-red-500/10 border border-red-500/25 text-red-400 text-xs flex items-start gap-1.5 leading-snug">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <span>
+                <strong>Atenção:</strong> Foram detectadas divergências superiores a R$ 1,00 nas taxas cobradas pelo marketplace comparadas aos custos esperados para este canal. Verifique a conciliação financeira do pedido.
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* FOOTER */}
       <div className="flex items-center justify-between gap-3 pt-2 border-t border-white/5 flex-wrap">
         <div className="flex items-baseline gap-1">
@@ -607,6 +713,20 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* Financeiro Toggle */}
+          {detalhe && !detalhe.error && detalhe.financeiro && (
+            <button
+              onClick={() => setShowFinanceiro(!showFinanceiro)}
+              type="button"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all active:scale-95
+                ${showFinanceiro
+                  ? 'bg-violet-500/15 border-violet-500/30 text-violet-400 font-extrabold'
+                  : 'bg-slate-800 border-white/5 text-slate-400 hover:text-slate-200'}`}
+            >
+              <span>{showFinanceiro ? 'Ocultar Margem' : 'Ver Margem'}</span>
+            </button>
+          )}
+
           {/* Flex Toggle */}
           {!jaCriado && (
             <button
