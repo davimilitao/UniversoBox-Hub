@@ -101,8 +101,8 @@ if ($ok) {
     Write-Error "FAIL_PRINT_SPOOLER"
 }
 `;
-
-    const psCommand = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${psScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`;
+    const encodedScript = Buffer.from(psScript, 'utf16le').toString('base64');
+    const psCommand = `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedScript}`;
 
     exec(psCommand, (error, stdout, stderr) => {
       // Remove o arquivo temporário
