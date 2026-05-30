@@ -344,22 +344,20 @@ router.get('/sales-intelligence/summary', requireFirebaseAuth, async (req, res, 
     const { tenantId } = req.auth;
     const { dataInicio, dataFim } = req.query; // YYYY-MM-DD
 
-    let query = db.collection('sales_intelligence')
-      .where('tenantId', '==', tenantId);
-
-    if (dataInicio) {
-      query = query.where('dateOnly', '>=', dataInicio);
-    }
-    if (dataFim) {
-      query = query.where('dateOnly', '<=', dataFim);
-    }
-
-    const snap = await query.get();
+    const snap = await db.collection('sales_intelligence')
+      .where('tenantId', '==', tenantId)
+      .get();
     const reports = [];
     const skusSet = new Set();
 
     snap.forEach(doc => {
       const data = doc.data();
+      const dt = data.dateOnly || '';
+
+      // Filtro de data em memória para evitar a necessidade de índice composto no Firestore
+      if (dataInicio && dt < dataInicio) return;
+      if (dataFim && dt > dataFim) return;
+
       reports.push(data);
       if (Array.isArray(data.itens)) {
         data.itens.forEach(it => {

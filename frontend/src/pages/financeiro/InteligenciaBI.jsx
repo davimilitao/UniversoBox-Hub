@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '../../utils/getAuthToken';
 import {
   TrendingUp, DollarSign, Truck, Percent, ShoppingBag,
