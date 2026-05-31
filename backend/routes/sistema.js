@@ -337,7 +337,6 @@ router.get('/config/gemini-usage', requireFirebaseAuth, async (req, res, next) =
 
     const logsSnap = await db.collection('gemini_usage_logs')
       .where('tenantId', '==', tenantId)
-      .where('timestamp', '>=', startOfMonth)
       .get();
 
     let totalTokensMonth = 0;
@@ -351,10 +350,14 @@ router.get('/config/gemini-usage', requireFirebaseAuth, async (req, res, next) =
     let totalRequestsToday = 0;
 
     const startOfDayTime = startOfDay.getTime();
+    const startOfMonthTime = startOfMonth.getTime();
 
     logsSnap.forEach(doc => {
       const data = doc.data();
       const ts = data.timestamp?.toDate ? data.timestamp.toDate().getTime() : new Date(data.timestamp).getTime();
+
+      // Filtrar em memoria para evitar a necessidade de criar um indice composto no Firestore
+      if (ts < startOfMonthTime) return;
 
       const pT = Number(data.promptTokens || 0);
       const cT = Number(data.completionTokens || 0);
