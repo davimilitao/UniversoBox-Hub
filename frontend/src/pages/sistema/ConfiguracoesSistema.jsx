@@ -16,7 +16,7 @@ import {
   FileCode, Receipt, ShoppingBag, FileUp,
   Home, LayoutGrid, FlaskConical,
   Globe, Database, Key, ChevronRight, Copy, Check,
-  RefreshCw, AlertTriangle, Unplug, Plug,
+  RefreshCw, AlertTriangle, Unplug, Plug, Sparkles,
 } from 'lucide-react';
 
 import { auth } from '../../firebase';
@@ -148,6 +148,7 @@ export default function ConfiguracoesSistema() {
     { id: 'perfis',   label: 'Perfis de Acesso', Icon: Shield },
     { id: 'usuarios', label: 'Usuários',          Icon: Users },
     { id: 'bling',    label: 'Integração Bling',  Icon: Zap },
+    { id: 'ia',       label: 'IA & Gemini',       Icon: Sparkles },
     { id: 'sistema',  label: 'Sistema',           Icon: Monitor },
   ];
 
@@ -188,6 +189,7 @@ export default function ConfiguracoesSistema() {
         {tab === 'perfis'   && <TabPerfis   showToast={showToast} />}
         {tab === 'usuarios' && <TabUsuarios showToast={showToast} />}
         {tab === 'bling'    && <TabBling    showToast={showToast} />}
+        {tab === 'ia'       && <TabGemini   showToast={showToast} />}
         {tab === 'sistema'  && <TabSistema  showToast={showToast} />}
       </div>
 
@@ -1624,4 +1626,187 @@ async function getBlingOrders() {
     </div>
   );
 }
+
+// ─── TAB: GEMINI/IA USAGE ───────────────────────────────────────────────────
+function TabGemini({ showToast }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [keyInput, setKeyInput] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
+
+  const loadUsage = async () => {
+    setLoading(true);
+    try {
+      const res = await apiFetch('/api/config/gemini-usage');
+      setData(res);
+    } catch (e) {
+      showToast('Erro ao carregar métricas de IA', 'err');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUsage();
+  }, []);
+
+  const handleSaveKey = async (e) => {
+    e.preventDefault();
+    if (!keyInput.trim()) return;
+    setSavingKey(true);
+    try {
+      const res = await apiFetch('/api/catalogo/config/gemini', {
+        method: 'POST',
+        body: JSON.stringify({ apiKey: keyInput.trim() }),
+      });
+      if (res.ok) {
+        showToast('Chave API do Gemini atualizada com sucesso! ✓');
+        setKeyInput('');
+        await loadUsage();
+      }
+    } catch (err) {
+      showToast('Erro ao salvar chave: ' + err.message, 'err');
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="p-8 space-y-4 max-w-2xl">
+        <div className="h-28 bg-white/[0.03] rounded-xl animate-pulse" />
+        <div className="h-44 bg-white/[0.03] rounded-xl animate-pulse" />
+      </div>
+    );
+  }
+
+  const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  const fmtBrl = v => BRL.format(v || 0);
+
+  return (
+    <div className="h-full overflow-y-auto p-5 space-y-6 max-w-3xl pb-12 animate-fade-in text-slate-200">
+      {/* status banner */}
+      <div className="relative overflow-hidden rounded-2xl border border-white/[0.06] bg-slate-900/40 p-6 backdrop-blur-md">
+        <div className="absolute -right-24 -top-24 w-48 h-48 rounded-full bg-violet-500/10 blur-3xl pointer-events-none" />
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-slate-900 border border-white/[0.08] flex items-center justify-center relative shadow-inner">
+            <Sparkles size={20} className={data?.hasApiKey ? "text-violet-400" : "text-slate-400"} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-slate-100">Status do Google Gemini</h3>
+              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border tracking-wide uppercase ${
+                data?.hasApiKey
+                  ? "bg-violet-500/10 text-violet-400 border-violet-500/20"
+                  : "bg-slate-800 text-slate-400 border-white/[0.06]"
+              }`}>
+                {data?.hasApiKey ? "Conectado" : "Desconectado"}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              {data?.hasApiKey
+                ? data.apiKeyFromEnv
+                  ? "Utilizando chave de API definida via variáveis de ambiente (.env)."
+                  : "Utilizando chave de API cadastrada no banco de dados."
+                : "Defina sua chave de API do Gemini para habilitar leitura de boletos, comprovantes e catalogação automática."}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Quotas & Metrics */}
+      {data?.hasApiKey && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Today card */}
+          <div className="bg-slate-900/40 border border-white/[0.06] rounded-2xl p-5 relative overflow-hidden">
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Consumo de Hoje</h4>
+            <div className="space-y-3">
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-500">Requisições diárias</span>
+                <span className="font-bold text-slate-200">{data.today.requests} / {data.today.limitRequests}</span>
+              </div>
+              {/* Progress bar */}
+              <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden">
+                <div className="bg-violet-500 h-1.5 rounded-full" style={{ width: `${Math.min((data.today.requests / data.today.limitRequests) * 100, 100)}%` }} />
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/[0.04] text-[11px]">
+                <div>
+                  <p className="text-slate-600">Tokens Prompt</p>
+                  <p className="font-mono font-bold text-slate-300">{data.today.promptTokens.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-slate-600">Tokens Resposta</p>
+                  <p className="font-mono font-bold text-slate-300">{data.today.completionTokens.toLocaleString()}</p>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-white/[0.04] flex justify-between items-baseline">
+                <span className="text-[10px] text-slate-500">Custo Estimado (Free Tier):</span>
+                <span className="text-xs font-black text-emerald-400">{fmtBrl(data.today.costBrl)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Month card */}
+          <div className="bg-slate-900/40 border border-white/[0.06] rounded-2xl p-5 relative overflow-hidden">
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Consumo Mensal</h4>
+            <div className="space-y-3">
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-500">Total de Requisições</span>
+                <span className="font-bold text-slate-200">{data.month.requests}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-2 text-[11px]">
+                <div>
+                  <p className="text-slate-600">Tokens Prompt</p>
+                  <p className="font-mono font-bold text-slate-300">{data.month.promptTokens.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-slate-600">Tokens Resposta</p>
+                  <p className="font-mono font-bold text-slate-300">{data.month.completionTokens.toLocaleString()}</p>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-white/[0.04] flex justify-between items-baseline">
+                <span className="text-[10px] text-slate-500">Total de Tokens Consumidos:</span>
+                <span className="text-xs font-bold text-slate-300">{data.month.totalTokens.toLocaleString()}</span>
+              </div>
+              <div className="pt-2 border-t border-white/[0.04] flex justify-between items-baseline">
+                <span className="text-[10px] text-slate-500">Custo Mensal Estimado:</span>
+                <span className="text-sm font-black text-emerald-400">{fmtBrl(data.month.costBrl)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save API Key */}
+      <SectionCard icon={Key} title="Configuração de Chave API (Google AI Studio)">
+        <form onSubmit={handleSaveKey} className="space-y-4">
+          <p className="text-[10px] text-slate-500 leading-relaxed">
+            Obtenha uma chave API gratuita no <a href="https://aistudio.google.com" target="_blank" rel="noreferrer" className="text-violet-400 hover:underline">Google AI Studio</a> para habilitar o processamento por IA. A chave será criptografada e armazenada com segurança.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Nova Chave API</label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={keyInput}
+                onChange={e => setKeyInput(e.target.value)}
+                placeholder="Insira sua GEMINI_API_KEY..."
+                className="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-white/[0.07] text-xs text-slate-200 placeholder-slate-700 focus:outline-none focus:border-violet-500/40 transition-all font-mono"
+              />
+              <button
+                type="submit"
+                disabled={savingKey || !keyInput.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all disabled:opacity-50 active:scale-95 shadow-md shadow-violet-950/20"
+              >
+                {savingKey ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                Salvar Chave
+              </button>
+            </div>
+          </div>
+        </form>
+      </SectionCard>
+    </div>
+  );
+}
+
 

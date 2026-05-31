@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const axios   = require('axios');
 const { db }  = require('../config/firebase');
+const { requireFirebaseAuth } = require('../middleware/requireFirebaseAuth');
 
 const BLING_API_BASE  = 'https://api.bling.com.br/Api/v3';
 const BLING_TOKEN_URL = 'https://www.bling.com.br/Api/v3/oauth/token';
@@ -90,6 +91,7 @@ function normalizarProduto(p, listItem = null) {
     codigo:       p.codigo        || '',
     gtin:         p.gtin          || '',
     preco:        String(p.preco  || '0.00'),
+    precoCusto:   String(p.precoCusto || p.preco_custo || '0.00'),
     marca:        p.marca         || '',
     ncm:          p.ncm           || '',
     descricao:       p.descricao       || '',
@@ -126,6 +128,7 @@ function montarPayload(p) {
     gtinEmbalagem: p.gtinEmbalagem || '',
     itensPorCaixa: parseInt(p.itensPorCaixa) || 1,
     preco:        parseFloat(p.preco)        || 0,
+    precoCusto:   parseFloat(p.precoCusto)   || 0,
     marca:        p.marca     || '',
     ncm:          p.ncm       || '',
     descricao:      p.descricao      || '',
@@ -330,12 +333,12 @@ router.post('/criar-produto', async (req, res) => {
 });
 
 // ── POST /ler-pdf — extrai dados estruturados de manual PDF ─────────────────
-router.post('/ler-pdf', async (req, res, next) => {
+router.post('/ler-pdf', requireFirebaseAuth, async (req, res, next) => {
   const { pdf } = req.body;
   if (!pdf) return res.status(400).json({ error: 'Conteúdo PDF (base64) obrigatório' });
   try {
     const { parseProductManualPdf } = require('../services/geminiService');
-    const data = await parseProductManualPdf(pdf);
+    const data = await parseProductManualPdf(pdf, req.auth.tenantId);
     res.json(data);
   } catch (err) {
     console.error('[POST /api/catalogo/ler-pdf] erro:', err.message);
@@ -371,4 +374,97 @@ router.post('/config/gemini', async (req, res) => {
   }
 });
 
+// ── POST /produto/:sku/sync-bling — Sincroniza produto individualmente do Bling para o Firestore ──
+router.post('/produto/:sku/sync-bling', requireFirebaseAuth, async (req, res) => {
+  const { sku } = req.params;
+  const { tenantId } = req.auth;
+  if (!sku) return res.status(400).json({ error: 'SKU obrigatório' });
+
+  try {
+    const token = await blingEnsureToken();
+    const headers = { Authorization: `Bearer ${token}` };
+
+    // 1. Busca por código (SKU)
+    console.log(`[sync-bling] Buscando SKU=${sku} no Bling...`);
+    const { data: listRes } = await axios.get(
+      `${BLING_API_BASE}/produtos?codigo=${encodeURIComponent(sku)}`,
+      { headers }
+    );
+
+    if (!listRes?.data || listRes.data.length === 0) {
+      return res.status(404).json({ error: `Produto com SKU ${sku} não encontrado no Bling.` });
+    }
+
+    const listItem = listRes.data[0];
+    const idBling = listItem.id;
+
+    // 2. Busca detalhe completo pelo ID do Bling
+    console.log(`[sync-bling] Buscando detalhes do ID=${idBling}...`);
+    const { data: detailRes } = await axios.get(
+      `${BLING_API_BASE}/produtos/${idBling}`,
+      { headers }
+    );
+
+    if (!detailRes?.data) {
+      return res.status(404).json({ error: `Erro ao obter detalhes do produto ${sku} do Bling.` });
+    }
+
+    const rawDetail = detailRes.data;
+    
+    // 3. Busca o estoque atualizado
+    let stock = 0;
+    try {
+      console.log(`[sync-bling] Buscando estoque para ID=${idBling}...`);
+      const { data: stockRes } = await axios.get(
+        `${BLING_API_BASE}/estoques/saldos?idsProdutos[]=${idBling}`,
+        { headers }
+      );
+      if (stockRes?.data && stockRes.data.length > 0) {
+        stock = stockRes.data[0].saldoFisicoTotal || 0;
+      }
+    } catch (stockErr) {
+      console.warn(`[sync-bling] Não foi possível obter estoque para o SKU ${sku}:`, stockErr.message);
+    }
+
+    // 4. Normaliza produto
+    const norm = normalizarProduto(rawDetail, listItem);
+
+    // 5. Salva no Firestore
+    const prodRef = db.collection('products').doc(sku);
+    const existingDoc = await prodRef.get();
+
+    if (existingDoc.exists) {
+      const existingData = existingDoc.data();
+      if (existingData.tenantId && existingData.tenantId !== tenantId) {
+        return res.status(403).json({ error: 'Este produto pertence a outro tenant e não pode ser sobrescrito.' });
+      }
+    }
+
+    const firestorePayload = {
+      tenantId: tenantId || null,
+      id:       norm.id,
+      nome:     norm.nome,
+      sku:      norm.codigo,
+      gtin:     norm.gtin,
+      preco:    parseFloat(norm.preco) || 0,
+      precoCusto: parseFloat(rawDetail.precoCusto || rawDetail.preco_custo || 0) || 0,
+      stock:    parseInt(stock) || 0,
+      marca:    norm.marca,
+      imagens:  norm.imagens || [],
+      descricao: norm.descricao || '',
+      descricaoCurta: norm.descricaoCurta || '',
+      updatedAt: new Date()
+    };
+
+    await prodRef.set(firestorePayload, { merge: true });
+
+    res.json({ ok: true, product: firestorePayload });
+  } catch (e) {
+    const msg = e.response?.data?.error?.message || e.message;
+    console.error(`[sync-bling] Erro ao sincronizar SKU ${sku}:`, msg);
+    res.status(500).json({ error: `Erro na sincronização Bling: ${msg}` });
+  }
+});
+
 module.exports = router;
+

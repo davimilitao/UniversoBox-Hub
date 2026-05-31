@@ -37,16 +37,32 @@ async function getGeminiApiKey() {
  * @param {string} pdfBase64 - PDF codificado em Base64
  * @returns {Promise<Object>} Dados do produto estruturados
  */
-async function parseProductManualPdf(pdfBase64) {
+async function logUsage(tenantId, action, promptTokens, completionTokens, totalTokens) {
+  try {
+    await db.collection('gemini_usage_logs').add({
+      timestamp: new Date(),
+      tenantId: tenantId || null,
+      model: 'gemini-2.5-flash',
+      action,
+      promptTokens: Number(promptTokens || 0),
+      completionTokens: Number(completionTokens || 0),
+      totalTokens: Number(totalTokens || 0),
+    });
+  } catch (err) {
+    console.error('[geminiService] Erro ao salvar log de uso de IA:', err.message);
+  }
+}
+
+async function parseProductManualPdf(pdfBase64, tenantId = null) {
   const apiKey = await getGeminiApiKey();
   if (!apiKey) {
     throw new Error('API Key do Gemini não configurada. Defina GEMINI_API_KEY no .env ou nas Configurações.');
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  // Usa o 1.5-flash por ser estável, rápido e compatível com a cota gratuita padrão de todas as contas
+  // Usa o gemini-2.5-flash para melhor inteligência e velocidade
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.5-flash',
     generationConfig: {
       responseMimeType: 'application/json',
     }
@@ -64,6 +80,7 @@ ATENÇÃO ÀS SEGUINTES REGRAS:
 5. Descrição Curta: Crie uma frase de venda chamativa de até 80 caracteres.
 6. Descrição Completa: Redija uma descrição técnica detalhada contendo os destaques do produto, materiais, certificações de segurança e usabilidade extraídos do manual.
 7. Marca: Identifique a marca do fabricante (ex: Cosco, Safety 1st, Infanti, Quinny, Maxi-Cosi, Dorel).
+8. Preço de Custo (precoCusto): Se for um pedido de compra ou nota fiscal, tente extrair o preço unitário de custo do produto como número (ex: 45.90) ou nulo se não encontrado.
 
 JSON de Saída esperado (não adicione formatação markdown como \`\`\`json na resposta, retorne apenas o JSON bruto):
 {
@@ -78,7 +95,8 @@ JSON de Saída esperado (não adicione formatação markdown como \`\`\`json na 
   "pesoBruto": "Peso bruto em kg (ex: 8.500)",
   "altura": "Altura em cm (ex: 98)",
   "largura": "Largura em cm (ex: 45)",
-  "profundidade": "Profundidade em cm (ex: 55)"
+  "profundidade": "Profundidade em cm (ex: 55)",
+  "precoCusto": 45.90
 }
 `;
 
@@ -92,6 +110,94 @@ JSON de Saída esperado (não adicione formatação markdown como \`\`\`json na 
   const result = await model.generateContent([prompt, pdfPart]);
   const textResponse = result.response.text();
   
+  // Log token usage
+  const usage = result.response.usageMetadata || {};
+  await logUsage(tenantId, 'parse_product_manual', usage.promptTokenCount, usage.candidatesTokenCount, usage.totalTokenCount);
+
+  try {
+    return JSON.parse(textResponse);
+  } catch (err) {
+    console.error('[geminiService] Falha ao parsear JSON retornado:', textResponse);
+    throw new Error('Falha ao estruturar os dados retornados pela IA.');
+  }
+}
+
+/**
+ * Envia um boleto ou comprovante (base64) para o Gemini extrair informações financeiras estruturadas
+ * @param {string} fileBase64 - Arquivo (PDF ou imagem) codificado em Base64
+ * @param {string} mimeType - Tipo MIME do arquivo
+ * @param {string} tenantId - Identificador do tenant para log
+ * @returns {Promise<Object>} Dados da despesa estruturados
+ */
+async function parseExpenseDocument(fileBase64, mimeType, tenantId = null) {
+  const apiKey = await getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('API Key do Gemini não configurada. Defina GEMINI_API_KEY no .env ou nas Configurações.');
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    generationConfig: {
+      responseMimeType: 'application/json',
+    }
+  });
+
+  const prompt = `
+Você é um assistente financeiro especialista em contas a pagar.
+Analise este arquivo (comprovante de pagamento, boleto, recibo ou nota fiscal de despesa) e extraia as informações estruturadas no formato JSON abaixo.
+
+ATENÇÃO ÀS SEGUINTES REGRAS DE EXTRAÇÃO:
+1. Valor (valor): Extraia o valor total do documento. Deve ser um número de ponto flutuante (ex: 1500.50).
+2. Data (data):
+   - Se for um boleto (ainda não pago), extraia a data de vencimento.
+   - Se for um comprovante de pagamento ou recibo (já pago), extraia a data do pagamento.
+   - Se houver ambas as datas, dê preferência à data de pagamento se for um comprovante de transação.
+   - Formate a data no padrão ISO YYYY-MM-DD (ex: "2026-05-31").
+3. Fornecedor (fornecedor): Identifique o fornecedor, favorecido, recebedor ou emissor do documento (ex: "Light", "Sabesp", "J3 Transportadora").
+4. Descrição (descricao): Crie uma descrição curta e resumida sobre o lançamento (ex: "Pagamento de energia elétrica ref. Maio/2026").
+5. Situação (situacao):
+   - Se o documento for um comprovante de pagamento realizado (como um Pix enviado, transferência efetuada, ou recibo pago), defina como "pago".
+   - Se for um boleto, cobrança ou nota fiscal sem comprovante de quitação associado, defina como "pendente".
+6. Categoria sugerida (categoria): Tente categorizar a despesa em uma das seguintes categorias padrão se fizer sentido, ou retorne outra caso seja mais adequada:
+   - "Mercadoria" (se for aquisição de produtos/estoque)
+   - "Frete" (se for transporte ou envio)
+   - "Marketing" (se for anúncios, tráfego pago)
+   - "Ferramentas/Software" (se for assinaturas de sistemas)
+   - "Serviços Contábeis" (se for contabilidade)
+   - "Impostos/Taxas"
+   - "Água/Luz/Internet"
+   - "Aluguel"
+   - "Salários/Pró-labore"
+   - "Outros"
+
+JSON de Saída esperado (não adicione formatação markdown como \`\`\`json na resposta, retorne apenas o JSON bruto):
+{
+  "valor": 123.45,
+  "data": "YYYY-MM-DD",
+  "fornecedor": "Nome do Fornecedor",
+  "descricao": "Descrição curta",
+  "situacao": "pago",
+  "categoria": "Categoria sugerida"
+}
+`;
+
+  const cleanBase64 = fileBase64.replace(/^data:.*?;base64,/, '');
+
+  const filePart = {
+    inlineData: {
+      data: cleanBase64,
+      mimeType: mimeType,
+    },
+  };
+
+  const result = await model.generateContent([prompt, filePart]);
+  const textResponse = result.response.text();
+  
+  // Log token usage
+  const usage = result.response.usageMetadata || {};
+  await logUsage(tenantId, 'parse_expense_document', usage.promptTokenCount, usage.candidatesTokenCount, usage.totalTokenCount);
+
   try {
     return JSON.parse(textResponse);
   } catch (err) {
@@ -102,5 +208,6 @@ JSON de Saída esperado (não adicione formatação markdown como \`\`\`json na 
 
 module.exports = {
   parseProductManualPdf,
+  parseExpenseDocument,
   getGeminiApiKey,
 };

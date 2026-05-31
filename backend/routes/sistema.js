@@ -321,8 +321,92 @@ router.post('/bling/config', requireFirebaseAuth, async (req, res, next) => {
 
     await db.collection('config').doc('bling').set(payload, { merge: true });
     res.json({ ok: true, active: payload.active });
+// GET /api/config/gemini-usage - Get Gemini API Usage Statistics (Tokens, Requests, Costs)
+router.get('/config/gemini-usage', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const tenantId = req.auth.tenantId;
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const logsSnap = await db.collection('gemini_usage_logs')
+      .where('tenantId', '==', tenantId)
+      .where('timestamp', '>=', startOfMonth)
+      .get();
+
+    let totalTokensMonth = 0;
+    let promptTokensMonth = 0;
+    let completionTokensMonth = 0;
+    let totalRequestsMonth = 0;
+
+    let totalTokensToday = 0;
+    let promptTokensToday = 0;
+    let completionTokensToday = 0;
+    let totalRequestsToday = 0;
+
+    const startOfDayTime = startOfDay.getTime();
+
+    logsSnap.forEach(doc => {
+      const data = doc.data();
+      const ts = data.timestamp?.toDate ? data.timestamp.toDate().getTime() : new Date(data.timestamp).getTime();
+
+      const pT = Number(data.promptTokens || 0);
+      const cT = Number(data.completionTokens || 0);
+      const tT = Number(data.totalTokens || 0);
+
+      // Month
+      totalRequestsMonth += 1;
+      promptTokensMonth += pT;
+      completionTokensMonth += cT;
+      totalTokensMonth += tT;
+
+      // Today
+      if (ts >= startOfDayTime) {
+        totalRequestsToday += 1;
+        promptTokensToday += pT;
+        completionTokensToday += cT;
+        totalTokensToday += tT;
+      }
+    });
+
+    const usdToBrl = 5.50;
+    const costUsdToday = (promptTokensToday * 0.075 / 1000000) + (completionTokensToday * 0.30 / 1000000);
+    const costUsdMonth = (promptTokensMonth * 0.075 / 1000000) + (completionTokensMonth * 0.30 / 1000000);
+
+    // Get API Key Status
+    let hasApiKey = false;
+    let apiKeyFromEnv = false;
+    if (process.env.GEMINI_API_KEY) {
+      hasApiKey = true;
+      apiKeyFromEnv = true;
+    } else {
+      const doc = await db.collection('config').doc('gemini').get();
+      if (doc.exists && doc.data().apiKey) {
+        hasApiKey = true;
+      }
+    }
+
+    res.json({
+      hasApiKey,
+      apiKeyFromEnv,
+      today: {
+        requests: totalRequestsToday,
+        promptTokens: promptTokensToday,
+        completionTokens: completionTokensToday,
+        totalTokens: totalTokensToday,
+        costBrl: costUsdToday * usdToBrl,
+        limitRequests: 1500,
+      },
+      month: {
+        requests: totalRequestsMonth,
+        promptTokens: promptTokensMonth,
+        completionTokens: completionTokensMonth,
+        totalTokens: totalTokensMonth,
+        costBrl: costUsdMonth * usdToBrl,
+      }
+    });
   } catch (err) {
-    console.error('[POST /api/bling/config]', err);
+    console.error('[GET /api/config/gemini-usage] erro:', err);
     next(err);
   }
 });

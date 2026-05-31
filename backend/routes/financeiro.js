@@ -3,6 +3,7 @@ const router  = express.Router();
 const { admin, db }  = require('../config/firebase');
 const { requireFirebaseAuth } = require('../middleware/requireFirebaseAuth');
 const { v4: uuidv4 } = require('uuid');
+const { parseExpenseDocument } = require('../services/geminiService');
 
 // Helpers
 function safeTrim(v) {
@@ -113,6 +114,21 @@ router.get('/compras/bi', async (req, res, next) => {
 });
 
 // ─── DESPESAS (coleção fin_despesas no Firestore) ─────────────────────────────
+
+// POST /fin-despesas/parse — analisa boleto ou comprovante via Gemini
+router.post('/fin-despesas/parse', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { fileBase64, mimeType } = req.body;
+    if (!fileBase64 || !mimeType) {
+      return res.status(400).json({ error: 'Arquivo (base64) e tipo MIME são obrigatórios.' });
+    }
+    const result = await parseExpenseDocument(fileBase64, mimeType, req.auth.tenantId);
+    res.json(result);
+  } catch (err) {
+    console.error('[POST /api/fin-despesas/parse] Erro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /fin-despesas — lança despesa no Firestore
 router.post('/fin-despesas', requireFirebaseAuth, async (req, res, next) => {

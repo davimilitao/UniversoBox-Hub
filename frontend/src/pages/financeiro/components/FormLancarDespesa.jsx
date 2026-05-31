@@ -14,8 +14,9 @@
 import { useState } from 'react';
 import {
   CalendarDays, Tag, FileText, DollarSign,
-  CheckCircle2, Clock, Plus, X, Loader2,
+  CheckCircle2, Clock, Plus, X, Loader2, Sparkles,
 } from 'lucide-react';
+import { apiFetch } from '../../../utils/getAuthToken';
 
 // Hoje no formato YYYY-MM-DD (nativo do input date)
 function hojeISO() {
@@ -51,10 +52,70 @@ export function FormLancarDespesa({ categorias, onSalvar, salvando }) {
   });
   const [novaCategoria,   setNovaCategoria]   = useState('');
   const [adicionandoCat,  setAdicionandoCat]  = useState(false);
+  const [lendoDocumento,  setLendoDocumento]  = useState(false);
 
   function set(field, value) {
     setForm(f => ({ ...f, [field]: value }));
   }
+
+  const toBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+  });
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLendoDocumento(true);
+    try {
+      const base64 = await toBase64(file);
+      const res = await apiFetch('/api/fin-despesas/parse', {
+        method: 'POST',
+        body: JSON.stringify({
+          fileBase64: base64,
+          mimeType: file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg')
+        })
+      });
+
+      if (!res || res.error) {
+        throw new Error(res?.error || 'Erro desconhecido ao ler com IA');
+      }
+
+      const data = res;
+      if (data.data) {
+        set('data', data.data);
+      }
+      if (data.valor) {
+        set('valor', data.valor);
+      }
+      if (data.descricao || data.fornecedor) {
+        set('descricao', data.descricao || data.fornecedor);
+      }
+      if (data.situacao) {
+        set('situacao', data.situacao);
+      }
+
+      if (data.categoria) {
+        const catExistente = categorias.find(c => c.toLowerCase() === data.categoria.toLowerCase());
+        if (catExistente) {
+          set('nome', catExistente);
+          setAdicionandoCat(false);
+        } else {
+          setNovaCategoria(data.categoria);
+          setAdicionandoCat(true);
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao ler documento:', err);
+      alert(`Erro ao analisar com IA: ${err.message || err}`);
+    } finally {
+      setLendoDocumento(false);
+      e.target.value = '';
+    }
+  };
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -79,6 +140,31 @@ export function FormLancarDespesa({ categorias, onSalvar, salvando }) {
         <Plus size={15} className="text-emerald-400" />
         Lançar Despesa
       </h2>
+
+      {/* Upload Inteligente */}
+      <div className="relative border-2 border-dashed border-white/10 hover:border-emerald-500/50 rounded-xl p-4 text-center hover:bg-slate-900/40 transition-all cursor-pointer group">
+        <input
+          type="file"
+          accept="application/pdf,image/*"
+          onChange={handleFileChange}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+          disabled={lendoDocumento}
+        />
+        {lendoDocumento ? (
+          <div className="flex flex-col items-center gap-2 py-2">
+            <Loader2 className="animate-spin text-emerald-400" size={24} />
+            <span className="text-xs text-slate-400 font-medium">Analisando documento com IA...</span>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-1.5 py-1">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform">
+              <Sparkles size={16} />
+            </div>
+            <p className="text-xs text-slate-300 font-bold">Importação Inteligente via IA</p>
+            <p className="text-[10px] text-slate-500">Arraste ou clique para enviar PDF ou foto do boleto/comprovante</p>
+          </div>
+        )}
+      </div>
 
       {/* Data */}
       <Campo label="Data" icon={CalendarDays}>

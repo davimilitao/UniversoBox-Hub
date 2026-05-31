@@ -354,6 +354,7 @@ export default function AdminProdutos() {
   const [savedBin,   setSavedBin]   = useState(false);
   const [savingNotes,setSavingNotes]= useState(false);
   const [savedNotes, setSavedNotes] = useState(false);
+  const [syncingBling, setSyncingBling] = useState(false);
 
   // ── Marcas tab ────────────────────────────────────────────────────────────
   const [semMarca,    setSemMarca]    = useState([]);
@@ -555,6 +556,27 @@ export default function AdminProdutos() {
       });
       showToast('Foto removida', 'info');
     } catch (e) { showToast('Erro: ' + e.message, 'err'); }
+  }
+
+  // ── Sincronizar com o Bling ──
+  async function syncWithBling() {
+    if (!produto || !produto.sku) return;
+    setSyncingBling(true);
+    try {
+      const data = await apiFetch(`/api/catalogo/produto/${encodeURIComponent(produto.sku)}/sync-bling`, {
+        method: 'POST',
+      });
+      if (data.ok) {
+        showToast('Sincronizado com Bling com sucesso! ✓');
+        await selectProduct(produto.sku);
+      } else {
+        throw new Error(data.error || 'Erro desconhecido');
+      }
+    } catch (e) {
+      showToast('Erro ao sincronizar: ' + e.message, 'err');
+    } finally {
+      setSyncingBling(false);
+    }
   }
 
   // ── Buscar fotos no Bling ────────────────────────────────────────────────
@@ -958,7 +980,23 @@ export default function AdminProdutos() {
 
             {/* ── Dados do Bling ── */}
             <Section emoji="📋" title="Dados do Bling" right={
-              <span className="text-[10px] text-slate-700 italic">somente leitura — reimporte o CSV para atualizar</span>
+              <button
+                onClick={syncWithBling}
+                disabled={syncingBling}
+                className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-lg border border-blue-500/20 bg-blue-500/[0.06] text-blue-400 hover:bg-blue-500/15 transition-all disabled:opacity-50"
+              >
+                {syncingBling ? (
+                  <>
+                    <Loader2 size={10} className="animate-spin" />
+                    Sincronizando...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={10} />
+                    Sincronizar com Bling
+                  </>
+                )}
+              </button>
             }>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <BlingField label="Peso líq."  value={fmtKg(produto.weight)}     warn={!produto.weight} />

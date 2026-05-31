@@ -214,9 +214,13 @@ function UploaderIA({ onFill, showToast }) {
       reader.onload = async () => {
         const base64 = reader.result;
         try {
+          const token = await getAuthToken();
           const res = await fetch('/api/catalogo/ler-pdf', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify({ pdf: base64 }),
           });
           const data = await res.json();
@@ -967,6 +971,7 @@ export default function AutomacaoCadastro() {
       imagens: prev.imagens || []
     }));
     if (data.preco) setPrecoSimulado(data.preco);
+    if (data.precoCusto) setCustoSimulado(data.precoCusto);
   }
 
   async function loadProductDetail(id) {
@@ -979,6 +984,7 @@ export default function AutomacaoCadastro() {
       setProduto(d);
       setOriginalProduto(d);
       setPrecoSimulado(d.preco || '0.00');
+      setCustoSimulado(d.precoCusto || '0.00');
       setStatus('studio');
     } catch (e) {
       setErro(e.message);
@@ -1041,6 +1047,7 @@ export default function AutomacaoCadastro() {
     // Filtrar e sanitarizar URLs de imagens vazias antes de enviar
     const sanitizedProduto = {
       ...produto,
+      precoCusto: custoSimulado,
       imagens: (produto.imagens || [])
         .map(img => typeof img === 'string' ? img.trim() : '')
         .filter(Boolean)
