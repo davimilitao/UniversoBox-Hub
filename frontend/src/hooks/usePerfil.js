@@ -11,10 +11,10 @@ import { auth }                from '../firebase';
 
 // Módulos válidos (espelha server.js — inclui 'insumos')
 const DEFAULT_MODULOS = {
-  admin:      ['pedidos', 'bling', 'financas', 'index', 'config'],
+  admin:      ['pedidos', 'bling', 'financas', 'index', 'config', 'catalogo'],
   operacao:   ['pedidos', 'bling', 'index'],
   financeiro: ['financas', 'index'],
-  catalogo:   ['index'],
+  catalogo:   ['index', 'catalogo'],
   vendas:     ['index'],
 };
 
