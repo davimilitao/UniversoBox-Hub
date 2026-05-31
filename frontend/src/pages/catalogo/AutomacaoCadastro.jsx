@@ -792,9 +792,63 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
+// ── Tela de Seleção de Produtos ───────────────────────────────────────────────
+function TelaSelecao({ items, onSelect, onVoltar }) {
+  return (
+    <div className="flex flex-col max-w-4xl mx-auto py-10 px-4 gap-6">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onVoltar}
+          className="p-2 rounded-lg bg-slate-800 border border-white/10 text-slate-400 hover:text-white transition-colors"
+        >
+          <ArrowLeft size={16} />
+        </button>
+        <div>
+          <h1 className="text-white text-xl font-black tracking-tight">Produtos Encontrados no Bling</h1>
+          <p className="text-slate-500 text-xs mt-0.5">Selecione o produto que deseja editar no Studio.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {items.map(p => (
+          <button
+            key={p.id}
+            onClick={() => onSelect(p.id)}
+            className="flex items-center gap-3.5 p-4 bg-slate-900 hover:bg-slate-800/80 border border-white/5 hover:border-emerald-500/30 rounded-2xl text-left transition-all group"
+          >
+            <div className="w-12 h-12 rounded-xl bg-slate-800 border border-white/10 overflow-hidden shrink-0">
+              <img
+                src={p.displayImage || '/assets/placeholder.png'}
+                alt=""
+                className="w-full h-full object-contain"
+                onError={e => { e.target.src = '/assets/placeholder.png'; }}
+              />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="text-[10px] font-mono text-emerald-400 font-bold tracking-wider leading-none block">
+                {p.sku || 'Sem SKU'}
+              </span>
+              <h3 className="text-slate-200 text-xs font-semibold truncate group-hover:text-white transition-colors mt-1">
+                {p.name}
+              </h3>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-[10px] text-slate-400 font-bold">
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseFloat(p.preco) || 0)}
+                </span>
+                {p.ean && <span className="text-[9px] text-slate-600 font-mono">· EAN {p.ean}</span>}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Componente principal ──────────────────────────────────────────────────────
 export default function AutomacaoCadastro() {
   const [busca,      setBusca]      = useState('');
-  const [status,     setStatus]     = useState('idle'); // idle | buscando | studio | salvando
+  const [status,     setStatus]     = useState('idle'); // idle | buscando | selecao | studio | salvando
   const [produto,    setProduto]    = useState(null);
   const [categorias, setCategorias] = useState([]);
   const [erro,       setErro]       = useState('');
@@ -804,6 +858,7 @@ export default function AutomacaoCadastro() {
   const isNovo = produto && !produto.id;
   const [originalProduto, setOriginalProduto] = useState(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [candidates,  setCandidates]  = useState([]);
 
   // Calcula diferenças entre o produto editado e o original do Bling
   const diffs = useMemo(() => {
@@ -914,6 +969,23 @@ export default function AutomacaoCadastro() {
     if (data.preco) setPrecoSimulado(data.preco);
   }
 
+  async function loadProductDetail(id) {
+    setStatus('buscando');
+    setErro('');
+    try {
+      const res = await fetch(`/api/catalogo/produto/${id}`);
+      const d   = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erro ao carregar detalhes do produto');
+      setProduto(d);
+      setOriginalProduto(d);
+      setPrecoSimulado(d.preco || '0.00');
+      setStatus('studio');
+    } catch (e) {
+      setErro(e.message);
+      setStatus('idle');
+    }
+  }
+
   async function handleBuscar(q) {
     if (q === '__novo__') {
       const template = { nome: '', codigo: '', gtin: '', preco: '0.00', marca: '', ncm: '',
@@ -930,13 +1002,31 @@ export default function AutomacaoCadastro() {
     setStatus('buscando');
     setErro('');
     try {
-      const res = await fetch(`/api/catalogo/buscar?q=${encodeURIComponent(q)}`);
+      // 1. Busca ampla por Nome, SKU ou EAN no Bling
+      const res = await fetch(`/api/catalogo/produtos?q=${encodeURIComponent(q)}`);
       const d   = await res.json();
       if (!res.ok) throw new Error(d.error || 'Produto não encontrado');
-      setProduto(d);
-      setOriginalProduto(d);
-      setPrecoSimulado(d.preco || '0.00');
-      setStatus('studio');
+
+      const items = d.items || [];
+      if (items.length === 0) {
+        throw new Error('Nenhum produto encontrado no Bling para esta busca.');
+      }
+
+      // 2. Tenta encontrar uma correspondência exata para SKU ou EAN
+      const exactMatch = items.find(it => 
+        (it.sku && it.sku.toLowerCase() === q.toLowerCase()) || 
+        (it.ean && it.ean.toLowerCase() === q.toLowerCase())
+      );
+
+      if (exactMatch) {
+        await loadProductDetail(exactMatch.id);
+      } else if (items.length === 1) {
+        await loadProductDetail(items[0].id);
+      } else {
+        // Múltiplos resultados -> exibir tela de seleção
+        setCandidates(items);
+        setStatus('selecao');
+      }
     } catch (e) {
       setErro(e.message);
       setStatus('idle');
@@ -947,6 +1037,15 @@ export default function AutomacaoCadastro() {
     if (!produto.nome || !produto.codigo) {
       setErro('Nome e SKU são obrigatórios'); return;
     }
+
+    // Filtrar e sanitarizar URLs de imagens vazias antes de enviar
+    const sanitizedProduto = {
+      ...produto,
+      imagens: (produto.imagens || [])
+        .map(img => typeof img === 'string' ? img.trim() : '')
+        .filter(Boolean)
+    };
+
     setStatus('salvando');
     setErro('');
     try {
@@ -955,16 +1054,17 @@ export default function AutomacaoCadastro() {
       const res    = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(produto),
+        body: JSON.stringify(sanitizedProduto),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Falha ao salvar');
       if (isNovo && d.id) {
         setProduto(prev => ({ ...prev, id: d.id }));
-        setOriginalProduto({ ...produto, id: d.id });
+        setOriginalProduto({ ...sanitizedProduto, id: d.id });
       } else {
-        setOriginalProduto(produto);
+        setOriginalProduto(sanitizedProduto);
       }
+      setProduto(prev => ({ ...prev, imagens: sanitizedProduto.imagens }));
       setSalvoOk(true);
       showToast('Produto salvo no Bling com sucesso! ✓');
       setTimeout(() => setSalvoOk(false), 3000);
@@ -977,14 +1077,33 @@ export default function AutomacaoCadastro() {
 
   function handleVoltar() {
     setProduto(null);
+    setCandidates([]);
     setStatus('idle');
     setErro('');
     setSalvoOk(false);
   }
 
+  if (status === 'selecao') {
+    return (
+      <div className="h-full overflow-y-auto bg-slate-950">
+        {erro && (
+          <div className="mx-4 mt-4 flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+            <AlertCircle size={15} className="shrink-0" /> {erro}
+            <button onClick={() => setErro('')} className="ml-auto text-red-600 hover:text-red-400">✕</button>
+          </div>
+        )}
+        <TelaSelecao
+          items={candidates}
+          onSelect={loadProductDetail}
+          onVoltar={handleVoltar}
+        />
+      </div>
+    );
+  }
+
   if (status === 'idle' || status === 'buscando') {
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="h-full overflow-y-auto bg-slate-950">
         <TelaBusca onBuscar={handleBuscar} carregando={status === 'buscando'} erro={erro} />
       </div>
     );
