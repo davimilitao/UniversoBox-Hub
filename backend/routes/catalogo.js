@@ -134,14 +134,13 @@ function montarPayload(p) {
     descricao:      p.descricao      || '',
     descricaoCurta: p.descricaoCurta || '',
     origem:         Number(p.origem) || 0,
-    peso: {
-      liquido: parseFloat(p.pesoLiq)   || 0,
-      bruto:   parseFloat(p.pesoBruto) || 0,
-    },
+    pesoBruto:      parseFloat(p.pesoBruto) || 0,
+    pesoLiquido:    parseFloat(p.pesoLiq)   || 0,
     dimensoes: {
       largura:      parseFloat(p.largura)      || 0,
       altura:       parseFloat(p.altura)        || 0,
       profundidade: parseFloat(p.profundidade)  || 0,
+      unidadeMedida: 1, // 1 = Centímetros
     },
     ...(p.categoria?.id ? { categoria: { id: Number(p.categoria.id) } } : {}),
     midia: {
@@ -453,6 +452,11 @@ router.post('/produto/:sku/sync-bling', requireFirebaseAuth, async (req, res) =>
       imagens:  norm.imagens || [],
       descricao: norm.descricao || '',
       descricaoCurta: norm.descricaoCurta || '',
+      pesoBruto:    parseFloat(norm.pesoBruto) || 0,
+      pesoLiquido:  parseFloat(norm.pesoLiq) || 0,
+      largura:      parseFloat(norm.largura) || 0,
+      altura:       parseFloat(norm.altura) || 0,
+      profundidade: parseFloat(norm.profundidade) || 0,
       updatedAt: new Date()
     };
 

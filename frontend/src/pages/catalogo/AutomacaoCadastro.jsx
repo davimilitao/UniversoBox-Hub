@@ -448,6 +448,7 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
   const p = produto;
   const set = (campo) => (val) => setProduto(prev => ({ ...prev, [campo]: val }));
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [showUrls, setShowUrls] = useState(false);
 
   const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
@@ -463,12 +464,9 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
       const updatedImgs = [...(p.imagens || [])];
 
       for (const file of files) {
-        // 1. Process local image via Canvas
-        const processedBlob = await processImageToCanvas(file);
-
-        // 2. Upload processed blob to Cloudinary
+        // Enviar imagem original diretamente para o Cloudinary (upload super rapido)
         const fd = new FormData();
-        fd.append('file', processedBlob, `${p.codigo}_standard.jpg`);
+        fd.append('file', file, file.name);
         fd.append('kind', 'stock');
 
         const uploadRes = await fetch(`/admin/save-photo-cloudinary/${encodeURIComponent(p.codigo)}`, {
@@ -485,7 +483,7 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
       }
 
       setProduto(prev => ({ ...prev, imagens: updatedImgs }));
-      showToast('Fotos adicionadas e tratadas com sucesso! ✓');
+      showToast('Fotos adicionadas com sucesso! ✓');
     } catch (err) {
       showToast('Erro no upload das fotos: ' + err.message, 'err');
     } finally {
@@ -675,53 +673,50 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               )}
             </div>
 
-            {/* Preview da primeira foto + botão editar */}
-            <div className="relative bg-slate-800 rounded-xl aspect-square flex items-center justify-center overflow-hidden group">
-              {p.imagens?.[0]
-                ? <>
-                    <img src={p.imagens[0]} alt="Foto principal" className="w-full h-full object-contain" />
-                    <button
-                      onClick={() => setEditorImg({ url: p.imagens[0], idx: 0 })}
-                      className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity gap-1.5 text-white text-xs font-bold"
-                    >
-                      <Sparkles size={14} /> Editar
-                    </button>
-                  </>
-                : <div className="text-slate-600 text-sm text-center px-4">
-                    <ImageIcon size={32} className="mx-auto mb-2 opacity-30" />
-                    Sem imagem
+            {/* Grid de Miniaturas de Fotos */}
+            {p.imagens && p.imagens.length > 0 ? (
+              <div className="grid grid-cols-3 gap-2">
+                {p.imagens.map((url, i) => (
+                  <div key={i} className="relative bg-slate-800 border border-white/[0.06] rounded-xl aspect-square flex items-center justify-center overflow-hidden group shadow-inner">
+                    {url ? (
+                      <>
+                        <img src={url} alt={`Foto ${i + 1}`} className="w-full h-full object-contain p-1" />
+                        {/* Overlay com Ações */}
+                        <div className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 p-1">
+                          <button
+                            onClick={() => setEditorImg({ url, idx: i })}
+                            className="w-full flex items-center justify-center gap-1 bg-violet-600 hover:bg-violet-500 text-white text-[9px] font-bold py-1 rounded-md transition-all shadow-md"
+                          >
+                            <Sparkles size={10} /> Tratar
+                          </button>
+                          <button
+                            onClick={() => setProduto(prev => ({ ...prev, imagens: prev.imagens.filter((_, j) => j !== i) }))}
+                            className="w-full flex items-center justify-center gap-1 bg-red-600/90 hover:bg-red-500 text-white text-[9px] font-bold py-1 rounded-md transition-all shadow-md"
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-slate-600 text-[9px] text-center p-1 font-mono break-all leading-tight">
+                        URL Vazia
+                      </div>
+                    )}
                   </div>
-              }
-            </div>
-
-            {/* Lista de URLs de imagens */}
-            <div className="space-y-2">
-              {(p.imagens || []).map((url, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input
-                    className="flex-1 bg-slate-800 border border-white/5 rounded-lg px-3 py-2 text-xs text-slate-400 font-mono outline-none focus:border-emerald-500/40"
-                    value={url}
-                    onChange={e => {
-                      const arr = [...(p.imagens || [])];
-                      arr[i] = e.target.value;
-                      setProduto(prev => ({ ...prev, imagens: arr }));
-                    }}
-                    placeholder="https://..."
-                  />
-                  {url && (
-                    <button
-                      onClick={() => setEditorImg({ url, idx: i })}
-                      title="Editar imagem"
-                      className="text-slate-600 hover:text-blue-400 transition-colors shrink-0"
-                    ><Sparkles size={14} /></button>
-                  )}
-                  <button
-                    onClick={() => setProduto(prev => ({ ...prev, imagens: prev.imagens.filter((_, j) => j !== i) }))}
-                    className="text-slate-600 hover:text-red-400 transition-colors shrink-0"
-                  >✕</button>
+                ))}
+              </div>
+            ) : (
+              <div className="relative bg-slate-800 rounded-xl aspect-square flex items-center justify-center overflow-hidden border border-white/[0.04]">
+                <div className="text-slate-600 text-sm text-center px-4">
+                  <ImageIcon size={32} className="mx-auto mb-2 opacity-30" />
+                  Sem imagem
                 </div>
-              ))}
-              {/* Canvas Drag & Drop Image Uploader */}
+              </div>
+            )}
+
+            {/* Ações e uploader */}
+            <div className="space-y-2 pt-2 border-t border-white/[0.03]">
+              {/* Uploader com Envio Direto Rápido */}
               <div className="border border-dashed border-white/10 hover:border-emerald-500/40 rounded-xl p-4 text-center bg-slate-950/40 hover:bg-slate-950/60 transition-all cursor-pointer relative group">
                 <input
                   type="file"
@@ -734,23 +729,56 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
                 {uploadingImages ? (
                   <div className="flex flex-col items-center gap-1.5 py-1">
                     <Loader2 size={18} className="animate-spin text-emerald-400" />
-                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Tratando imagens...</span>
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Enviando fotos...</span>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-1">
                     <Upload size={18} className="text-slate-500 group-hover:text-emerald-400 transition-colors" />
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider group-hover:text-emerald-300 transition-colors">Enviar Fotos Locals</span>
-                    <span className="text-[9px] text-slate-600">Canvas 1200x1200px + Fundo Branco</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider group-hover:text-emerald-300 transition-colors">Enviar Fotos Locais</span>
+                    <span className="text-[9px] text-slate-600">Upload direto rápido · Trate depois se necessário</span>
                   </div>
                 )}
               </div>
 
-              <button
-                onClick={() => setProduto(prev => ({ ...prev, imagens: [...(prev.imagens || []), ''] }))}
-                className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-white/10 text-slate-600 hover:text-slate-400 hover:border-white/20 text-xs transition-colors"
-              >
-                <Plus size={12} /> Adicionar URL de imagem
-              </button>
+              {/* Controles Avançados e Adicionar URL */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowUrls(!showUrls)}
+                  className="flex-1 py-2 rounded-lg border border-white/5 hover:bg-white/[0.02] text-slate-500 hover:text-slate-300 text-[10px] font-semibold transition-colors text-center"
+                >
+                  {showUrls ? 'Ocultar URLs' : 'Ver/Editar URLs'}
+                </button>
+                <button
+                  onClick={() => setProduto(prev => ({ ...prev, imagens: [...(prev.imagens || []), ''] }))}
+                  className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-white/10 text-slate-500 hover:text-slate-300 hover:border-white/20 text-[10px] transition-colors"
+                >
+                  <Plus size={10} /> Adicionar URL
+                </button>
+              </div>
+
+              {/* Lista de URLs de imagens (Acordeão) */}
+              {showUrls && (
+                <div className="space-y-2 pt-2 border-t border-white/[0.03] animate-fade-in">
+                  {(p.imagens || []).map((url, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        className="flex-1 bg-slate-800 border border-white/5 rounded-lg px-2.5 py-1.5 text-[10px] text-slate-400 font-mono outline-none focus:border-emerald-500/40"
+                        value={url}
+                        onChange={e => {
+                          const arr = [...(p.imagens || [])];
+                          arr[i] = e.target.value;
+                          setProduto(prev => ({ ...prev, imagens: arr }));
+                        }}
+                        placeholder="https://..."
+                      />
+                      <button
+                        onClick={() => setProduto(prev => ({ ...prev, imagens: prev.imagens.filter((_, j) => j !== i) }))}
+                        className="text-slate-600 hover:text-red-400 text-xs transition-colors shrink-0 px-1"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* ImageEditor modal */}
