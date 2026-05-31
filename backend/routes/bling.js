@@ -259,7 +259,7 @@ router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
     const cacheDoc = await db.collection('bling_nfe_cache').doc(cacheDocId).get();
     if (cacheDoc.exists) {
       const cacheData = cacheDoc.data();
-      if (cacheData.item && cacheData.item.detalhado) {
+      if (cacheData.item && cacheData.item.detalhado && cacheData.item.valorTotal > 0) {
         return res.json({ item: cacheData.item });
       }
     }
@@ -323,7 +323,7 @@ router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
     // Estimativas de comissão e frete com base nas regras do canal
     let expectedCommission = 0;
     let expectedShipping = 16.15;
-    const valorTotalNF = Number(n.valorTotal || n.totalProdutos || 0);
+    const valorTotalNF = Number(n.valorNota || n.valorTotal || n.totalProdutos || 0);
 
     if (mkt2 === 'MERCADO_LIVRE') {
       const rate = 0.165;
@@ -397,7 +397,7 @@ router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
 
       // Parsing de valores e dados de destino
       const valorTotal = valorTotalNF;
-      const valorFrete = Number(n.transporte?.frete || 0);
+      const valorFrete = Number(n.valorFrete || n.transporte?.frete || 0);
       const cidade = n.contato?.endereco?.municipio || n.contato?.endereco?.cidade || '';
       const uf = n.contato?.endereco?.uf || '';
 
