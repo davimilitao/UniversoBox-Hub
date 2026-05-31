@@ -321,6 +321,12 @@ router.post('/bling/config', requireFirebaseAuth, async (req, res, next) => {
 
     await db.collection('config').doc('bling').set(payload, { merge: true });
     res.json({ ok: true, active: payload.active });
+  } catch (err) {
+    console.error('[POST /api/bling/config]', err);
+    next(err);
+  }
+});
+
 // GET /api/config/gemini-usage - Get Gemini API Usage Statistics (Tokens, Requests, Costs)
 router.get('/config/gemini-usage', requireFirebaseAuth, async (req, res, next) => {
   try {
