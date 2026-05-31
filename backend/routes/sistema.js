@@ -13,10 +13,10 @@ router.get('/perfis', requireFirebaseAuth, async (req, res, next) => {
     if (perfis.length === 0) {
       // Initialize default profiles for this tenant
       const defaults = [
-        { id: 'admin', nome: 'Super Admin', avatar: 'SA', cor: '#8b5cf6', tema: 'dark', modulos: ['pedidos', 'bling', 'financas', 'index', 'config'], tenantId },
+        { id: 'admin', nome: 'Super Admin', avatar: 'SA', cor: '#8b5cf6', tema: 'dark', modulos: ['pedidos', 'bling', 'financas', 'index', 'config', 'catalogo'], tenantId },
         { id: 'operacao', nome: 'Operação', avatar: 'OP', cor: '#3b82f6', tema: 'dark', modulos: ['pedidos', 'bling', 'index'], tenantId },
         { id: 'financeiro', nome: 'Financeiro', avatar: 'FI', cor: '#10b981', tema: 'dark', modulos: ['financas', 'index'], tenantId },
-        { id: 'catalogo', nome: 'Catálogo', avatar: 'CT', cor: '#f59e0b', tema: 'dark', modulos: ['index'], tenantId },
+        { id: 'catalogo', nome: 'Catálogo', avatar: 'CT', cor: '#f59e0b', tema: 'dark', modulos: ['index', 'catalogo'], tenantId },
         { id: 'vendas', nome: 'Vendas', avatar: 'VE', cor: '#ec4899', tema: 'dark', modulos: ['index'], tenantId }
       ];
       
@@ -53,10 +53,10 @@ router.get('/perfis/:role', requireFirebaseAuth, async (req, res, next) => {
       res.json(doc.data());
     } else {
       const DEFAULT_MODULOS = {
-        admin:      ['pedidos', 'bling', 'financas', 'index', 'config'],
+        admin:      ['pedidos', 'bling', 'financas', 'index', 'config', 'catalogo'],
         operacao:   ['pedidos', 'bling', 'index'],
         financeiro: ['financas', 'index'],
-        catalogo:   ['index'],
+        catalogo:   ['index', 'catalogo'],
         vendas:     ['index'],
       };
       const names = { admin: 'Super Admin', operacao: 'Operação', financeiro: 'Financeiro', catalogo: 'Catálogo', vendas: 'Vendas' };
