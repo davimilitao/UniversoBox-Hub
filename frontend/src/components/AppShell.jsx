@@ -29,6 +29,10 @@ const ROTAS = [
   // Expedição
   { key: 'pedidos',        moduleId: 'pedidos',        label: 'Entregas do Dia',   secao: 'Expedição',  Icon: Package,           react: true,  href: '/expedicao/pedidos'    },
   { key: 'bling',          moduleId: 'bling',          label: 'Expedir Bling',     secao: 'Expedição',  Icon: Zap,               react: true,  href: '/expedicao/bling'      },
+  // Catálogo
+  { key: 'cat-cadastro',   moduleId: 'catalogo',       label: 'Catálogo Studio',   secao: 'Catálogo',   Icon: Sparkles,          react: true,  href: '/catalogo/automacao'   },
+  { key: 'cat-produtos',   moduleId: 'catalogo',       label: 'Produtos',          secao: 'Catálogo',   Icon: Box,               react: true,  href: '/catalogo/produtos'    },
+  { key: 'cat-admin',      moduleId: 'catalogo',       label: 'Admin Catálogo',    secao: 'Catálogo',   Icon: Settings2,         react: true,  href: '/catalogo/admin'       },
   // Financeiro
   { key: 'fin-contas',     moduleId: 'financas',       label: 'Despesas',          secao: 'Financeiro', Icon: Wallet,            react: true,  href: '/financeiro/despesas'  },
   { key: 'inteligencia',   moduleId: 'financas',       label: 'Inteligência (BI)', secao: 'Financeiro', Icon: TrendingUp,        react: true,  href: '/financeiro/inteligencia' },

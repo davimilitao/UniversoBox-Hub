@@ -16,6 +16,13 @@ import ConfiguracoesSistema    from './pages/sistema/ConfiguracoesSistema';
 import Contas                  from './pages/financeiro/Contas';
 import InteligenciaBI          from './pages/financeiro/InteligenciaBI';
 
+// Catálogo
+import AutomacaoCadastro       from './pages/catalogo/AutomacaoCadastro';
+import AdminProdutos           from './pages/catalogo/AdminProdutos';
+import CatalogoPro             from './pages/catalogo/CatalogoPro';
+import ImageStudio             from './pages/catalogo/ImageStudio';
+import BatchImageStudio        from './pages/catalogo/BatchImageStudio';
+
 export default function App() {
   return (
     <Routes>
@@ -30,6 +37,13 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         {/* Expedição */}
         <Route path="/expedicao/bling"     element={<BlingPedidos />} />
+        {/* Catálogo */}
+        <Route path="/catalogo/automacao"  element={<AutomacaoCadastro />} />
+        <Route path="/catalogo/admin"      element={<AdminProdutos />} />
+        <Route path="/catalogo/produtos"   element={<CatalogoPro />} />
+        <Route path="/catalogo/fotos"      element={<ImageStudio />} />
+        <Route path="/catalogo/fotos-lote" element={<BatchImageStudio />} />
+        {/* Expedição */}
         <Route path="/expedicao/pedidos"   element={<PedidosDoDia />} />
         {/* Financeiro */}
         <Route path="/financeiro/despesas"    element={<Contas />} />
