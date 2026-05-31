@@ -112,6 +112,10 @@ function normalizarProduto(p, listItem = null) {
 
 // Monta payload para PUT /produtos/:id
 function montarPayload(p) {
+  const cleanImagens = (p.imagens || [])
+    .map(link => typeof link === 'string' ? link.trim() : '')
+    .filter(Boolean);
+
   return {
     nome:         p.nome,
     codigo:       p.codigo,
@@ -137,11 +141,9 @@ function montarPayload(p) {
       profundidade: parseFloat(p.profundidade)  || 0,
     },
     ...(p.categoria?.id ? { categoria: { id: Number(p.categoria.id) } } : {}),
-    ...(p.imagens?.length ? {
-      midia: {
-        imagens: p.imagens.map(link => ({ link }))
-      }
-    } : {}),
+    midia: {
+      imagens: cleanImagens.map(link => ({ link }))
+    },
   };
 }
 
