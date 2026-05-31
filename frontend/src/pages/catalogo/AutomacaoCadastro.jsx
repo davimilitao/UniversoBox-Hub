@@ -119,11 +119,41 @@ function processImageToCanvas(file) {
 
 
 // ── Campo de texto genérico ───────────────────────────────────────────────────
-function Campo({ label, value, onChange, mono, placeholder, area, hint }) {
+function Campo({ label, value, onChange, mono, placeholder, area, hint, originalValue, importedValue, onUseOriginal, onUseImported }) {
   const cls = 'w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-white outline-none focus:border-emerald-500/60 transition-colors ' + (mono ? 'font-mono text-emerald-400' : '');
+  const hasDiff = originalValue !== undefined && String(originalValue ?? '') !== String(value ?? '');
+
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{label}</label>
+      <div className="flex justify-between items-baseline gap-2">
+        <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{label}</label>
+        {hasDiff && (
+          <div className="text-[9px] text-slate-500 flex items-center gap-1.5 animate-fade-in mb-0.5 max-w-[70%] overflow-hidden truncate">
+            <span>Bling: <strong className="text-slate-400 font-mono bg-white/[0.03] px-1 py-0.5 rounded">{originalValue || '—'}</strong></span>
+            {onUseOriginal && (
+              <button
+                type="button"
+                onClick={onUseOriginal}
+                className="text-violet-400 hover:text-violet-300 font-semibold underline shrink-0"
+              >
+                Usar Bling
+              </button>
+            )}
+            {importedValue !== undefined && String(importedValue ?? '') !== String(value ?? '') && onUseImported && (
+              <>
+                <span className="text-slate-700">|</span>
+                <button
+                  type="button"
+                  onClick={onUseImported}
+                  className="text-emerald-400 hover:text-emerald-300 font-semibold underline shrink-0"
+                >
+                  Usar PDF
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
       {area
         ? <textarea rows={5} className={cls + ' resize-none'} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
         : <input className={cls} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
@@ -261,7 +291,7 @@ function UploaderIA({ onFill, showToast }) {
 }
 
 // ── Componente Precificadora Inteligente de Canais ──
-function Precificadora({ precoVenda, setPrecoVenda, custo, setCusto, simplesNacional, setSimplesNacional, pesoBruto, onApplyPrice }) {
+function Precificadora({ precoVenda, setPrecoVenda, custo, setCusto, simplesNacional, setSimplesNacional, pesoBruto, onApplyPrice, originalCusto, originalPreco, onUseOriginalCusto, onUseOriginalPreco }) {
   const pVenda = parseFloat(precoVenda) || 0;
   const pCusto = parseFloat(custo) || 0;
   const impPct = parseFloat(simplesNacional) || 0;
@@ -303,6 +333,9 @@ function Precificadora({ precoVenda, setPrecoVenda, custo, setCusto, simplesNaci
     return { comissao, frete, imposto, liquido, margem };
   }, [pVenda, pCusto, impPct]);
 
+  const hasCustoDiff = originalCusto !== undefined && String(originalCusto) !== String(custo);
+  const hasPrecoDiff = originalPreco !== undefined && String(originalPreco) !== String(precoVenda);
+
   return (
     <section className="bg-slate-900 border border-white/5 rounded-2xl p-5 space-y-4">
       <h2 className="text-[11px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
@@ -311,7 +344,15 @@ function Precificadora({ precoVenda, setPrecoVenda, custo, setCusto, simplesNaci
       
       <div className="grid grid-cols-3 gap-3">
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Custo Prod (R$)</label>
+          <div className="flex justify-between items-baseline gap-1">
+            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Custo (R$)</label>
+            {hasCustoDiff && (
+              <span className="text-[8px] text-slate-500 truncate" title={`Bling: ${originalCusto}`}>
+                Bling: {originalCusto}{' '}
+                <button type="button" onClick={onUseOriginalCusto} className="text-violet-400 hover:text-violet-300 underline font-bold">Usar</button>
+              </span>
+            )}
+          </div>
           <input
             type="number"
             step="0.01"
@@ -333,7 +374,15 @@ function Precificadora({ precoVenda, setPrecoVenda, custo, setCusto, simplesNaci
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Preço Simulado (R$)</label>
+          <div className="flex justify-between items-baseline gap-1">
+            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Preço (R$)</label>
+            {hasPrecoDiff && (
+              <span className="text-[8px] text-slate-500 truncate" title={`Bling: ${originalPreco}`}>
+                Bling: {originalPreco}{' '}
+                <button type="button" onClick={onUseOriginalPreco} className="text-violet-400 hover:text-violet-300 underline font-bold">Usar</button>
+              </span>
+            )}
+          </div>
           <input
             type="number"
             step="0.01"
@@ -444,11 +493,25 @@ function Precificadora({ precoVenda, setPrecoVenda, custo, setCusto, simplesNaci
 }
 
 // ── Studio principal ──────────────────────────────────────────────────────────
-function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, onVoltar, isNovo, precoSimulado, setPrecoSimulado, custoSimulado, setCustoSimulado, simplesNacional, setSimplesNacional, onFill, showToast }) {
+function Studio({ produto, setProduto, originalProduto, importedProduto, categorias, onSalvar, salvando, salvoOk, onVoltar, isNovo, precoSimulado, setPrecoSimulado, custoSimulado, setCustoSimulado, simplesNacional, setSimplesNacional, onFill, showToast }) {
   const p = produto;
   const set = (campo) => (val) => setProduto(prev => ({ ...prev, [campo]: val }));
   const [uploadingImages, setUploadingImages] = useState(false);
   const [showUrls, setShowUrls] = useState(false);
+
+  const useOrig = (campo) => () => {
+    if (!originalProduto) return;
+    set(campo)(originalProduto[campo]);
+    if (campo === 'preco') setPrecoSimulado(originalProduto.preco || '0.00');
+    if (campo === 'precoCusto') setCustoSimulado(originalProduto.precoCusto || '0.00');
+  };
+
+  const useImport = (campo) => () => {
+    if (!importedProduto) return;
+    set(campo)(importedProduto[campo]);
+    if (campo === 'preco') setPrecoSimulado(importedProduto.preco || '0.00');
+    if (campo === 'precoCusto') setCustoSimulado(importedProduto.precoCusto || '0.00');
+  };
 
   const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
@@ -554,14 +617,62 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
             <h2 className="text-[11px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
               <Tag size={12} /> Identificação
             </h2>
-            <Campo label="Título / Nome do Produto" value={p.nome} onChange={set('nome')} placeholder="Nome completo do produto" />
+            <Campo
+              label="Título / Nome do Produto"
+              value={p.nome}
+              onChange={set('nome')}
+              originalValue={originalProduto?.nome}
+              importedValue={importedProduto?.nome}
+              onUseOriginal={useOrig('nome')}
+              onUseImported={useImport('nome')}
+              placeholder="Nome completo do produto"
+            />
             <div className="grid grid-cols-2 gap-4">
-              <Campo label="SKU / Código" value={p.codigo} onChange={set('codigo')} mono placeholder="EX: BUBA-PRATO-VD" />
-              <Campo label="EAN / GTIN (Unitário)" value={p.gtin} onChange={set('gtin')} mono placeholder="Código de barras unitário" />
+              <Campo
+                label="SKU / Código"
+                value={p.codigo}
+                onChange={set('codigo')}
+                originalValue={originalProduto?.codigo}
+                importedValue={importedProduto?.codigo}
+                onUseOriginal={useOrig('codigo')}
+                onUseImported={useImport('codigo')}
+                mono
+                placeholder="EX: BUBA-PRATO-VD"
+              />
+              <Campo
+                label="EAN / GTIN (Unitário)"
+                value={p.gtin}
+                onChange={set('gtin')}
+                originalValue={originalProduto?.gtin}
+                importedValue={importedProduto?.gtin}
+                onUseOriginal={useOrig('gtin')}
+                onUseImported={useImport('gtin')}
+                mono
+                placeholder="Código de barras unitário"
+              />
             </div>
             <div className="grid grid-cols-3 gap-4">
-              <Campo label="Marca" value={p.marca} onChange={set('marca')} placeholder="Ex: Buba" />
-              <Campo label="NCM" value={p.ncm} onChange={set('ncm')} mono placeholder="00000000" />
+              <Campo
+                label="Marca"
+                value={p.marca}
+                onChange={set('marca')}
+                originalValue={originalProduto?.marca}
+                importedValue={importedProduto?.marca}
+                onUseOriginal={useOrig('marca')}
+                onUseImported={useImport('marca')}
+                placeholder="Ex: Buba"
+              />
+              <Campo
+                label="NCM"
+                value={p.ncm}
+                onChange={set('ncm')}
+                originalValue={originalProduto?.ncm}
+                importedValue={importedProduto?.ncm}
+                onUseOriginal={useOrig('ncm')}
+                onUseImported={useImport('ncm')}
+                mono
+                placeholder="00000000"
+              />
               <div className="flex flex-col gap-1">
                 <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Situação</label>
                 <select
@@ -582,7 +693,17 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               <Hash size={12} /> Preço e Categoria
             </h2>
             <div className="grid grid-cols-2 gap-4">
-              <Campo label="Preço de venda (R$)" value={p.preco} onChange={set('preco')} placeholder="0.00" hint="Formato: 29.90" />
+              <Campo
+                label="Preço de venda (R$)"
+                value={p.preco}
+                onChange={set('preco')}
+                originalValue={originalProduto?.preco}
+                importedValue={importedProduto?.preco}
+                onUseOriginal={useOrig('preco')}
+                onUseImported={useImport('preco')}
+                placeholder="0.00"
+                hint="Formato: 29.90"
+              />
               <div className="flex flex-col gap-1">
                 <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Categoria Bling</label>
                 <select
@@ -614,6 +735,13 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               set('preco')(val);
               setPrecoSimulado(val);
             }}
+            originalCusto={originalProduto?.precoCusto}
+            originalPreco={originalProduto?.preco}
+            onUseOriginalCusto={() => setCustoSimulado(originalProduto?.precoCusto || '0.00')}
+            onUseOriginalPreco={() => {
+              setPrecoSimulado(originalProduto?.preco || '0.00');
+              set('preco')(originalProduto?.preco || '0.00');
+            }}
           />
 
           {/* Descrição */}
@@ -625,6 +753,10 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               label="Descrição curta (Bling)"
               value={p.descricaoCurta}
               onChange={set('descricaoCurta')}
+              originalValue={originalProduto?.descricaoCurta}
+              importedValue={importedProduto?.descricaoCurta}
+              onUseOriginal={useOrig('descricaoCurta')}
+              onUseImported={useImport('descricaoCurta')}
               placeholder="Texto resumido para listagens e marketplaces..."
               hint="Campo descricaoCurta do Bling — aparece em cards de produto"
             />
@@ -640,17 +772,80 @@ function Studio({ produto, setProduto, categorias, onSalvar, salvando, salvoOk, 
               <Truck size={12} /> Logística
             </h2>
             <div className="grid grid-cols-2 gap-4">
-              <Campo label="Peso Líquido (kg)" value={p.pesoLiq} onChange={set('pesoLiq')} placeholder="0.000" />
-              <Campo label="Peso Bruto (kg)" value={p.pesoBruto} onChange={set('pesoBruto')} placeholder="0.000" />
+              <Campo
+                label="Peso Líquido (kg)"
+                value={p.pesoLiq}
+                onChange={set('pesoLiq')}
+                originalValue={originalProduto?.pesoLiq}
+                importedValue={importedProduto?.pesoLiq}
+                onUseOriginal={useOrig('pesoLiq')}
+                onUseImported={useImport('pesoLiq')}
+                placeholder="0.000"
+              />
+              <Campo
+                label="Peso Bruto (kg)"
+                value={p.pesoBruto}
+                onChange={set('pesoBruto')}
+                originalValue={originalProduto?.pesoBruto}
+                importedValue={importedProduto?.pesoBruto}
+                onUseOriginal={useOrig('pesoBruto')}
+                onUseImported={useImport('pesoBruto')}
+                placeholder="0.000"
+              />
             </div>
             <div className="grid grid-cols-3 gap-4">
-              <Campo label="Largura (cm)" value={p.largura} onChange={set('largura')} placeholder="0" />
-              <Campo label="Altura (cm)" value={p.altura} onChange={set('altura')} placeholder="0" />
-              <Campo label="Profundidade (cm)" value={p.profundidade} onChange={set('profundidade')} placeholder="0" />
+              <Campo
+                label="Largura (cm)"
+                value={p.largura}
+                onChange={set('largura')}
+                originalValue={originalProduto?.largura}
+                importedValue={importedProduto?.largura}
+                onUseOriginal={useOrig('largura')}
+                onUseImported={useImport('largura')}
+                placeholder="0"
+              />
+              <Campo
+                label="Altura (cm)"
+                value={p.altura}
+                onChange={set('altura')}
+                originalValue={originalProduto?.altura}
+                importedValue={importedProduto?.altura}
+                onUseOriginal={useOrig('altura')}
+                onUseImported={useImport('altura')}
+                placeholder="0"
+              />
+              <Campo
+                label="Profundidade (cm)"
+                value={p.profundidade}
+                onChange={set('profundidade')}
+                originalValue={originalProduto?.profundidade}
+                importedValue={importedProduto?.profundidade}
+                onUseOriginal={useOrig('profundidade')}
+                onUseImported={useImport('profundidade')}
+                placeholder="0"
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <Campo label="Itens por Caixa Master" value={p.itensPorCaixa} onChange={set('itensPorCaixa')} placeholder="1" />
-              <Campo label="EAN Caixa Master" value={p.gtinEmbalagem} onChange={set('gtinEmbalagem')} placeholder="Código de barras da caixa master" />
+              <Campo
+                label="Itens por Caixa Master"
+                value={p.itensPorCaixa}
+                onChange={set('itensPorCaixa')}
+                originalValue={originalProduto?.itensPorCaixa}
+                importedValue={importedProduto?.itensPorCaixa}
+                onUseOriginal={useOrig('itensPorCaixa')}
+                onUseImported={useImport('itensPorCaixa')}
+                placeholder="1"
+              />
+              <Campo
+                label="EAN Caixa Master"
+                value={p.gtinEmbalagem}
+                onChange={set('gtinEmbalagem')}
+                originalValue={originalProduto?.gtinEmbalagem}
+                importedValue={importedProduto?.gtinEmbalagem}
+                onUseOriginal={useOrig('gtinEmbalagem')}
+                onUseImported={useImport('gtinEmbalagem')}
+                placeholder="Código de barras da caixa master"
+              />
             </div>
           </section>
         </div>
@@ -892,6 +1087,11 @@ export default function AutomacaoCadastro() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [candidates,  setCandidates]  = useState([]);
 
+  // States para fluxo de busca por EAN pós-PDF e tela comparativa
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [blingMatch, setBlingMatch] = useState(null);
+  const [importedProduto, setImportedProduto] = useState(null);
+
   // Calcula diferenças entre o produto editado e o original do Bling
   const diffs = useMemo(() => {
     if (!originalProduto || !produto) return [];
@@ -992,14 +1192,81 @@ export default function AutomacaoCadastro() {
     }
   }
 
-  function handleFill(data) {
+  async function handleFill(data) {
+    const eanOrSku = (data.gtin || data.codigo || '').trim();
+    if (!eanOrSku) {
+      applyFillDirect(data);
+      return;
+    }
+
+    setStatus('buscando');
+    try {
+      const res = await fetch(`/api/catalogo/produtos?q=${encodeURIComponent(eanOrSku)}`);
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erro ao buscar');
+
+      const items = d.items || [];
+      const match = items.find(it =>
+        (it.sku && it.sku.toLowerCase() === eanOrSku.toLowerCase()) ||
+        (it.ean && it.ean.toLowerCase() === eanOrSku.toLowerCase())
+      );
+
+      if (match) {
+        setBlingMatch(match);
+        setImportedProduto(data);
+        setShowSyncModal(true);
+        setStatus('idle');
+      } else {
+        applyFillDirect(data);
+        setStatus('studio');
+      }
+    } catch (err) {
+      console.warn('Erro ao buscar EAN/SKU no Bling:', err);
+      applyFillDirect(data);
+      setStatus('studio');
+    }
+  }
+
+  function applyFillDirect(data) {
     setProduto(prev => ({
       ...prev,
       ...data,
       imagens: prev.imagens || []
     }));
+    setOriginalProduto(null);
+    setImportedProduto(data);
     if (data.preco) setPrecoSimulado(data.preco);
     if (data.precoCusto) setCustoSimulado(data.precoCusto);
+  }
+
+  async function handleSyncConfirm() {
+    if (!blingMatch) return;
+    setShowSyncModal(false);
+    setStatus('buscando');
+    try {
+      const res = await fetch(`/api/catalogo/produto/${blingMatch.id}`);
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erro ao carregar detalhes do Bling');
+
+      const merged = {
+        ...d,
+        ...importedProduto,
+        id: d.id,
+        imagens: [...(d.imagens || []), ...(importedProduto?.imagens || [])]
+          .map(img => typeof img === 'string' ? img.trim() : img.link || img.url || '')
+          .filter((v, i, a) => v && a.indexOf(v) === i)
+      };
+
+      setProduto(merged);
+      setOriginalProduto(d);
+      setPrecoSimulado(merged.preco || '0.00');
+      setCustoSimulado(merged.precoCusto || '0.00');
+      setStatus('studio');
+      showToast('Produto sincronizado com o Bling! Diferenças exibidas nos campos. ✓');
+    } catch (err) {
+      showToast('Erro ao sincronizar com o Bling: ' + err.message, 'err');
+      setStatus('idle');
+    }
   }
 
   async function loadProductDetail(id) {
@@ -1161,6 +1428,8 @@ export default function AutomacaoCadastro() {
       <Studio
         produto={produto}
         setProduto={setProduto}
+        originalProduto={originalProduto}
+        importedProduto={importedProduto}
         categorias={categorias}
         onSalvar={triggerConfirm}
         salvando={status === 'salvando'}
@@ -1176,6 +1445,58 @@ export default function AutomacaoCadastro() {
         onFill={handleFill}
         showToast={showToast}
       />
+
+      {/* Modal de Confirmação de Sincronização pós-PDF */}
+      {showSyncModal && blingMatch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl animate-scale-up">
+            <div className="px-5 py-4 border-b border-white/5 bg-slate-950 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                <Sparkles size={16} className="text-violet-400" />
+                Produto Encontrado no Bling
+              </h3>
+              <button onClick={() => setShowSyncModal(false)} className="text-slate-500 hover:text-slate-300">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Identificamos que este produto já está cadastrado no Bling!
+              </p>
+              <div className="bg-slate-950/60 rounded-xl p-4 border border-white/[0.04] space-y-2 text-xs">
+                <p className="text-slate-500">
+                  <span className="font-bold text-slate-400">Nome:</span> {blingMatch.nome}
+                </p>
+                <p className="text-slate-500 font-mono">
+                  <span className="font-bold text-slate-400 font-sans">SKU / Código:</span> {blingMatch.sku}
+                </p>
+                <p className="text-slate-500 font-mono">
+                  <span className="font-bold text-slate-400 font-sans">EAN / GTIN:</span> {blingMatch.ean || '—'}
+                </p>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Deseja mesclar os dados extraídos do PDF com os dados existentes no Bling para comparar as diferenças antes de salvar?
+              </p>
+            </div>
+            <div className="px-5 py-4 border-t border-white/5 bg-slate-950 flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  setShowSyncModal(false);
+                  applyFillDirect(importedProduto);
+                  setStatus('studio');
+                }}
+                className="px-4 py-2 rounded-xl border border-white/5 hover:bg-white/[0.05] text-xs font-semibold text-slate-400 transition-all"
+              >
+                Ignorar e Criar Novo
+              </button>
+              <button
+                onClick={handleSyncConfirm}
+                className="px-5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs transition-all shadow-lg shadow-violet-950/20"
+              >
+                Sincronizar e Comparar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Confirmação de Sincronização */}
       {showConfirm && (
