@@ -353,12 +353,42 @@ router.get('/orders/today', async (req, res, next) => {
 
     const statusList = await Promise.all(orders.map(o => resolveLocalStatus(o.id)));
 
-    const enriched = orders.map((o, i) => ({
-      ...o,
-      logistica:     detectLogistica(o),
-      _localStatus:  statusList[i],
-      _createdTime:  formatTimeBR(o.date_created),
-    }));
+    // Buscar detalhes do envio (shipment) em paralelo para obter a logistica real
+    const shipmentPromises = orders.map(async (o) => {
+      const shipId = o.shipping?.id;
+      if (!shipId) return null;
+      try {
+        const sRes = await fetchWithTimeout(`${ML_API_BASE}/shipments/${shipId}`, { headers }, 8000);
+        if (sRes.ok) return await sRes.json();
+      } catch (_) {}
+      return null;
+    });
+
+    const shipmentsData = await Promise.all(shipmentPromises);
+    const shipmentsMap = {};
+    shipmentsData.forEach(s => {
+      if (s && s.id) shipmentsMap[s.id] = s;
+    });
+
+    const enriched = orders.map((o, i) => {
+      const shipDetails = o.shipping?.id ? shipmentsMap[o.shipping.id] : null;
+      const enrichedShipping = {
+        ...o.shipping,
+        ...(shipDetails || {})
+      };
+      const enrichedOrder = {
+        ...o,
+        shipping: enrichedShipping
+      };
+
+      return {
+        ...o,
+        shipping:     enrichedShipping,
+        logistica:    detectLogistica(enrichedOrder),
+        _localStatus: statusList[i],
+        _createdTime: formatTimeBR(o.date_created),
+      };
+    });
 
     const statusOrder = { imprimir: 0, expedir: 1, enviado: 2, cancelado: 3 };
     enriched.sort((a, b) =>
@@ -852,22 +882,52 @@ router.get('/dashboard', requireFirebaseAuth, async (req, res, next) => {
     }
 
     const statusList = await Promise.all(rawOrders.map(o => resolveLocalStatus(o.id)));
-    orders = rawOrders.map((o, i) => ({
-      id:           o.id,
-      logistica:    detectLogistica(o),
-      _localStatus: statusList[i],
-      _createdTime: formatTimeBR(o.date_created),
-      buyer:        o.buyer?.nickname || null,
-      total:        o.total_amount   || 0,
-      items:        (o.order_items   || []).map(it => ({
-        sku:   it.item?.seller_sku || null,
-        name:  it.item?.title     || null,
-        qty:   it.quantity        || 1,
-      })),
-      tracking:     o.shipping?.tracking_number || null,
-      needsLabel:   !o.shipping?.tracking_number,
-      orderId:      o.id,
-    }));
+
+    // Buscar detalhes do envio (shipment) em paralelo para obter a logistica real no Dashboard
+    const shipmentPromises = rawOrders.map(async (o) => {
+      const shipId = o.shipping?.id;
+      if (!shipId) return null;
+      try {
+        const sRes = await fetchWithTimeout(`${ML_API_BASE}/shipments/${shipId}`, { headers }, 8000);
+        if (sRes.ok) return await sRes.json();
+      } catch (_) {}
+      return null;
+    });
+
+    const shipmentsData = await Promise.all(shipmentPromises);
+    const shipmentsMap = {};
+    shipmentsData.forEach(s => {
+      if (s && s.id) shipmentsMap[s.id] = s;
+    });
+
+    orders = rawOrders.map((o, i) => {
+      const shipDetails = o.shipping?.id ? shipmentsMap[o.shipping.id] : null;
+      const enrichedShipping = {
+        ...o.shipping,
+        ...(shipDetails || {})
+      };
+      const enrichedOrder = {
+        ...o,
+        shipping: enrichedShipping
+      };
+
+      return {
+        id:           o.id,
+        logistica:    detectLogistica(enrichedOrder),
+        _localStatus: statusList[i],
+        _createdTime: formatTimeBR(o.date_created),
+        buyer:        o.buyer?.nickname || null,
+        total:        o.total_amount   || 0,
+        items:        (o.order_items   || []).map(it => ({
+          sku:   it.item?.seller_sku || null,
+          name:  it.item?.title     || null,
+          qty:   it.quantity        || 1,
+        })),
+        tracking:     enrichedShipping.tracking_number || null,
+        needsLabel:   !enrichedShipping.tracking_number,
+        orderId:      o.id,
+      };
+    });
 
     const statusOrder = { imprimir: 0, expedir: 1, enviado: 2, cancelado: 3 };
     orders.sort((a, b) => (statusOrder[a._localStatus] ?? 9) - (statusOrder[b._localStatus] ?? 9));
