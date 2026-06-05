@@ -10,7 +10,7 @@ import {
   CreditCard, Plus, AlertTriangle, CheckCircle2, Clock,
   Calendar, Loader2, Wallet, X, RotateCcw, Banknote,
   BarChart2, ShieldCheck, RefreshCw, MessageCircle, Copy,
-  Check, ChevronLeft, ChevronRight, AlertCircle,
+  Check, ChevronLeft, ChevronRight, AlertCircle, ChevronDown, Clipboard,
 } from 'lucide-react';
 import { useCompras, calcParcelas } from '../../hooks/useCompras';
 import { useMeiosPagamento } from '../../hooks/useMeiosPagamento';
@@ -378,12 +378,207 @@ function PainelVencimentos({ parcelas, loading, marcarPago, desfazerPagamento, g
   );
 }
 
-// ─── Formulário Nova Compra (inalterado) ──────────────────────────────────────
+// ─── Helpers do Lançamento Inteligente ────────────────────────────────────────
+
+function hojeISO() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function parsePastedText(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  let totalBruto = '';
+  let dataCompra = '';
+  let numParcelas = '1';
+  let descricao = '';
+  let sku = '';
+  let totalQtd = 0;
+  let avista = true;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].toLowerCase();
+    
+    // 1. Data de compra
+    if (line.includes('data de compra') || line.includes('data da compra')) {
+      const match = line.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      if (match) {
+        dataCompra = `${match[3]}-${match[2]}-${match[1]}`;
+      } else if (i + 1 < lines.length) {
+        const nextMatch = lines[i+1].match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (nextMatch) {
+          dataCompra = `${nextMatch[3]}-${nextMatch[2]}-${nextMatch[1]}`;
+        }
+      }
+    }
+
+    // 2. Valor total
+    if (line === 'total') {
+      if (i + 1 < lines.length) {
+        const match = lines[i+1].match(/R\$\s*([\d.,]+)/i);
+        if (match) {
+          totalBruto = match[1].replace(/\./g, '').replace(',', '.');
+        }
+      }
+    }
+  }
+
+  // Fallback para valor do produto se total não for achado
+  if (!totalBruto) {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].toLowerCase().includes('valor dos produtos')) {
+        if (i + 1 < lines.length) {
+          const match = lines[i+1].match(/R\$\s*([\d.,]+)/i);
+          if (match) {
+            totalBruto = match[1].replace(/\./g, '').replace(',', '.');
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Parcelas
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].toLowerCase();
+    const matchParc = line.match(/em\s*(\d+)\s*x\s*/i) || line.match(/(\d+)\s*x\s*de\s*/i) || line.match(/cartão de crédito\s*\[(\d+)x\]/i);
+    if (matchParc) {
+      numParcelas = matchParc[1];
+      avista = parseInt(numParcelas) <= 1;
+    }
+  }
+
+  // 4. Produtos e SKUs
+  const productsFound = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].toLowerCase();
+    if (line === 'sku' || line.startsWith('sku:')) {
+      let currentSku = '';
+      if (line.startsWith('sku:')) {
+        currentSku = lines[i].split(':')[1].trim();
+      } else if (i + 1 < lines.length) {
+        currentSku = lines[i+1];
+      }
+      
+      let currentQty = 1;
+      let productName = '';
+      
+      // Procura nome do produto subindo
+      let nameIdx = i - 1;
+      while (nameIdx >= 0 && nameIdx >= i - 4) {
+        const l = lines[nameIdx];
+        if (l.toLowerCase() !== 'produtos' && !l.includes(':') && !l.match(/^\d+x$/) && !l.includes('R$')) {
+          productName = l;
+          break;
+        }
+        nameIdx--;
+      }
+
+      // Procura quantidade
+      for (let offset = -3; offset <= 3; offset++) {
+        if (i + offset >= 0 && i + offset < lines.length) {
+          const mQty = lines[i + offset].match(/^(\d+)x$/);
+          if (mQty) {
+            currentQty = parseInt(mQty[1]);
+            break;
+          }
+        }
+      }
+
+      productsFound.push({ sku: currentSku, name: productName || 'Produto', qty: currentQty });
+    }
+  }
+
+  if (productsFound.length > 0) {
+    const uniqueProducts = [];
+    productsFound.forEach(p => {
+      if (!uniqueProducts.find(u => u.sku === p.sku)) {
+        uniqueProducts.push(p);
+      }
+    });
+    descricao = uniqueProducts.map(p => `${p.name} (${p.qty}x)`).join(', ');
+    sku = uniqueProducts[0].sku;
+    totalQtd = uniqueProducts.reduce((sum, p) => sum + p.qty, 0);
+  }
+
+  let fornecedor = 'Mercado Livre';
+  if (text.toLowerCase().includes('amazon')) {
+    fornecedor = 'Amazon';
+  } else if (text.toLowerCase().includes('bling')) {
+    fornecedor = 'Bling';
+  }
+
+  return {
+    fornecedor,
+    descricao: descricao || 'Compra de estoque',
+    totalBruto,
+    numeroParcelas: numParcelas,
+    avista,
+    sku,
+    qtd: totalQtd || '',
+    dataCompra,
+  };
+}
+
+function findBestCard(text, meios) {
+  if (!meios || !meios.length) return '';
+  const textLower = text.toLowerCase();
+  
+  for (const m of meios) {
+    if (m.final && textLower.includes(m.final.toLowerCase())) {
+      return m.id;
+    }
+  }
+  
+  const keywords = {
+    meli: ['meli', 'mercado livre', 'mercadolivre'],
+    nubank: ['nubank', 'nu '],
+    inter: ['inter'],
+    caixa: ['caixa'],
+    renner: ['renner'],
+    fernanda: ['fernanda'],
+    santander: ['santander'],
+    joao: ['joao', 'joão']
+  };
+  
+  for (const m of meios) {
+    const nomeLower = m.nome.toLowerCase();
+    for (const [key, aliases] of Object.entries(keywords)) {
+      if (nomeLower.includes(key)) {
+        if (aliases.some(alias => textLower.includes(alias))) {
+          return m.id;
+        }
+      }
+    }
+  }
+  
+  if (textLower.includes('mercado livre') || textLower.includes('mercadolivre') || textLower.includes('etapas') || textLower.includes('pedido faturado')) {
+    const meliCard = meios.find(m => m.nome.toLowerCase().includes('meli'));
+    if (meliCard) return meliCard.id;
+  }
+  
+  return '';
+}
+
+// ─── Formulário Nova Compra (com Lançamento Inteligente) ──────────────────────
 function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
-  const EMPTY = { fornecedor: '', descricao: '', totalBruto: '', numeroParcelas: '1', taxaJuros: '', meioId: '', sku: '', qtd: '', avista: true };
+  const EMPTY = { 
+    fornecedor: '', 
+    descricao: '', 
+    totalBruto: '', 
+    numeroParcelas: '1', 
+    taxaJuros: '', 
+    meioId: '', 
+    sku: '', 
+    qtd: '', 
+    avista: true,
+    dataCompra: hojeISO()
+  };
   const [f, setF] = useState(EMPTY);
   const [erro, setErro] = useState('');
   const [ok, setOk] = useState(false);
+  
+  // Smart Paste State
+  const [showSmartPaste, setShowSmartPaste] = useState(false);
+  const [rawText, setRawText] = useState('');
+  const [smartPasteError, setSmartPasteError] = useState('');
 
   const meio = meios.find(m => m.id === f.meioId);
   const total = parseFloat(f.totalBruto) || 0;
@@ -398,10 +593,41 @@ function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
   const custoUnit = total > 0 && parseInt(f.qtd) > 0 ? (total / parseInt(f.qtd)).toFixed(2) : '';
 
   function dataPrimeiraParcela() {
-    const hoje = new Date();
+    const base = f.dataCompra ? new Date(f.dataCompra + 'T12:00:00') : new Date();
     const dia  = meio?.diaVencimento || 10;
-    const mes  = hoje.getDate() < dia ? hoje.getMonth() : hoje.getMonth() + 1;
-    return new Date(hoje.getFullYear(), mes, dia);
+    const mes  = base.getDate() < dia ? base.getMonth() : base.getMonth() + 1;
+    return new Date(base.getFullYear(), mes, dia);
+  }
+
+  function handleSmartImport() {
+    setSmartPasteError('');
+    if (!rawText.trim()) {
+      setSmartPasteError('Cole algum texto primeiro.');
+      return;
+    }
+    
+    try {
+      const parsed = parsePastedText(rawText);
+      const bestCardId = findBestCard(rawText, meios);
+      
+      setF(prev => ({
+        ...prev,
+        fornecedor: parsed.fornecedor,
+        descricao: parsed.descricao,
+        totalBruto: parsed.totalBruto || prev.totalBruto,
+        numeroParcelas: parsed.numeroParcelas || prev.numeroParcelas,
+        avista: parsed.avista,
+        sku: parsed.sku || prev.sku,
+        qtd: parsed.qtd || prev.qtd,
+        meioId: bestCardId || prev.meioId,
+        dataCompra: parsed.dataCompra || prev.dataCompra,
+      }));
+      
+      setShowSmartPaste(false);
+      setRawText('');
+    } catch (e) {
+      setSmartPasteError('Erro ao processar texto: ' + e.message);
+    }
   }
 
   async function handleSubmit(e) {
@@ -429,11 +655,68 @@ function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
         <ShieldCheck size={14} className="shrink-0" />
         <span>Os dados do cartão não são armazenados — apenas o apelido e os últimos 4 dígitos.</span>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+
+      {/* Lançamento Inteligente */}
+      <div className="bg-slate-900/60 border border-dashed border-white/10 rounded-2xl p-4">
+        <button
+          type="button"
+          onClick={() => setShowSmartPaste(!showSmartPaste)}
+          className="flex items-center justify-between w-full text-left text-xs font-bold text-slate-400 hover:text-slate-200 uppercase tracking-wider focus:outline-none"
+        >
+          <span className="flex items-center gap-2">
+            <span className="bg-blue-500/15 border border-blue-500/30 text-blue-400 p-1.5 rounded-lg">
+              <Clipboard size={14} />
+            </span>
+            Importação Inteligente (Ctrl+C / Ctrl+V)
+          </span>
+          <ChevronDown size={14} className={`transition-transform duration-200 ${showSmartPaste ? 'rotate-180' : ''}`} />
+        </button>
+        
+        {showSmartPaste && (
+          <div className="mt-4 space-y-3 animate-fade-in">
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              Cole o texto copiado da tela de detalhes da sua compra (Mercado Livre, Amazon, etc.) no campo abaixo. O sistema preencherá automaticamente os valores, parcelas, data e SKUs para você revisar.
+            </p>
+            <textarea
+              value={rawText}
+              onChange={e => setRawText(e.target.value)}
+              placeholder="Cole o texto do pedido aqui..."
+              className="w-full h-32 bg-slate-950 border border-white/[0.06] rounded-xl p-3 text-slate-200 text-xs outline-none focus:border-blue-500/50 font-mono"
+            />
+            {smartPasteError && (
+              <p className="text-red-400 text-xs flex items-center gap-1">
+                <AlertTriangle size={12} /> {smartPasteError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              {rawText && (
+                <button
+                  type="button"
+                  onClick={() => setRawText('')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-all"
+                >
+                  Limpar
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleSmartImport}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition-all active:scale-95 shadow-md shadow-blue-500/10"
+              >
+                <RefreshCw size={12} /> Analisar Texto
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div><p className={lbl}>Fornecedor *</p>
           <input className={inp} placeholder="Ex: Distribuidora SP" required value={f.fornecedor} onChange={e => setF(p => ({...p, fornecedor: e.target.value}))} /></div>
         <div><p className={lbl}>Descrição / Produto</p>
           <input className={inp} placeholder="Ex: Pelúcias 100un" value={f.descricao} onChange={e => setF(p => ({...p, descricao: e.target.value}))} /></div>
+        <div><p className={lbl}>Data da Compra *</p>
+          <input className={inp} type="date" required value={f.dataCompra} onChange={e => setF(p => ({...p, dataCompra: e.target.value}))} /></div>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div><p className={lbl}>Valor Total R$ *</p>
