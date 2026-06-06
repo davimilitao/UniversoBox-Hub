@@ -5,12 +5,13 @@
  * @version 2.0.0
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   CreditCard, Plus, AlertTriangle, CheckCircle2, Clock,
   Calendar, Loader2, Wallet, X, RotateCcw, Banknote,
   BarChart2, ShieldCheck, RefreshCw, MessageCircle, Copy,
   Check, ChevronLeft, ChevronRight, AlertCircle, ChevronDown, Clipboard,
+  Box, Package, TrendingUp,
 } from 'lucide-react';
 import { useCompras, calcParcelas } from '../../hooks/useCompras';
 import { useMeiosPagamento } from '../../hooks/useMeiosPagamento';
@@ -53,6 +54,16 @@ function fmtData(ts)      { const d = tsToDate(ts); return d ? d.toLocaleDateStr
 function fmtDataCurta(ts) { const d = tsToDate(ts); return d ? d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '—'; }
 function fmtMesAno(ts)    { const d = tsToDate(ts); return d ? d.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' }) : ''; }
 function labelMes(ts)     { const d = tsToDate(ts); return d ? `${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}` : ''; }
+
+function labelMesBonito(label) {
+  const NOME_MES = {
+    '01':'Janeiro','02':'Fevereiro','03':'Março','04':'Abril',
+    '05':'Maio','06':'Junho','07':'Julho','08':'Agosto',
+    '09':'Setembro','10':'Outubro','11':'Novembro','12':'Dezembro',
+  };
+  const [mm, yyyy] = (label || '').split('/');
+  return mm && yyyy ? `${NOME_MES[mm] ?? mm} de ${yyyy}` : label;
+}
 
 function diasParaVencer(ts) {
   const d = tsToDate(ts);
@@ -807,8 +818,42 @@ export default function Contas() {
   const [mostrarCharts, setMostrarCharts] = useState(false);
   const [highlightedId, setHighlightedId] = useState(null);
 
-  const { parcelas, loading, saving, lancarCompra, marcarPago, desfazerPagamento, reload } = useCompras();
+  const { parcelas, compras, loading, saving, lancarCompra, marcarPago, desfazerPagamento, reload } = useCompras();
   const { meios, loading: loadingMeios } = useMeiosPagamento();
+
+  const [totalEstoqueBling, setTotalEstoqueBling] = useState(0);
+  const [loadingEstoque, setLoadingEstoque] = useState(false);
+
+  useEffect(() => {
+    async function loadEstoqueValuation() {
+      setLoadingEstoque(true);
+      try {
+        const res = await apiFetch('/products/all');
+        if (res.ok) {
+          const data = await res.json();
+          const items = data.items || [];
+          const sum = items.reduce((acc, p) => {
+            const stock = Number(p.stock || 0);
+            const cost = Number(p.precoCusto || p.preco_custo || 0);
+            return acc + (stock * cost);
+          }, 0);
+          setTotalEstoqueBling(sum);
+        }
+      } catch (e) {
+        console.error('[Contas] Erro ao buscar valor do estoque:', e);
+      } finally {
+        setLoadingEstoque(false);
+      }
+    }
+    loadEstoqueValuation();
+  }, []);
+
+  const totalEstoqueAChegar = useMemo(() => {
+    if (!compras) return 0;
+    return compras
+      .filter(c => c.status === 'aberta')
+      .reduce((sum, c) => sum + (Number(c.qtd || 0) * Number(c.custoUnitario || 0)), 0);
+  }, [compras]);
 
   // ─── Dados de Despesas Operacionais (fin_despesas)
   const { despesas, loading: loadingDesp, error: errorDesp } = useFinDespesas();
@@ -894,6 +939,7 @@ export default function Contas() {
     const semAte = new Date(hoje); semAte.setDate(semAte.getDate() + 7);
 
     const pendentes = contasUnificadas.filter(c => c.situacao === 'pendente');
+    const pagos = contasUnificadas.filter(c => c.situacao === 'pago');
     const tsMs = c => c.timestamp;
 
     const vencidas  = pendentes.filter(c => tsMs(c) < hoje.getTime());
@@ -901,13 +947,25 @@ export default function Contas() {
     const semana_arr = pendentes.filter(c => { const t = tsMs(c); return t >= hoje.getTime() && t <= semAte.getTime(); });
 
     const soma = arr => arr.reduce((s, c) => s + (c.valor || 0), 0);
-    const totalPago = contasUnificadas.filter(c => c.situacao === 'pago').reduce((s, c) => s + (c.valor || 0), 0);
+    
+    const totalPendenteGeral = soma(pendentes);
+    const countPendenteGeral = pendentes.length;
+    const totalPagoGeral = soma(pagos);
+    const countPagoGeral = pagos.length;
 
     return {
       vencidas: { total: soma(vencidas), count: vencidas.length },
       hoje: { total: soma(hoje_arr), count: hoje_arr.length },
       semana: { total: soma(semana_arr), count: semana_arr.length },
-      totalPago,
+      totalPago: totalPagoGeral,
+      totalPendenteGeral,
+      countPendenteGeral,
+      totalPagoGeral,
+      countPagoGeral,
+      totalAtrasado: soma(vencidas),
+      countAtrasado: vencidas.length,
+      totalHoje: soma(hoje_arr),
+      countHoje: hoje_arr.length,
     };
   }, [contasUnificadas]);
 
@@ -968,6 +1026,18 @@ export default function Contas() {
     if (!mesEfetivo) return contasUnificadas;
     return contasUnificadas.filter(d => labelMesAnoTs(d.timestamp) === mesEfetivo);
   }, [contasUnificadas, mesEfetivo]);
+
+  const kpisMes = useMemo(() => {
+    const pendentes = contasMes.filter(c => c.situacao === 'pendente');
+    const pagos = contasMes.filter(c => c.situacao === 'pago');
+    const soma = arr => arr.reduce((s, c) => s + (c.valor || 0), 0);
+    return {
+      totalPendente: soma(pendentes),
+      countPendente: pendentes.length,
+      totalPago: soma(pagos),
+      countPago: pagos.length,
+    };
+  }, [contasMes]);
 
   // Handlers para salvar/toggle/deletar
   async function handleSalvarDespesa(payload) {
@@ -1142,12 +1212,81 @@ export default function Contas() {
 
         {aba === 'contas' && (
           <div className="space-y-4">
-            {/* KPIs Unificados */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <KpiCard label="Vencidos"     value={brl(kpisUnificados.vencidas.total)}  sub={`${kpisUnificados.vencidas.count} item(ns)`}  color="red"     Icon={AlertTriangle} />
-              <KpiCard label="Vence Hoje"  value={brl(kpisUnificados.hoje.total)}      sub={`${kpisUnificados.hoje.count} item(ns)`}      color="yellow"  Icon={Clock} />
-              <KpiCard label="Próx. 7 dias" value={brl(kpisUnificados.semana.total)}   sub={`${kpisUnificados.semana.count} item(ns)`}    color="blue"    Icon={Calendar} />
-              <KpiCard label="Total Pago"   value={brl(kpisUnificados.totalPago)}       sub="Histórico"                                     color="emerald" Icon={CheckCircle2} />
+            {/* KPIs Unificados de Duas Fileiras (Patrimônio Geral vs Período Selecionado) */}
+            <div className="space-y-4">
+              {/* Seção 1: Patrimônio & Visão Geral */}
+              <div className="space-y-2">
+                <h2 className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 pl-1">
+                  <Wallet size={12} className="text-emerald-500" /> Patrimônio & Fluxo Geral (Todos os Tempos)
+                </h2>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <KpiCard
+                    label="Estoque Atual (Bling)"
+                    value={loadingEstoque ? "Carregando..." : brl(totalEstoqueBling)}
+                    sub="Valor de Custo Total"
+                    color="blue"
+                    Icon={Box}
+                  />
+                  <KpiCard
+                    label="Estoque a Chegar"
+                    value={brl(totalEstoqueAChegar)}
+                    sub="Pedidos de compra abertos"
+                    color="yellow"
+                    Icon={Package}
+                  />
+                  <KpiCard
+                    label="Dívida Total (Geral)"
+                    value={brl(kpisUnificados.totalPendenteGeral)}
+                    sub={`${kpisUnificados.countPendenteGeral} lançamento(s) pendente(s)`}
+                    color="red"
+                    Icon={AlertTriangle}
+                  />
+                  <KpiCard
+                    label="Histórico Pago (Geral)"
+                    value={brl(kpisUnificados.totalPagoGeral)}
+                    sub="Total pago histórico"
+                    color="emerald"
+                    Icon={CheckCircle2}
+                  />
+                </div>
+              </div>
+
+              {/* Seção 2: Vencimentos do Período Selecionado */}
+              <div className="space-y-2">
+                <h2 className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 pl-1">
+                  <Calendar size={12} className="text-emerald-500" /> Vencimentos do Período ({rangeInicio && rangeFim ? 'Personalizado' : labelMesBonito(mesEfetivo)})
+                </h2>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <KpiCard
+                    label="A Pagar no Período"
+                    value={brl(kpisMes.totalPendente)}
+                    sub={`${kpisMes.countPendente} item(ns) pendente(s)`}
+                    color="blue"
+                    Icon={Clock}
+                  />
+                  <KpiCard
+                    label="Pago no Período"
+                    value={brl(kpisMes.totalPago)}
+                    sub={`${kpisMes.countPago} item(ns) pago(s)`}
+                    color="emerald"
+                    Icon={CheckCircle2}
+                  />
+                  <KpiCard
+                    label="Total Vencido"
+                    value={brl(kpisUnificados.totalAtrasado)}
+                    sub={`${kpisUnificados.countAtrasado} item(ns) vencido(s)`}
+                    color="red"
+                    Icon={AlertTriangle}
+                  />
+                  <KpiCard
+                    label="Vence Hoje"
+                    value={brl(kpisUnificados.totalHoje)}
+                    sub={`${kpisUnificados.countHoje} item(ns)`}
+                    color="yellow"
+                    Icon={Clock}
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Toggle de gráficos / filtros de origem */}
@@ -1280,7 +1419,7 @@ export default function Contas() {
           </div>
         )}
 
-        {aba === 'cartoes' && <MeiosPagamento />}
+        {aba === 'cartoes' && <MeiosPagamento parcelas={parcelas} />}
       </div>
 
       {editingItem && (

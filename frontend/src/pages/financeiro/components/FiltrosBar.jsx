@@ -60,6 +60,8 @@ export function FiltrosBar({
 
   const inputCls = "rounded-lg bg-slate-900 border border-white/10 text-slate-300 text-sm px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 [color-scheme:dark]";
 
+  const [showCategorias, setShowCategorias] = useState(false);
+
   return (
     <div className="flex flex-col gap-3">
 
@@ -134,45 +136,64 @@ export function FiltrosBar({
       </div>
 
       {/* ── Linha 2: Categoria + Status ─────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="flex items-center gap-1 text-xs text-slate-600">
-          <Tag size={11} /> Categoria:
-        </span>
-        {['Todas', ...categorias].map(cat => {
-          const val  = cat === 'Todas' ? 'all' : cat;
-          const ativo = categoriaAtiva === val;
-          return (
-            <button key={val} onClick={() => onCategoria(val)}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
-                ativo
-                  ? 'bg-emerald-600 border-emerald-500 text-white'
-                  : 'bg-slate-800 border-white/[0.07] text-slate-500 hover:text-slate-300 hover:border-emerald-600/40'
-              }`}>
-              {val === 'all' && <LayoutList size={10} className="inline mr-1" />}
-              {cat}
-            </button>
-          );
-        })}
-
-        <span className="w-px h-3.5 bg-white/10 mx-0.5" />
-
-        {[
-          { val: 'all',      label: 'Todos',    Icon: LayoutList   },
-          { val: 'pago',     label: 'Pago',     Icon: CheckCircle2 },
-          { val: 'pendente', label: 'Pendente', Icon: Clock        },
-        ].map(({ val, label, Icon }) => (
-          <button key={val} onClick={() => onStatus(val)}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
-              statusAtivo === val
-                ? val === 'pago'     ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400'
-                : val === 'pendente' ? 'bg-orange-600/20 border-orange-500 text-orange-400'
-                                     : 'bg-slate-600 border-slate-500 text-white'
-                : 'bg-slate-800 border-white/[0.07] text-slate-500 hover:text-slate-300'
-            }`}>
-            <Icon size={10} />
-            {label}
+      <div className="flex flex-col gap-2 border-t border-white/5 pt-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-wider">
+            <Tag size={11} className="text-emerald-500" /> Categorias
+          </span>
+          {categoriaAtiva !== 'all' && (
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-600/10 border border-emerald-500/20 text-emerald-400">
+              Ativo: {categoriaAtiva === 'all' ? 'Todas' : categoriaAtiva}
+            </span>
+          )}
+          <button
+            onClick={() => setShowCategorias(v => !v)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold border border-white/[0.08] text-slate-500 hover:text-slate-300 hover:border-white/20 transition-all ml-auto cursor-pointer"
+          >
+            {showCategorias ? 'Colapsar categorias' : 'Expandir categorias'}
           </button>
-        ))}
+        </div>
+
+        {showCategorias && (
+          <div className="flex flex-wrap gap-1.5 bg-slate-900/40 border border-white/[0.03] p-2.5 rounded-xl animate-fade-in max-h-32 overflow-y-auto">
+            {['Todas', ...categorias].map(cat => {
+              const val  = cat === 'Todas' ? 'all' : cat;
+              const ativo = categoriaAtiva === val;
+              return (
+                <button key={val} onClick={() => onCategoria(val)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                    ativo
+                      ? 'bg-emerald-600 border-emerald-500 text-white'
+                      : 'bg-slate-800 border-white/[0.07] text-slate-500 hover:text-slate-300'
+                  }`}>
+                  {val === 'all' && <LayoutList size={10} className="inline mr-1" />}
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.03] pt-2">
+          <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-600 mr-2">Status:</span>
+          {[
+            { val: 'all',      label: 'Todos',    Icon: LayoutList   },
+            { val: 'pago',     label: 'Pago',     Icon: CheckCircle2 },
+            { val: 'pendente', label: 'Pendente', Icon: Clock        },
+          ].map(({ val, label, Icon }) => (
+            <button key={val} onClick={() => onStatus(val)}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                statusAtivo === val
+                  ? val === 'pago'     ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400'
+                  : val === 'pendente' ? 'bg-orange-600/20 border-orange-500 text-orange-400'
+                                       : 'bg-slate-600 border-slate-500 text-white'
+                  : 'bg-slate-800 border-white/[0.07] text-slate-500 hover:text-slate-300'
+              }`}>
+              <Icon size={10} />
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
