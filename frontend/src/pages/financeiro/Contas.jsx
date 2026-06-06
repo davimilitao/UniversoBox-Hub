@@ -947,7 +947,7 @@ export default function Contas() {
   const [mostrarCharts, setMostrarCharts] = useState(false);
   const [highlightedId, setHighlightedId] = useState(null);
 
-  const { parcelas, compras, loading, saving, lancarCompra, marcarPago, desfazerPagamento, reload } = useCompras();
+  const { parcelas, compras, loading, saving, lancarCompra, marcarPago, desfazerPagamento, reload, deletarCompra } = useCompras();
   const { meios, loading: loadingMeios } = useMeiosPagamento();
 
   const [totalEstoqueBling, setTotalEstoqueBling] = useState(0);
