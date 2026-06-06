@@ -17,10 +17,11 @@ import {
   Tag, Hash, ChevronLeft, ChevronRight, Flame, ExternalLink,
   Package, ShoppingBag,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { getAuthToken } from '../../utils/getAuthToken';
 import { auth } from '../../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { usePerfil } from '../../hooks/usePerfil';
 
 // ─── helpers de data ──────────────────────────────────────────────────────────
 const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -403,7 +404,7 @@ function ResumoCard({ label, valor, sub, cor = 'slate' }) {
 }
 
 // ─── Day Group Card ───────────────────────────────────────────────────────────
-const DayGroupCard = memo(function DayGroupCard({ title, list, color, onBulkImport, onFilterClick }) {
+const DayGroupCard = memo(function DayGroupCard({ title, list, color, onBulkImport, onFilterClick, isAdmin }) {
   const mktGroups = useMemo(() => {
     const groups = { MERCADO_LIVRE: [], SHOPEE: [], MAGALU: [], TIKTOK: [], OUTROS: [] };
     list.forEach(nf => {
@@ -464,15 +465,17 @@ const DayGroupCard = memo(function DayGroupCard({ title, list, color, onBulkImpo
               </div>
               <div className="flex items-center justify-between text-[11px] text-slate-500">
                 <span>DANFE: {comDanfe} ok · {semDanfe} sem</span>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onBulkImport(mkt);
-                  }}
-                  className="text-emerald-400 hover:text-emerald-300 font-bold underline transition-colors text-xs"
-                >
-                  Expedir Lote
-                </button>
+                {isAdmin && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onBulkImport(mkt);
+                    }}
+                    className="text-emerald-400 hover:text-emerald-300 font-bold underline transition-colors text-xs"
+                  >
+                    Expedir Lote
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -483,8 +486,8 @@ const DayGroupCard = memo(function DayGroupCard({ title, list, color, onBulkImpo
 });
 
 // ─── NF Card Flat (Sem Collapse) ──────────────────────────────────────────────
-const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onClonar, onReload, isFlex, onFlexToggle, clonando, selected, onSelectToggle }) {
-  const jaCriado = clonados.has(String(nf.id));
+const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onClonar, onReload, isFlex, onFlexToggle, clonando, selected, onSelectToggle, isAdmin }) {
+  const jaCriado = !!(nf.clonado || clonados.has(String(nf.id)));
   const eClonar  = clonando === nf.id;
   const cli      = parseCliente(nf.cliente?.nome);
   const [showFinanceiro, setShowFinanceiro] = useState(false);
@@ -496,13 +499,15 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
       {/* TOP HEADER */}
       <div className="flex items-center gap-2 flex-wrap justify-between border-b border-white/5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onSelectToggle}
-            disabled={jaCriado}
-            className="w-4 h-4 rounded border-white/15 bg-slate-900 text-emerald-500 focus:ring-0 focus:ring-offset-0 disabled:opacity-30 cursor-pointer transition-colors"
-          />
+          {isAdmin && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onSelectToggle}
+              disabled={jaCriado}
+              className="w-4 h-4 rounded border-white/15 bg-slate-900 text-emerald-500 focus:ring-0 focus:ring-offset-0 disabled:opacity-30 cursor-pointer transition-colors"
+            />
+          )}
           <span className="text-xs font-mono text-slate-500 shrink-0">#{nf.numero}</span>
           <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-black border uppercase tracking-wider whitespace-nowrap ${canalCor(nf.marketplace)}`}>
             {mktLabels[nf.marketplace] || nf.marketplace || '?'}
@@ -772,12 +777,16 @@ const NFCard = memo(function NFCard({ nf, detalhe, loadingDetalhe, clonados, onC
 // ─── Página Principal ─────────────────────────────────────────────────────────
 export function BlingPedidos() {
   const defaultRange = calcPreset('hoje');
+  const [searchParams] = useSearchParams();
+  const { perfil } = usePerfil();
+  const isAdmin = perfil?.role === 'admin';
 
   const [status,                 setStatus]                 = useState(null);
   const [rangeIni,               setRangeIni]               = useState(defaultRange.ini);
   const [rangeFim,               setRangeFim]               = useState(defaultRange.fim);
   const [showPicker,             setShowPicker]             = useState(false);
-  const [canalSel,               setCanalSel]               = useState('all');
+  const [canalSel,               setCanalSel]               = useState(() => searchParams.get('canal') || 'all');
+  const [logisticaSel,           setLogisticaSel]           = useState(() => searchParams.get('filtro') || 'all');
   const [situacaoSel,            setSituacaoSel]            = useState('all');
   const [nfs,                    setNfs]                    = useState([]);
   const [loadingNfs,             setLoadingNfs]             = useState(false);
@@ -810,6 +819,14 @@ export function BlingPedidos() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // Sincronizar filtros com searchParams (ex: navegação vinda do painel ML)
+  useEffect(() => {
+    const canal = searchParams.get('canal');
+    const filtro = searchParams.get('filtro');
+    if (canal) setCanalSel(canal);
+    if (filtro) setLogisticaSel(filtro);
+  }, [searchParams]);
 
   // Buscar status (Bling ativo/inativo) - Apenas no mount
   const fetchStatus = useCallback(async () => {
@@ -934,8 +951,11 @@ export function BlingPedidos() {
 
     setLoadingNfs(true); setErro(null); setLoadingMsg('Buscando notas fiscais no Bling...');
     try {
+      const token = await getAuthToken();
       const params = new URLSearchParams({ dataInicio: ini, dataFim: fim, loja: 'all' });
-      const res  = await fetch(`/bling/pedidos?${params}`);
+      const res  = await fetch(`/bling/pedidos?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const data = await res.json();
       if (data.error === 'bling_not_authorized') {
         setErro('Bling não autorizado. Conecte sua conta.'); setNfs([]); return;
@@ -1010,7 +1030,7 @@ export function BlingPedidos() {
 
   // Executar a importação sequencial ou em lote no backend
   const executeBulkImport = async (listToImport) => {
-    const pendentes = listToImport.filter(nf => !clonados.has(String(nf.id)));
+    const pendentes = listToImport.filter(nf => !(nf.clonado || clonados.has(String(nf.id))));
     if (!pendentes.length) {
       showToast('Todos os pedidos selecionados já estão no sistema.', 'info');
       return;
@@ -1196,13 +1216,29 @@ export function BlingPedidos() {
         return true;
       });
     }
+
+    // Filtro por logística (Flex / Agência)
+    if (logisticaSel === 'flex' || logisticaSel === 'agency') {
+      lista = lista.filter(nf => {
+        const isFlexToggled = flexFlags[nf.id];
+        if (isFlexToggled !== undefined) {
+          return logisticaSel === 'flex' ? isFlexToggled : !isFlexToggled;
+        }
+        const det = nfeDetails[nf.id];
+        if (!det) {
+          return true; // Mantém enquanto carrega detalhes
+        }
+        const logistica = det.logistica || 'agency';
+        return logistica === logisticaSel;
+      });
+    }
     
     return lista;
-  }, [nfs, canalSel, situacaoSel, selectedDayFilter, selectedChannelFilter]);
+  }, [nfs, canalSel, situacaoSel, selectedDayFilter, selectedChannelFilter, logisticaSel, flexFlags, nfeDetails]);
 
   // Checkbox de seleção total
   const unimportedVisibleNfs = useMemo(() => {
-    return nfsFiltradas.filter(nf => !clonados.has(String(nf.id)));
+    return nfsFiltradas.filter(nf => !(nf.clonado || clonados.has(String(nf.id))));
   }, [nfsFiltradas, clonados]);
 
   const allSelected = useMemo(() => {
@@ -1234,7 +1270,7 @@ export function BlingPedidos() {
   const resumo = useMemo(() => {
     const total      = nfs.length;
     const semDanfe   = nfs.filter(n => isSemDanfe(n.situacao)).length;
-    const importadas = nfs.filter(n => clonados.has(String(n.id))).length;
+    const importadas = nfs.filter(n => n.clonado || clonados.has(String(n.id))).length;
     return { total, semDanfe, importadas, pendentes: Math.max(0, semDanfe - importadas) };
   }, [nfs, clonados]);
 
@@ -1246,7 +1282,7 @@ export function BlingPedidos() {
     <div className="text-slate-100 px-2 py-3 md:px-4 md:py-6 w-full overflow-y-auto flex-1 relative">
 
       {/* Floating Action Bar for Bulk Import */}
-      {selectedIds.size > 0 && (
+      {isAdmin && selectedIds.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] bg-slate-900/90 border border-emerald-500/30 rounded-2xl px-6 py-4 shadow-2xl backdrop-blur-lg flex items-center gap-6 min-w-[320px] max-w-md animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex flex-col">
             <span className="text-sm font-black text-white">{selectedIds.size} selecionado(s)</span>
@@ -1368,6 +1404,19 @@ export function BlingPedidos() {
             <div className="bg-slate-900/40 border border-white/[0.06] rounded-xl p-3 shadow-md flex flex-col gap-2.5">
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Período & Canais</span>
               
+              {/* Active Logistics Filter Badge */}
+              {logisticaSel !== 'all' && (
+                <div className="flex items-center justify-between bg-violet-600/10 border border-violet-500/20 rounded-lg px-2.5 py-1.5 text-[11px] text-violet-300">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <Flame size={12} className="text-violet-400 shrink-0" />
+                    <span className="truncate">Filtro: <strong>{logisticaSel === 'flex' ? 'ML Flex' : 'ML Agência'}</strong></span>
+                  </span>
+                  <button onClick={() => setLogisticaSel('all')} className="text-violet-400 hover:text-violet-200 bg-transparent border-0 cursor-pointer font-bold text-[10px] pl-2 uppercase shrink-0">
+                    Limpar
+                  </button>
+                </div>
+              )}
+              
               {/* Date button */}
               <div className="relative" ref={pickerRef}>
                 <button
@@ -1439,6 +1488,7 @@ export function BlingPedidos() {
                       color="emerald"
                       onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.hoje, mkt)}
                       onFilterClick={(mkt) => handleFilterClick('hoje', mkt)}
+                      isAdmin={isAdmin}
                     />
                   )}
                   {groupedByDay.amanha.length > 0 && (
@@ -1448,6 +1498,7 @@ export function BlingPedidos() {
                       color="blue"
                       onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.amanha, mkt)}
                       onFilterClick={(mkt) => handleFilterClick('amanha', mkt)}
+                      isAdmin={isAdmin}
                     />
                   )}
                   {groupedByDay.futuros.length > 0 && (
@@ -1457,6 +1508,7 @@ export function BlingPedidos() {
                       color="purple"
                       onBulkImport={(mkt) => handleBulkImportFromGroup(groupedByDay.futuros, mkt)}
                       onFilterClick={(mkt) => handleFilterClick('futuros', mkt)}
+                      isAdmin={isAdmin}
                     />
                   )}
                   {groupedByDay.hoje.length === 0 && groupedByDay.amanha.length === 0 && groupedByDay.futuros.length === 0 && (
@@ -1531,13 +1583,17 @@ export function BlingPedidos() {
                   {/* List Header com Checkbox Geral */}
                   <div className="flex items-center justify-between px-3 py-1.5 border border-white/[0.04] bg-slate-900/30 rounded-lg text-xs">
                     <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        onChange={handleSelectAllToggle}
-                        className="w-4 h-4 rounded border-white/15 bg-slate-950 text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer transition-colors"
-                      />
-                      <span className="font-extrabold text-slate-500 uppercase tracking-wider text-xs">Selecionar Todos</span>
+                      {isAdmin && (
+                        <>
+                          <input
+                            type="checkbox"
+                            checked={allSelected}
+                            onChange={handleSelectAllToggle}
+                            className="w-4 h-4 rounded border-white/15 bg-slate-950 text-emerald-500 focus:ring-0 focus:ring-offset-0 cursor-pointer transition-colors"
+                          />
+                          <span className="font-extrabold text-slate-500 uppercase tracking-wider text-xs">Selecionar Todos</span>
+                        </>
+                      )}
                     </div>
                     <span className="font-bold text-slate-600 text-xs">
                       Exibindo {nfsFiltradas.length} de {nfs.length} Notas
@@ -1554,11 +1610,12 @@ export function BlingPedidos() {
                       clonados={clonados}
                       onClonar={handleClonar}
                       onReload={() => reloadSingleNfeDetails(nf.id)}
-                      isFlex={!!flexFlags[nf.id]}
+                      isFlex={flexFlags[nf.id] !== undefined ? flexFlags[nf.id] : (nfeDetails[nf.id]?.logistica === 'flex')}
                       onFlexToggle={handleFlexToggle}
                       clonando={clonando}
                       selected={selectedIds.has(nf.id)}
                       onSelectToggle={() => handleSelectToggle(nf.id)}
+                      isAdmin={isAdmin}
                     />
                   ))}
 

@@ -55,6 +55,29 @@ function detectLogistica(order) {
   return 'agency';
 }
 
+async function saveOrderLogistics(ordersWithLogistics) {
+  try {
+    const batch = db.batch();
+    let count = 0;
+    for (const item of ordersWithLogistics) {
+      const id = item.id || item.orderId;
+      if (!id || !item.logistica) continue;
+      const ref = db.collection('ml_order_logistics').doc(String(id));
+      batch.set(ref, {
+        logistica: item.logistica,
+        updatedAtMs: Date.now()
+      }, { merge: true });
+      count++;
+    }
+    if (count > 0) {
+      await batch.commit();
+      console.log(`[ML Logistics] Saved ${count} mappings to Firestore.`);
+    }
+  } catch (err) {
+    console.error('[ML Logistics] Error saving mappings:', err.message);
+  }
+}
+
 function formatTimeBR(isoStr) {
   if (!isoStr) return '';
   try {
@@ -389,6 +412,9 @@ router.get('/orders/today', async (req, res, next) => {
         _createdTime: formatTimeBR(o.date_created),
       };
     });
+
+    // Salvar mapeamento de logística no Firestore para o Bling
+    saveOrderLogistics(enriched).catch(err => console.error('[today-orders] Error saving logistics:', err.message));
 
     const statusOrder = { imprimir: 0, expedir: 1, enviado: 2, cancelado: 3 };
     enriched.sort((a, b) =>
@@ -928,6 +954,9 @@ router.get('/dashboard', requireFirebaseAuth, async (req, res, next) => {
         orderId:      o.id,
       };
     });
+
+    // Salvar mapeamento de logística no Firestore para o Bling
+    saveOrderLogistics(orders).catch(err => console.error('[dashboard-orders] Error saving logistics:', err.message));
 
     const statusOrder = { imprimir: 0, expedir: 1, enviado: 2, cancelado: 3 };
     orders.sort((a, b) => (statusOrder[a._localStatus] ?? 9) - (statusOrder[b._localStatus] ?? 9));

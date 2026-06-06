@@ -101,6 +101,8 @@ function CutoffBanner({ cutoffSchedule, summary }) {
   const urgente  = minutes !== null && minutes >= 0 && minutes <= 90;
   const expirado = minutes !== null && minutes < 0;
 
+  if (expirado && pendentes === 0) return null;
+
   return (
     <div className={[
       'rounded-2xl border p-4 flex items-center gap-4 transition-all',
@@ -709,14 +711,14 @@ export function DashboardPage() {
               <ModalidadeCard
                 icon={Zap} label="Pedidos Flex" count={summary.flex || 0}
                 sub={(summary.flex || 0) > 0 ? 'Fila de separação Flex' : 'Zero pendências'}
-                href="/expedicao/pedidos" disabled={!summary.flex}
+                href="/expedicao/bling?canal=ml&filtro=flex" disabled={!summary.flex}
                 colors={{ border:'border-purple-500/20', bg:'bg-purple-500/5', iconBg:'bg-purple-500/15',
                           icon:'text-purple-400', count:'text-purple-300', action:'text-purple-400' }}
               />
               <ModalidadeCard
                 icon={Building2} label="Agência ML" count={summary.agency || 0}
                 sub={(summary.agency || 0) > 0 ? 'Bipar etiquetas' : 'Zero pendências'}
-                href="/expedicao/pedidos" disabled={!summary.agency}
+                href="/expedicao/bling?canal=ml&filtro=agency" disabled={!summary.agency}
                 colors={{ border:'border-blue-500/20', bg:'bg-blue-500/5', iconBg:'bg-blue-500/15',
                           icon:'text-blue-400', count:'text-blue-300', action:'text-blue-400' }}
               />

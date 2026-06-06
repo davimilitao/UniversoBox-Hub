@@ -140,6 +140,238 @@ function matchCanal(canalId, mkt) {
   }
 }
 
+async function saveSalesTelemetry(n, itemItens, tenantId) {
+  try {
+    const docId = `${tenantId}_${n.id}`;
+    const valorTotal = Number(n.valorNota || n.valorTotal || n.totalProdutos || 0);
+    const valorFrete = Number(n.valorFrete || n.transporte?.frete || 0);
+    const cidade = n.contato?.endereco?.municipio || n.contato?.endereco?.cidade || '';
+    const uf = n.contato?.endereco?.uf || '';
+
+    const dtStr = n.dataEmissao || '';
+    const dateOnly = dtStr.substring(0, 10);
+    let hora = 12; // padrão
+    let diaSemana = 1; // padrão (segunda)
+    
+    if (dtStr.includes(' ')) {
+      const timePart = dtStr.split(' ')[1];
+      if (timePart) {
+        const hPart = timePart.split(':')[0];
+        if (hPart) hora = parseInt(hPart, 10);
+      }
+    }
+    if (dateOnly) {
+      const parsedDate = new Date(dateOnly + 'T12:00:00');
+      diaSemana = parsedDate.getDay();
+    }
+
+    const reportData = {
+      id: String(n.id),
+      tenantId,
+      numero: String(n.numero),
+      dataEmissao: dtStr,
+      dateOnly,
+      hora,
+      diaSemana,
+      valorTotal,
+      valorFrete,
+      cidade,
+      uf,
+      marketplace: detectarMkt(n),
+      itens: itemItens,
+      updatedAtMs: Date.now()
+    };
+
+    await db.collection('sales_intelligence').doc(docId).set(reportData, { merge: true });
+  } catch (err) {
+    console.error(`[saveSalesTelemetry] Erro ao gravar BI para NFe ${n.id}:`, err.message);
+  }
+}
+
+async function enrichAndCacheNfe(nfeId, tenantId) {
+  const cacheDocId = `${tenantId}_${nfeId}`;
+
+  // Tentar ler do cache
+  try {
+    const cacheDoc = await db.collection('bling_nfe_cache').doc(cacheDocId).get();
+    if (cacheDoc.exists) {
+      const cacheData = cacheDoc.data();
+      if (cacheData.item && cacheData.item.detalhado && cacheData.item.valorTotal > 0) {
+        const item = cacheData.item;
+        const sitDesc = item.situacao || '';
+        const isDisponivel = sitDesc.toLowerCase().includes('autorizada') ||
+                             sitDesc.toLowerCase().includes('danfe') ||
+                             sitDesc.toLowerCase().includes('emitida') ||
+                             sitDesc.toLowerCase().includes('registrada');
+        if (isDisponivel) {
+          const nFake = {
+            id: item.id,
+            numero: item.numero,
+            dataEmissao: item.dataEmissao,
+            valorNota: item.valorTotal,
+            valorTotal: item.valorTotal,
+            contato: { nome: item.cliente?.nome, endereco: { uf: item.cliente?.uf || '' } }
+          };
+          saveSalesTelemetry(nFake, item.itens, tenantId).catch(err => 
+            console.error('[Telemetry] Error saving telemetry from cached NFe:', nfeId, err.message)
+          );
+        }
+        return item;
+      }
+    }
+  } catch (err) {
+    console.error(`[enrichAndCacheNfe] Cache read error for NFe ${nfeId}:`, err.message);
+  }
+
+  const resp = await blingFetch(`/nfe/${nfeId}`);
+  const n    = resp.data || resp;
+
+  const numeroPedido = n.numeroPedidoLoja || n.numeroPedido || null;
+  const mkt2         = detectarMkt(n);
+  const mlOrderId2   = (mkt2 === 'MERCADO_LIVRE' && numeroPedido) ? String(numeroPedido) : null;
+  const sitDesc      = getSituacaoDescricao(n.situacao);
+
+  const baseItens = (n.itens || []).map(it => ({
+    sku:   safeTrim(it.codigo || it.produto?.codigo || ''),
+    nome:  safeTrim(it.descricao || it.produto?.descricao || ''),
+    qty:   Number(it.quantidade ?? it.qty ?? 1),
+    preco: Number(it.valor ?? it.valorUnitario ?? 0),
+  }));
+
+  // Buscar imagens e preços de custo do catálogo local
+  const itensComImagens = await Promise.all(
+    baseItens.map(async it => {
+      let image = null;
+      let precoCusto = 0;
+      if (it.sku) {
+        try {
+          const pDoc = await db.collection('products').doc(it.sku).get();
+          if (pDoc.exists) {
+            const pData = pDoc.data();
+            image = pData.image || (pData.images && pData.images[0]) || null;
+            precoCusto = Number(pData.precoCusto || 0);
+          }
+        } catch (e) {
+          console.error(`[enrichAndCacheNfe] Erro ao buscar produto para SKU ${it.sku}:`, e.message);
+        }
+      }
+      return { ...it, image, precoCusto };
+    })
+  );
+
+  // Buscar dados reais do pedido de venda no Bling para obter tarifas
+  let realCommission = 0;
+  let realShipping = 0;
+  const orderNum = n.numeroPedidoLoja || n.numeroPedido;
+  if (orderNum) {
+    try {
+      const orderRes = await blingFetch(`/pedidos/vendas?numero=${orderNum}`);
+      const orders = orderRes.data || [];
+      if (orders.length > 0) {
+        const orderId = orders[0].id;
+        const orderDetailRes = await blingFetch(`/pedidos/vendas/${orderId}`);
+        const orderDetail = orderDetailRes.data || orderDetailRes;
+        realCommission = Number(orderDetail.desconto || 0);
+        realShipping = Number(orderDetail.valorFrete || orderDetail.transporte?.frete || 0);
+      }
+    } catch (e) {
+      console.error(`[enrichAndCacheNfe] Erro ao buscar pedido de venda (${orderNum}):`, e.message);
+    }
+  }
+
+  // Verificar se o mlOrderId tem mapeamento de logística no Firestore (do painel Mercado Livre)
+  let detectedLogistica = null;
+  if (mlOrderId2) {
+    try {
+      const logDoc = await db.collection('ml_order_logistics').doc(mlOrderId2).get();
+      if (logDoc.exists) {
+        detectedLogistica = logDoc.data().logistica || null;
+      }
+    } catch (e) {
+      console.error(`[enrichAndCacheNfe] Erro ao buscar logística ML para ${mlOrderId2}:`, e.message);
+    }
+  }
+
+  // Estimativas de comissão e frete
+  let expectedCommission = 0;
+  let expectedShipping = 16.15;
+  const valorTotalNF = Number(n.valorNota || n.valorTotal || n.totalProdutos || 0);
+
+  if (mkt2 === 'MERCADO_LIVRE') {
+    const rate = 0.165;
+    const fixed = valorTotalNF < 79 ? 6.00 : 0;
+    expectedCommission = Number((valorTotalNF * rate + fixed).toFixed(2));
+    expectedShipping = valorTotalNF >= 79 ? 23.65 : 0;
+  } else if (mkt2 === 'SHOPEE') {
+    expectedCommission = Number((valorTotalNF * 0.20).toFixed(2));
+    expectedShipping = 0;
+  } else if (mkt2 === 'MAGALU') {
+    expectedCommission = Number((valorTotalNF * 0.16).toFixed(2));
+    expectedShipping = valorTotalNF >= 79 ? 19.90 : 0;
+  } else if (mkt2 === 'TIKTOK') {
+    expectedCommission = Number((valorTotalNF * 0.15).toFixed(2));
+    expectedShipping = 0;
+  } else {
+    expectedCommission = Number((valorTotalNF * 0.15).toFixed(2));
+    expectedShipping = 0;
+  }
+
+  const aliquotaImposto = 0.072;
+  const impostoEstimado = Number((valorTotalNF * aliquotaImposto).toFixed(2));
+  const custoProdutos = itensComImagens.reduce((sum, it) => sum + (it.precoCusto * it.qty), 0);
+
+  const finalCommission = realCommission > 0 ? realCommission : expectedCommission;
+  const finalShipping = realShipping > 0 ? realShipping : expectedShipping;
+
+  const margemContribReal = Number((valorTotalNF - custoProdutos - finalCommission - finalShipping - impostoEstimado).toFixed(2));
+  const margemContribRealPct = valorTotalNF > 0 ? Number(((margemContribReal / valorTotalNF) * 100).toFixed(2)) : 0;
+  const temDivergencia = Math.abs(finalShipping - expectedShipping) > 1.00 || Math.abs(finalCommission - expectedCommission) > 1.00;
+
+  const item = {
+    id:           n.id,
+    numero:       n.numero,
+    numeroPedido,
+    mlOrderId:    mlOrderId2,
+    dataEmissao:  n.dataEmissao,
+    situacao:     sitDesc,
+    cliente:      { nome: n.contato?.nome || '', email: n.contato?.email || '' },
+    marketplace:  mkt2,
+    valorTotal:   valorTotalNF,
+    linkDanfe:    n.linkDanfe || null,
+    linkPDF:      n.linkPDF || null,
+    detalhado:    true,
+    itens:        itensComImagens,
+    logistica:    detectedLogistica,
+    financeiro: {
+      custoProdutos,
+      impostoEstimado,
+      expectedCommission,
+      expectedShipping,
+      realCommission: finalCommission,
+      realShipping: finalShipping,
+      margemContribReal,
+      margemContribRealPct,
+      temDivergencia
+    }
+  };
+
+  const isDisponivel = sitDesc.toLowerCase().includes('autorizada') ||
+                       sitDesc.toLowerCase().includes('danfe') ||
+                       sitDesc.toLowerCase().includes('emitida') ||
+                       sitDesc.toLowerCase().includes('registrada');
+
+  if (isDisponivel) {
+    // Gravação assíncrona do cache
+    db.collection('bling_nfe_cache').doc(cacheDocId).set({ item, cachedAt: Date.now() }, { merge: true })
+      .catch(err => console.error('[NfeCache] Erro ao salvar cache local:', err));
+
+    // Gravação da telemetria de BI
+    saveSalesTelemetry(n, item.itens, tenantId).catch(err => console.error('[Telemetry] Error saving telemetry:', err.message));
+  }
+
+  return item;
+}
+
 // ── STATUS ────────────────────────────────────────────────────────
 router.get('/status', async (req, res) => {
   try {
@@ -190,7 +422,7 @@ router.post('/disconnect', async (req, res) => {
 });
 
 // ── LISTAR NFs DO DIA ─────────────────────────────────────────────
-router.get('/pedidos', async (req, res, next) => {
+router.get('/pedidos', requireFirebaseAuth, async (req, res, next) => {
   try {
     const hoje    = new Date().toISOString().split('T')[0];
     const dataInicio = req.query.dataInicio || req.query.data || hoje;
@@ -236,6 +468,43 @@ router.get('/pedidos', async (req, res, next) => {
       items = items.filter(item => matchCanal(lojaFiltro, item.marketplace));
     }
 
+    // Consultar notas já importadas no Firestore em chunks de 30 IDs
+    const nfIds = items.map(it => String(it.id));
+    const importedMap = new Map();
+    if (nfIds.length > 0) {
+      const chunks = [];
+      for (let i = 0; i < nfIds.length; i += 30) {
+        chunks.push(nfIds.slice(i, i + 30));
+      }
+      for (const chunk of chunks) {
+        try {
+          const snap = await db.collection('orders')
+            .where('blingNfId', 'in', chunk)
+            .get();
+          snap.forEach(doc => {
+            const data = doc.data();
+            if (data.blingNfId) {
+              importedMap.set(String(data.blingNfId), {
+                clonado: true,
+                orderStatus: data.status || 'pending',
+                orderId: doc.id
+              });
+            }
+          });
+        } catch (err) {
+          console.error('[pedidos] Erro ao consultar orders no Firestore:', err.message);
+        }
+      }
+    }
+
+    items = items.map(it => {
+      const info = importedMap.get(String(it.id)) || { clonado: false, orderStatus: null, orderId: null };
+      return {
+        ...it,
+        ...info
+      };
+    });
+
     res.json({ items, total: items.length, dataInicio, dataFim });
   } catch(err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
@@ -253,194 +522,7 @@ router.get('/pedidos', async (req, res, next) => {
 router.get('/pedidos/:id', requireFirebaseAuth, async (req, res, next) => {
   try {
     const { tenantId } = req.auth;
-    const cacheDocId = `${tenantId}_${req.params.id}`;
-
-    // Tentar ler do cache
-    const cacheDoc = await db.collection('bling_nfe_cache').doc(cacheDocId).get();
-    if (cacheDoc.exists) {
-      const cacheData = cacheDoc.data();
-      if (cacheData.item && cacheData.item.detalhado && cacheData.item.valorTotal > 0) {
-        return res.json({ item: cacheData.item });
-      }
-    }
-
-    const resp = await blingFetch(`/nfe/${req.params.id}`);
-    const n    = resp.data || resp;
-
-    const numeroPedido = n.numeroPedidoLoja || n.numeroPedido || null;
-    const mkt2         = detectarMkt(n);
-    const mlOrderId2   = (mkt2 === 'MERCADO_LIVRE' && numeroPedido) ? String(numeroPedido) : null;
-    const sitDesc      = getSituacaoDescricao(n.situacao);
-
-    const baseItens = (n.itens || []).map(it => ({
-      sku:   safeTrim(it.codigo || it.produto?.codigo || ''),
-      nome:  safeTrim(it.descricao || it.produto?.descricao || ''),
-      qty:   Number(it.quantidade ?? it.qty ?? 1),
-      preco: Number(it.valor ?? it.valorUnitario ?? 0),
-    }));
-
-    // Buscar imagens e preços de custo do catálogo local (Firestore) em paralelo
-    const itensComImagens = await Promise.all(
-      baseItens.map(async it => {
-        let image = null;
-        let precoCusto = 0;
-        if (it.sku) {
-          try {
-            const pDoc = await db.collection('products').doc(it.sku).get();
-            if (pDoc.exists) {
-              const pData = pDoc.data();
-              image = pData.image || (pData.images && pData.images[0]) || null;
-              precoCusto = Number(pData.precoCusto || 0);
-            }
-          } catch (e) {
-            console.error(`[NfeDetail] Erro ao buscar produto para SKU ${it.sku}:`, e.message);
-          }
-        }
-        return { ...it, image, precoCusto };
-      })
-    );
-
-    // Buscar dados reais do pedido de venda no Bling para obter tarifas
-    let realCommission = 0;
-    let realShipping = 0;
-    const orderNum = n.numeroPedidoLoja || n.numeroPedido;
-    if (orderNum) {
-      try {
-        const orderRes = await blingFetch(`/pedidos/vendas?numero=${orderNum}`);
-        const orders = orderRes.data || [];
-        if (orders.length > 0) {
-          const orderId = orders[0].id;
-          const orderDetailRes = await blingFetch(`/pedidos/vendas/${orderId}`);
-          const orderDetail = orderDetailRes.data || orderDetailRes;
-          realCommission = Number(orderDetail.desconto || 0);
-          realShipping = Number(orderDetail.valorFrete || orderDetail.transporte?.frete || 0);
-        }
-      } catch (e) {
-        console.error(`[NfeDetail] Erro ao buscar pedido de venda (${orderNum}):`, e.message);
-      }
-    }
-
-    // Estimativas de comissão e frete com base nas regras do canal
-    let expectedCommission = 0;
-    let expectedShipping = 16.15;
-    const valorTotalNF = Number(n.valorNota || n.valorTotal || n.totalProdutos || 0);
-
-    if (mkt2 === 'MERCADO_LIVRE') {
-      const rate = 0.165;
-      const fixed = valorTotalNF < 79 ? 6.00 : 0;
-      expectedCommission = Number((valorTotalNF * rate + fixed).toFixed(2));
-      expectedShipping = valorTotalNF >= 79 ? 23.65 : 0;
-    } else if (mkt2 === 'SHOPEE') {
-      expectedCommission = Number((valorTotalNF * 0.20).toFixed(2));
-      expectedShipping = 0;
-    } else if (mkt2 === 'MAGALU') {
-      expectedCommission = Number((valorTotalNF * 0.16).toFixed(2));
-      expectedShipping = valorTotalNF >= 79 ? 19.90 : 0;
-    } else if (mkt2 === 'TIKTOK') {
-      expectedCommission = Number((valorTotalNF * 0.15).toFixed(2));
-      expectedShipping = 0;
-    } else {
-      expectedCommission = Number((valorTotalNF * 0.15).toFixed(2));
-      expectedShipping = 0;
-    }
-
-    const aliquotaImposto = 0.072;
-    const impostoEstimado = Number((valorTotalNF * aliquotaImposto).toFixed(2));
-    const custoProdutos = itensComImagens.reduce((sum, it) => sum + (it.precoCusto * it.qty), 0);
-
-    const finalCommission = realCommission > 0 ? realCommission : expectedCommission;
-    const finalShipping = realShipping > 0 ? realShipping : expectedShipping;
-
-    const margemContribReal = Number((valorTotalNF - custoProdutos - finalCommission - finalShipping - impostoEstimado).toFixed(2));
-    const margemContribRealPct = valorTotalNF > 0 ? Number(((margemContribReal / valorTotalNF) * 100).toFixed(2)) : 0;
-    const temDivergencia = Math.abs(finalShipping - expectedShipping) > 1.00 || Math.abs(finalCommission - expectedCommission) > 1.00;
-
-    const item = {
-      id:           n.id,
-      numero:       n.numero,
-      numeroPedido,
-      mlOrderId:    mlOrderId2,
-      dataEmissao:  n.dataEmissao,
-      situacao:     sitDesc,
-      cliente:      { nome: n.contato?.nome || '', email: n.contato?.email || '' },
-      marketplace:  mkt2,
-      valorTotal:   valorTotalNF,
-      linkDanfe:    n.linkDanfe || null,
-      linkPDF:      n.linkPDF || null,
-      detalhado:    true,
-      itens:        itensComImagens,
-      financeiro: {
-        custoProdutos,
-        impostoEstimado,
-        expectedCommission,
-        expectedShipping,
-        realCommission: finalCommission,
-        realShipping: finalShipping,
-        margemContribReal,
-        margemContribRealPct,
-        temDivergencia
-      }
-    };
-
-    // Coleta de dados da Inteligência de Vendas (BI) e Caching
-    const isDisponivel = sitDesc.toLowerCase().includes('autorizada') ||
-                         sitDesc.toLowerCase().includes('danfe') ||
-                         sitDesc.toLowerCase().includes('emitida') ||
-                         sitDesc.toLowerCase().includes('registrada');
-
-    if (isDisponivel) {
-      const docId = `${tenantId}_${n.id}`;
-
-      // Gravação assíncrona do cache
-      db.collection('bling_nfe_cache').doc(docId).set({ item, cachedAt: Date.now() }, { merge: true })
-        .catch(err => console.error('[NfeCache] Erro ao salvar cache local:', err));
-
-      // Parsing de valores e dados de destino
-      const valorTotal = valorTotalNF;
-      const valorFrete = Number(n.valorFrete || n.transporte?.frete || 0);
-      const cidade = n.contato?.endereco?.municipio || n.contato?.endereco?.cidade || '';
-      const uf = n.contato?.endereco?.uf || '';
-
-      // Parsing de datas e horários (sazonalidade)
-      const dtStr = n.dataEmissao || '';
-      const dateOnly = dtStr.substring(0, 10);
-      let hora = 12; // padrão
-      let diaSemana = 1; // padrão (segunda)
-      
-      if (dtStr.includes(' ')) {
-        const timePart = dtStr.split(' ')[1];
-        if (timePart) {
-          const hPart = timePart.split(':')[0];
-          if (hPart) hora = parseInt(hPart, 10);
-        }
-      }
-      if (dateOnly) {
-        const parsedDate = new Date(dateOnly + 'T12:00:00');
-        diaSemana = parsedDate.getDay();
-      }
-
-      const reportData = {
-        id: String(n.id),
-        tenantId,
-        numero: String(n.numero),
-        dataEmissao: dtStr,
-        dateOnly,
-        hora,
-        diaSemana,
-        valorTotal,
-        valorFrete,
-        cidade,
-        uf,
-        marketplace: mkt2,
-        itens: item.itens,
-        updatedAtMs: Date.now()
-      };
-
-      // Gravação assíncrona do BI
-      db.collection('sales_intelligence').doc(docId).set(reportData, { merge: true })
-        .catch(err => console.error('[SalesIntelligence] Erro ao salvar telemetria:', err));
-    }
-
+    const item = await enrichAndCacheNfe(req.params.id, tenantId);
     res.json({ item });
   } catch(err) {
     if (err.message === 'bling_not_authorized') return res.status(401).json({ error: 'bling_not_authorized' });
@@ -605,8 +687,9 @@ router.get('/debug/lista', async (req, res, next) => {
 });
 
 // ── CLONAR NF → CRIAR PEDIDO ─────────────────────────────────────
-router.post('/clonar', async (req, res, next) => {
+router.post('/clonar', requireFirebaseAuth, async (req, res, next) => {
   try {
+    const { tenantId } = req.auth;
     const { marketplace, itens, clienteNome, numeroPedido, mlOrderId, logistica } = req.body;
     const blingNfId = String(req.body.blingNfId || '').replace(/\D/g, '') || null;
 
@@ -693,6 +776,12 @@ router.post('/clonar', async (req, res, next) => {
       return { orderId };
     });
 
+    if (blingNfId) {
+      enrichAndCacheNfe(blingNfId, tenantId).catch(err => {
+        console.error(`[clonar] Erro ao enriquecer e gravar telemetria para NFe ${blingNfId}:`, err.message);
+      });
+    }
+
     res.json({ ok: true, orderId: result.orderId, skusFaltando, itensSemSku: itensSemSku.map(it=>it.nome), cartCount: cart.length });
   } catch(err) {
     console.error('[POST /bling/clonar]', err);
@@ -701,8 +790,9 @@ router.post('/clonar', async (req, res, next) => {
 });
 
 // ── CLONAR NFs EM LOTE ───────────────────────────────────────────
-router.post('/clonar-lote', async (req, res, next) => {
+router.post('/clonar-lote', requireFirebaseAuth, async (req, res, next) => {
   try {
+    const { tenantId } = req.auth;
     const { pedidos } = req.body;
     if (!Array.isArray(pedidos) || !pedidos.length) {
       return res.status(400).json({ error: 'Nenhum pedido enviado para clonagem.' });
@@ -810,6 +900,16 @@ router.post('/clonar-lote', async (req, res, next) => {
 
       return { createdOrders };
     });
+
+    if (result.createdOrders && result.createdOrders.length > 0) {
+      for (const item of result.createdOrders) {
+        if (item.blingNfId) {
+          enrichAndCacheNfe(item.blingNfId, tenantId).catch(err => {
+            console.error(`[clonar-lote] Erro ao enriquecer e gravar telemetria para NFe ${item.blingNfId}:`, err.message);
+          });
+        }
+      }
+    }
 
     res.json({ ok: true, createdCount: result.createdOrders.length, orders: result.createdOrders });
   } catch (err) {
