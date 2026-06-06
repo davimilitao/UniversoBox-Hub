@@ -80,11 +80,11 @@ export function FormLancarDespesa({ categorias, onSalvar, salvando }) {
         })
       });
 
-      if (!res || res.error) {
-        throw new Error(res?.error || 'Erro desconhecido ao ler com IA');
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Falha ao analisar com IA`);
       }
 
-      const data = res;
+      const data = await res.json();
       if (data.data) {
         set('data', data.data);
       }

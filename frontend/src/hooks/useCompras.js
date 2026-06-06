@@ -128,6 +128,17 @@ export function useCompras() {
         dados.totalBruto, n, dados.taxaJuros
       );
 
+      // Determina status inicial com base na previsão de entrega (retroativa = recebida)
+      let initialStatus = 'aberta';
+      if (dados.previsaoEntrega) {
+        const hojeComeco = new Date();
+        hojeComeco.setHours(0, 0, 0, 0);
+        const prevDate = new Date(dados.previsaoEntrega + 'T12:00:00');
+        if (prevDate.getTime() < hojeComeco.getTime()) {
+          initialStatus = 'recebida';
+        }
+      }
+
       // 1. Cabeçalho da compra
       const compraRef = await addDoc(collection(db, 'fin_compras'), {
         tenantId,
@@ -144,7 +155,9 @@ export function useCompras() {
         qtd:             dados.qtd || 0,
         custoUnitario:   dados.custoUnitario || 0,
         items:           dados.items || [], // Salva a lista de produtos importados
-        status:          'aberta',      // aberta | quitada
+        dataCompra:      dados.dataCompra || null,
+        previsaoEntrega: dados.previsaoEntrega || null,
+        status:          initialStatus,      // aberta | quitada | recebida
         createdAt:       serverTimestamp(),
       });
 
@@ -162,10 +175,13 @@ export function useCompras() {
 
       if (itemsToUpdate.length > 0) {
         try {
-          await apiFetch('/api/produtos/custos', {
+          const res = await apiFetch('/api/produtos/custos', {
             method: 'POST',
             body: JSON.stringify({ items: itemsToUpdate }),
           });
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: Falha ao atualizar custos`);
+          }
         } catch (apiErr) {
           console.error('[useCompras] Falha ao atualizar custos na API:', apiErr);
           // Não impede o lançamento principal de continuar caso a atualização opcional de custos falhe

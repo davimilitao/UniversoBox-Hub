@@ -75,17 +75,23 @@ export default function InteligenciaBI() {
       const params = new URLSearchParams({ dataInicio, dataFim });
       const res = await apiFetch(`/api/sales-intelligence/summary?${params}`);
       
-      setSummary(res.summary || {
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Falha ao carregar dados do BI`);
+      }
+      
+      const data = await res.json();
+      
+      setSummary(data.summary || {
         totalOrders: 0,
         totalRevenue: 0,
         totalFreight: 0,
         totalCost: 0,
         totalProfit: 0,
       });
-      setUfData(res.uf || []);
-      setChannelData(res.channel || []);
-      setHourData(res.hour || []);
-      setWeekdayData(res.weekday || []);
+      setUfData(data.uf || []);
+      setChannelData(data.channel || []);
+      setHourData(data.hour || []);
+      setWeekdayData(data.weekday || []);
     } catch (e) {
       console.error('[InteligenciaBI] load error:', e);
       setError(e.message || 'Erro ao carregar dados do BI.');

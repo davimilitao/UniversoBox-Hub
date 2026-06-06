@@ -399,6 +399,7 @@ function parsePastedText(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   let totalBruto = '';
   let dataCompra = '';
+  let previsaoEntrega = '';
   let numParcelas = '1';
   let descricao = '';
   let sku = '';
@@ -417,6 +418,19 @@ function parsePastedText(text) {
         const nextMatch = lines[i+1].match(/(\d{2})\/(\d{2})\/(\d{4})/);
         if (nextMatch) {
           dataCompra = `${nextMatch[3]}-${nextMatch[2]}-${nextMatch[1]}`;
+        }
+      }
+    }
+
+    // Previsão de entrega
+    if (line.includes('previsão de entrega') || line.includes('previsao de entrega')) {
+      const match = line.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      if (match) {
+        previsaoEntrega = `${match[3]}-${match[2]}-${match[1]}`;
+      } else if (i + 1 < lines.length) {
+        const nextMatch = lines[i+1].match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (nextMatch) {
+          previsaoEntrega = `${nextMatch[3]}-${nextMatch[2]}-${nextMatch[1]}`;
         }
       }
     }
@@ -536,6 +550,7 @@ function parsePastedText(text) {
     sku,
     qtd: totalQtd || '',
     dataCompra,
+    previsaoEntrega,
     items: uniqueProducts
   };
 }
@@ -593,6 +608,7 @@ function FormNovaCompra({ compras = [], meios, lancarCompra, saving, onSucesso }
     qtd: '', 
     avista: true,
     dataCompra: hojeISO(),
+    previsaoEntrega: '',
     items: []
   };
   const [f, setF] = useState(EMPTY);
@@ -643,10 +659,15 @@ function FormNovaCompra({ compras = [], meios, lancarCompra, saving, onSucesso }
         ? String(c.sku || '').toLowerCase() === String(f.sku || '').toLowerCase()
         : true;
         
-      const sameDate = f.dataCompra && c.createdAt
-        ? new Date(f.dataCompra + 'T12:00:00').toLocaleDateString('pt-BR') === 
-          (c.createdAt?.toDate ? c.createdAt.toDate().toLocaleDateString('pt-BR') : new Date(c.createdAt).toLocaleDateString('pt-BR'))
-        : true;
+      let compDateStr = '';
+      if (c.dataCompra) {
+        compDateStr = c.dataCompra;
+      } else if (c.createdAt) {
+        const dObj = c.createdAt.toDate ? c.createdAt.toDate() : new Date(c.createdAt);
+        compDateStr = `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`;
+      }
+      
+      const sameDate = f.dataCompra && compDateStr ? f.dataCompra === compDateStr : true;
         
       return sameFornecedor && sameTotal && sameSku && sameDate;
     });
@@ -683,6 +704,7 @@ function FormNovaCompra({ compras = [], meios, lancarCompra, saving, onSucesso }
         qtd: parsed.qtd || prev.qtd,
         meioId: bestCardId || prev.meioId,
         dataCompra: parsed.dataCompra || prev.dataCompra,
+        previsaoEntrega: parsed.previsaoEntrega || prev.previsaoEntrega,
         items: parsed.items || []
       }));
       
@@ -711,6 +733,7 @@ function FormNovaCompra({ compras = [], meios, lancarCompra, saving, onSucesso }
       totalBruto: total, numeroParcelas: f.avista ? 1 : n, taxaJuros: f.avista ? 0 : taxa,
       meioId: meio.id, meioNome: meio.nome, meioBandeira: meio.bandeira,
       diaVencimento: meio.diaVencimento || 10, dataPrimeiraParcela: dataPrimeiraParcela(),
+      dataCompra: f.dataCompra, previsaoEntrega: f.previsaoEntrega,
       sku: f.sku.trim(), qtd: parseInt(f.qtd) || 0, custoUnitario: parseFloat(custoUnit) || 0,
       items: itemsWithCosts.map(it => ({
         sku: it.sku,
@@ -956,8 +979,20 @@ export default function Contas() {
 
   const totalEstoqueAChegar = useMemo(() => {
     if (!compras) return 0;
+    const hojeComeco = new Date();
+    hojeComeco.setHours(0, 0, 0, 0);
+
     return compras
-      .filter(c => c.status === 'aberta')
+      .filter(c => {
+        if (c.status !== 'aberta') return false;
+        if (c.previsaoEntrega) {
+          const prevDate = new Date(c.previsaoEntrega + 'T12:00:00');
+          if (prevDate.getTime() < hojeComeco.getTime()) {
+            return false;
+          }
+        }
+        return true;
+      })
       .reduce((sum, c) => sum + (Number(c.qtd || 0) * Number(c.custoUnitario || 0)), 0);
   }, [compras]);
 
