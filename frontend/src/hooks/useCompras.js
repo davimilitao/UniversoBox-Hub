@@ -17,6 +17,7 @@ import {
   orderBy, serverTimestamp, Timestamp, writeBatch, where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { apiFetch } from '../utils/getAuthToken';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -147,19 +148,28 @@ export function useCompras() {
         createdAt:       serverTimestamp(),
       });
 
-      // Atualiza o custo unitário real de cada SKU no catálogo (products)
+      // Atualiza o custo unitário real de cada SKU no catálogo (products) via API
+      const itemsToUpdate = [];
       if (dados.items && dados.items.length > 0) {
-        const batchProd = writeBatch(db);
         dados.items.forEach(it => {
           if (it.sku && it.custoUnitario > 0) {
-            const prodRef = doc(db, 'products', it.sku);
-            batchProd.set(prodRef, { precoCusto: Number(it.custoUnitario) }, { merge: true });
+            itemsToUpdate.push({ sku: it.sku, custoUnitario: it.custoUnitario });
           }
         });
-        await batchProd.commit();
       } else if (dados.sku && dados.custoUnitario > 0) {
-        const prodRef = doc(db, 'products', dados.sku);
-        await updateDoc(prodRef, { precoCusto: Number(dados.custoUnitario) });
+        itemsToUpdate.push({ sku: dados.sku, custoUnitario: dados.custoUnitario });
+      }
+
+      if (itemsToUpdate.length > 0) {
+        try {
+          await apiFetch('/api/produtos/custos', {
+            method: 'POST',
+            body: JSON.stringify({ items: itemsToUpdate }),
+          });
+        } catch (apiErr) {
+          console.error('[useCompras] Falha ao atualizar custos na API:', apiErr);
+          // Não impede o lançamento principal de continuar caso a atualização opcional de custos falhe
+        }
       }
 
       // 2. Parcelas em batch

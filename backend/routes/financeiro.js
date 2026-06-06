@@ -477,5 +477,37 @@ router.get('/sales-intelligence/summary', requireFirebaseAuth, async (req, res, 
   }
 });
 
+// POST /api/produtos/custos — Atualiza o custo de produtos via Admin SDK (evita erro de permissão no Firestore)
+router.post('/produtos/custos', requireFirebaseAuth, async (req, res, next) => {
+  try {
+    const { items } = req.body;
+    if (!items || !items.length) {
+      return res.status(400).json({ error: 'Lista de itens vazia ou inválida' });
+    }
+
+    const batch = db.batch();
+    let count = 0;
+
+    items.forEach(it => {
+      const sku = String(it.sku || '').trim();
+      const cost = Number(it.custoUnitario || 0);
+      if (sku && cost >= 0) {
+        const prodRef = db.collection('products').doc(sku);
+        batch.set(prodRef, { precoCusto: cost }, { merge: true });
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+    }
+
+    res.json({ ok: true, count });
+  } catch (err) {
+    console.error('[POST /api/produtos/custos] Erro:', err);
+    next(err);
+  }
+});
+
 module.exports = router;
 
