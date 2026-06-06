@@ -22,17 +22,21 @@ function fmtWhats(despesas) {
 
 import { useState, useMemo } from 'react';
 
-export function TabelaDespesas({ despesas, isAdmin, onDelete, onDeleteCompra, onToggleStatus, onEdit }) {
+export function TabelaDespesas({ despesas, isAdmin, onDelete, onDeleteCompra, onToggleStatus, onEdit, highlightedId }) {
+  const [sortBy,       setSortBy]       = useState('lancamento'); // 'vencimento' | 'lancamento'
   const [ordem,        setOrdem]        = useState('desc');
   const [deletando,    setDeletando]    = useState(null);
   const [toggling,     setToggling]     = useState(null);
   const [selecionados, setSelecionados] = useState(new Set());
   const [copiado,      setCopiado]      = useState(false);
 
-  const sorted = useMemo(() =>
-    [...despesas].sort((a, b) => ordem === 'desc' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp),
-    [despesas, ordem]
-  );
+  const sorted = useMemo(() => {
+    return [...despesas].sort((a, b) => {
+      const valA = sortBy === 'lancamento' ? (a.timestampLancamento || a.timestamp || 0) : (a.timestamp || 0);
+      const valB = sortBy === 'lancamento' ? (b.timestampLancamento || b.timestamp || 0) : (b.timestamp || 0);
+      return ordem === 'desc' ? valB - valA : valA - valB;
+    });
+  }, [despesas, sortBy, ordem]);
 
   const totalSelecionado = useMemo(() => {
     return sorted
@@ -113,22 +117,49 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onDeleteCompra, on
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-white/5 text-left">
+              <tr className="border-b border-white/5 text-left text-slate-500 font-medium text-xs uppercase tracking-wider">
                 {/* Checkbox selecionar todos */}
                 <th className="px-3 py-3 w-10">
                   <input type="checkbox" checked={todosSelect} onChange={toggleTodos}
-                    className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer" />
+                    className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer rounded" />
                 </th>
-                <th className="px-4 py-3 text-slate-500 font-medium cursor-pointer select-none hover:text-slate-300 whitespace-nowrap"
-                  onClick={() => setOrdem(o => o === 'desc' ? 'asc' : 'desc')}>
+                
+                {/* Vencimento Column Header */}
+                <th className="px-4 py-3 cursor-pointer select-none hover:text-slate-300 whitespace-nowrap"
+                  onClick={() => {
+                    if (sortBy === 'vencimento') {
+                      setOrdem(o => o === 'desc' ? 'asc' : 'desc');
+                    } else {
+                      setSortBy('vencimento');
+                      setOrdem('desc');
+                    }
+                  }}>
                   <span className="flex items-center gap-1.5">
-                    <OrdemIcon size={13} className="text-emerald-500" /> Data
+                    {sortBy === 'vencimento' && <OrdemIcon size={12} className="text-emerald-500" />}
+                    Vencimento
                   </span>
                 </th>
-                <th className="px-4 py-3 text-slate-500 font-medium">Categoria</th>
-                <th className="px-4 py-3 text-slate-500 font-medium">Descrição</th>
-                <th className="px-4 py-3 text-slate-500 font-medium text-right">Valor</th>
-                <th className="px-4 py-3 text-slate-500 font-medium text-center">Status</th>
+
+                {/* Lançamento Column Header */}
+                <th className="px-4 py-3 cursor-pointer select-none hover:text-slate-300 whitespace-nowrap"
+                  onClick={() => {
+                    if (sortBy === 'lancamento') {
+                      setOrdem(o => o === 'desc' ? 'asc' : 'desc');
+                    } else {
+                      setSortBy('lancamento');
+                      setOrdem('desc');
+                    }
+                  }}>
+                  <span className="flex items-center gap-1.5">
+                    {sortBy === 'lancamento' && <OrdemIcon size={12} className="text-emerald-500" />}
+                    Lançamento
+                  </span>
+                </th>
+
+                <th className="px-4 py-3">Categoria</th>
+                <th className="px-4 py-3">Descrição</th>
+                <th className="px-4 py-3 text-right">Valor</th>
+                <th className="px-4 py-3 text-center">Status</th>
                 {isAdmin && <th className="px-4 py-3 w-10" />}
               </tr>
             </thead>
@@ -136,17 +167,23 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onDeleteCompra, on
               {sorted.map((d, i) => {
                 const isPago   = d.situacao?.toLowerCase().includes('pago');
                 const selected = selecionados.has(d.id);
+                const isHighlighted = highlightedId && (d.id === highlightedId || d.compraId === highlightedId);
                 return (
                   <tr key={i}
                     onClick={() => toggleItem(d.id)}
-                    className={`border-b border-white/5 last:border-0 cursor-pointer transition-colors group ${
-                      selected ? 'bg-emerald-500/[0.06]' : 'hover:bg-white/[0.02]'
+                    className={`border-b border-white/5 last:border-0 cursor-pointer transition-all duration-500 group ${
+                      selected
+                        ? 'bg-emerald-500/[0.06]'
+                        : isHighlighted
+                        ? 'bg-blue-500/[0.12] border-l-2 border-l-blue-500 shadow-md ring-1 ring-blue-500/20'
+                        : 'hover:bg-white/[0.02]'
                     }`}>
                     <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
                       <input type="checkbox" checked={selected} onChange={() => toggleItem(d.id)}
                         className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer" />
                     </td>
-                    <td className="px-4 py-3 text-slate-400 whitespace-nowrap font-mono text-xs">{d.data || '—'}</td>
+                    <td className="px-4 py-3 text-slate-300 whitespace-nowrap font-mono text-xs">{d.data || '—'}</td>
+                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap font-mono text-xs">{d.dataLancamento || d.data || '—'}</td>
                     <td className="px-4 py-3 text-slate-300 font-medium max-w-[180px]">
                       <div className="flex items-center gap-1.5 min-w-0">
                         {d.origem === 'parcela' ? (
@@ -157,7 +194,15 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onDeleteCompra, on
                         <span className="truncate">{d.nome || '—'}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-slate-500 max-w-[220px] truncate">{d.descricao || '—'}</td>
+                    <td className="px-4 py-3 text-slate-400 max-w-[220px]">
+                      <div className="truncate text-slate-300 font-medium" title={d.descricao}>{d.descricao || '—'}</div>
+                      {d.origem === 'parcela' && d.meioNome && (
+                        <div className="text-[10px] text-slate-500 mt-0.5 font-bold flex items-center gap-1.5 bg-slate-900/40 border border-white/[0.04] px-1.5 py-0.5 rounded w-max">
+                          <span className="text-blue-400">💳</span>
+                          <span className="uppercase tracking-wider font-sans">{d.meioNome}</span>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold text-slate-200 whitespace-nowrap tabular-nums">
                       {BRL.format(d.valor)}
                     </td>
@@ -201,7 +246,7 @@ export function TabelaDespesas({ despesas, isAdmin, onDelete, onDeleteCompra, on
             </tbody>
             <tfoot>
               <tr className="border-t border-white/10 bg-slate-900/50">
-                <td colSpan={4} className="px-4 py-3 text-slate-500 text-xs">
+                <td colSpan={5} className="px-4 py-3 text-slate-500 text-xs">
                   {sorted.length} lançamento{sorted.length !== 1 ? 's' : ''}
                   {selecionados.size > 0 && (
                     <span className="ml-2 text-emerald-400 font-bold">

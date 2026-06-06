@@ -642,7 +642,7 @@ function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
       diaVencimento: meio.diaVencimento || 10, dataPrimeiraParcela: dataPrimeiraParcela(),
       sku: f.sku.trim(), qtd: parseInt(f.qtd) || 0, custoUnitario: parseFloat(custoUnit) || 0,
     });
-    if (result.ok) { setOk(true); setF(EMPTY); setTimeout(() => { setOk(false); onSucesso?.(); }, 1500); }
+    if (result.ok) { setOk(true); setF(EMPTY); setTimeout(() => { setOk(false); onSucesso?.(result.compraId); }, 1500); }
     else setErro(result.error || 'Erro ao lançar compra');
   }
 
@@ -805,6 +805,7 @@ export default function Contas() {
   const [editingItem, setEditingItem] = useState(null);
   const [origemFiltro, setOrigemFiltro] = useState('all'); // 'all' | 'despesa' | 'parcela'
   const [mostrarCharts, setMostrarCharts] = useState(false);
+  const [highlightedId, setHighlightedId] = useState(null);
 
   const { parcelas, loading, saving, lancarCompra, marcarPago, desfazerPagamento, reload } = useCompras();
   const { meios, loading: loadingMeios } = useMeiosPagamento();
@@ -823,27 +824,40 @@ export default function Contas() {
   // Normalização de dados
   const normalizedDespesas = useMemo(() => {
     if (!despesas) return [];
-    return despesas.map(d => ({
-      ...d,
-      origem: 'despesa',
-      data: d.data, // string "DD/MM/YYYY"
-      timestamp: d.timestamp, // numeric ts
-      situacao: d.situacao, // 'pago' / 'pendente'
-      tipo: d.tipo || 'operacional',
-    }));
+    return despesas.map(d => {
+      const createdDate = tsToDate(d.createdAt || d.data); // fallback se não tiver
+      const createdString = createdDate ? createdDate.toLocaleDateString('pt-BR') : '';
+      const vencDate = tsToDate(d.data);
+      const vencString = vencDate ? vencDate.toLocaleDateString('pt-BR') : '';
+      return {
+        ...d,
+        origem: 'despesa',
+        data: vencString, // data de vencimento
+        dataLancamento: createdString, // data de criação
+        timestamp: vencDate ? vencDate.getTime() : 0,
+        timestampLancamento: createdDate ? createdDate.getTime() : 0,
+        situacao: d.situacao, // 'pago' / 'pendente'
+        tipo: d.tipo || 'operacional',
+        nome: d.fornecedor || 'Despesa',
+      };
+    });
   }, [despesas]);
 
   const normalizedParcelas = useMemo(() => {
     if (!parcelas) return [];
     return parcelas.map(p => {
       const vencDate = tsToDate(p.vencimento);
-      const dataString = vencDate ? vencDate.toLocaleDateString('pt-BR') : '';
+      const vencString = vencDate ? vencDate.toLocaleDateString('pt-BR') : '';
+      const createdDate = tsToDate(p.createdAt);
+      const createdString = createdDate ? createdDate.toLocaleDateString('pt-BR') : '';
       const labelParcela = p.totalParcelas > 1 ? ` (${p.numeroParcela}/${p.totalParcelas}x)` : '';
       return {
         id: p.id,
         compraId: p.compraId,
-        data: dataString,
+        data: vencString, // data de vencimento
+        dataLancamento: createdString || vencString, // data de criação
         timestamp: vencDate ? vencDate.getTime() : 0,
+        timestampLancamento: createdDate ? createdDate.getTime() : (vencDate ? vencDate.getTime() : 0),
         tipo: 'investimento',
         categoria: p.meioNome || 'Compra',
         nome: p.fornecedor || 'Compra',
@@ -853,6 +867,7 @@ export default function Contas() {
         situacao: p.status || 'pendente',
         origem: 'parcela',
         meioId: p.meioId || '',
+        meioNome: p.meioNome || '',
       };
     });
   }, [parcelas]);
@@ -963,7 +978,12 @@ export default function Contas() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
       setAba('contas');
+      if (data && data.id) {
+        setHighlightedId(data.id);
+        setTimeout(() => setHighlightedId(null), 8000);
+      }
     } catch (err) {
       alert(`Erro ao lançar despesa: ${err.message}`);
     } finally {
@@ -1198,6 +1218,7 @@ export default function Contas() {
                 onDelete={(id) => handleDeleteUnified(id, 'despesa')}
                 onDeleteCompra={handleDeleteCompra}
                 onEdit={setEditingItem}
+                highlightedId={highlightedId}
               />
             )}
           </div>
@@ -1246,7 +1267,14 @@ export default function Contas() {
                   </button>
                 </div>
               ) : (
-                <FormNovaCompra meios={meios} lancarCompra={lancarCompra} saving={saving} onSucesso={() => { setAba('contas'); reload(); }} />
+                <FormNovaCompra meios={meios} lancarCompra={lancarCompra} saving={saving} onSucesso={(compraId) => {
+                  setAba('contas');
+                  reload();
+                  if (compraId) {
+                    setHighlightedId(compraId);
+                    setTimeout(() => setHighlightedId(null), 8000);
+                  }
+                }} />
               )
             )}
           </div>
