@@ -149,10 +149,17 @@ export function useCompras() {
       // 2. Parcelas em batch
       const batch = writeBatch(db);
       const mesBase = dados.dataPrimeiraParcela || new Date();
+      const hojeComeco = new Date();
+      hojeComeco.setHours(0, 0, 0, 0);
 
       for (let i = 0; i < n; i++) {
         const valor = i === n - 1 ? +(valorBase + resto).toFixed(2) : valorBase;
         const venc  = calcVencimento(dados.diaVencimento, mesBase, i);
+        
+        // Verifica se a parcela já venceu
+        const vencDate = venc.toDate();
+        const jaVenceu = vencDate.getTime() < hojeComeco.getTime();
+        
         const pRef  = doc(collection(db, 'fin_parcelas'));
         batch.set(pRef, {
           tenantId,
@@ -166,9 +173,9 @@ export function useCompras() {
           totalParcelas:  n,
           valor,
           vencimento:     venc,
-          status:         'pendente',   // pendente | pago | cancelado
+          status:         jaVenceu ? 'pago' : 'pendente',   // pendente | pago | cancelado
           comprovante:    null,
-          paidAt:         null,
+          paidAt:         jaVenceu ? venc : null,
           createdAt:      serverTimestamp(),
         });
       }

@@ -569,7 +569,7 @@ function findBestCard(text, meios) {
 }
 
 // ─── Formulário Nova Compra (com Lançamento Inteligente) ──────────────────────
-function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
+function FormNovaCompra({ compras = [], meios, lancarCompra, saving, onSucesso }) {
   const EMPTY = { 
     fornecedor: '', 
     descricao: '', 
@@ -600,6 +600,27 @@ function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
     () => total > 0 ? calcParcelas(total, n, taxa) : { totalComJuros: 0, valorBase: 0 },
     [total, n, taxa]
   );
+
+  // Lógica de Detecção de Duplicados
+  const isDuplicate = useMemo(() => {
+    if (!f.fornecedor.trim() || !total) return false;
+    
+    return compras.some(c => {
+      const sameFornecedor = String(c.fornecedor || '').toLowerCase() === String(f.fornecedor || '').toLowerCase();
+      const sameTotal = Number(c.totalBruto || 0).toFixed(2) === Number(total || 0).toFixed(2);
+      
+      const sameSku = f.sku.trim() 
+        ? String(c.sku || '').toLowerCase() === String(f.sku || '').toLowerCase()
+        : true;
+        
+      const sameDate = f.dataCompra && c.createdAt
+        ? new Date(f.dataCompra + 'T12:00:00').toLocaleDateString('pt-BR') === 
+          (c.createdAt?.toDate ? c.createdAt.toDate().toLocaleDateString('pt-BR') : new Date(c.createdAt).toLocaleDateString('pt-BR'))
+        : true;
+        
+      return sameFornecedor && sameTotal && sameSku && sameDate;
+    });
+  }, [f.fornecedor, total, f.sku, f.dataCompra, compras]);
 
   const custoUnit = total > 0 && parseInt(f.qtd) > 0 ? (total / parseInt(f.qtd)).toFixed(2) : '';
 
@@ -646,6 +667,14 @@ function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
     if (!f.fornecedor.trim()) { setErro('Informe o fornecedor'); return; }
     if (!total || total <= 0) { setErro('Valor total inválido'); return; }
     if (!f.meioId)            { setErro('Selecione o meio de pagamento'); return; }
+    
+    if (isDuplicate) {
+      const confirmSave = window.confirm(
+        `Aviso: Já existe uma compra cadastrada para "${f.fornecedor}" no valor de ${brl(total)}. Deseja cadastrar outra cópia mesmo assim?`
+      );
+      if (!confirmSave) return;
+    }
+
     const result = await lancarCompra({
       fornecedor: f.fornecedor.trim(), descricao: f.descricao.trim(),
       totalBruto: total, numeroParcelas: f.avista ? 1 : n, taxaJuros: f.avista ? 0 : taxa,
@@ -794,6 +823,12 @@ function FormNovaCompra({ meios, lancarCompra, saving, onSucesso }) {
             </div></div>
         </div>
       </div>
+      {isDuplicate && (
+        <div className="flex items-center gap-2 text-yellow-400 text-xs bg-yellow-500/[0.05] border border-yellow-500/10 rounded-xl px-4 py-3 animate-pulse">
+          <AlertTriangle size={14} className="shrink-0 text-yellow-400" />
+          <span><strong>Possível Duplicidade:</strong> Já existe uma compra com este mesmo fornecedor, valor e data cadastrada no sistema.</span>
+        </div>
+      )}
       {erro && (
         <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
           <AlertTriangle size={14} className="shrink-0" /> {erro}
@@ -1406,7 +1441,7 @@ export default function Contas() {
                   </button>
                 </div>
               ) : (
-                <FormNovaCompra meios={meios} lancarCompra={lancarCompra} saving={saving} onSucesso={(compraId) => {
+                <FormNovaCompra compras={compras} meios={meios} lancarCompra={lancarCompra} saving={saving} onSucesso={(compraId) => {
                   setAba('contas');
                   reload();
                   if (compraId) {
