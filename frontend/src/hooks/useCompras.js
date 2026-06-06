@@ -142,9 +142,25 @@ export function useCompras() {
         sku:             dados.sku || '',
         qtd:             dados.qtd || 0,
         custoUnitario:   dados.custoUnitario || 0,
+        items:           dados.items || [], // Salva a lista de produtos importados
         status:          'aberta',      // aberta | quitada
         createdAt:       serverTimestamp(),
       });
+
+      // Atualiza o custo unitário real de cada SKU no catálogo (products)
+      if (dados.items && dados.items.length > 0) {
+        const batchProd = writeBatch(db);
+        dados.items.forEach(it => {
+          if (it.sku && it.custoUnitario > 0) {
+            const prodRef = doc(db, 'products', it.sku);
+            batchProd.set(prodRef, { precoCusto: Number(it.custoUnitario) }, { merge: true });
+          }
+        });
+        await batchProd.commit();
+      } else if (dados.sku && dados.custoUnitario > 0) {
+        const prodRef = doc(db, 'products', dados.sku);
+        await updateDoc(prodRef, { precoCusto: Number(dados.custoUnitario) });
+      }
 
       // 2. Parcelas em batch
       const batch = writeBatch(db);

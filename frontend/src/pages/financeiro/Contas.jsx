@@ -469,6 +469,7 @@ function parsePastedText(text) {
       }
       
       let currentQty = 1;
+      let unitPrice = 0;
       let productName = '';
       
       // Procura nome do produto subindo
@@ -482,23 +483,33 @@ function parsePastedText(text) {
         nameIdx--;
       }
 
-      // Procura quantidade
-      for (let offset = -3; offset <= 3; offset++) {
-        if (i + offset >= 0 && i + offset < lines.length) {
-          const mQty = lines[i + offset].match(/^(\d+)x$/);
-          if (mQty) {
-            currentQty = parseInt(mQty[1]);
-            break;
-          }
+      // Procura quantidade e preço unitário descendo
+      let searchIdx = i + 1;
+      while (searchIdx < Math.min(lines.length, i + 6)) {
+        const nextLine = lines[searchIdx].trim();
+        const qtyMatch = nextLine.toLowerCase().match(/^(\d+)x$/);
+        if (qtyMatch) {
+          currentQty = parseInt(qtyMatch[1]);
         }
+        
+        const priceMatch = nextLine.match(/R\$\s*([\d.,]+)/i);
+        if (priceMatch) {
+          unitPrice = parseFloat(priceMatch[1].replace(/\./g, '').replace(',', '.'));
+        }
+        searchIdx++;
       }
 
-      productsFound.push({ sku: currentSku, name: productName || 'Produto', qty: currentQty });
+      productsFound.push({ 
+        sku: currentSku, 
+        name: productName || 'Produto', 
+        qty: currentQty,
+        price: unitPrice 
+      });
     }
   }
 
+  const uniqueProducts = [];
   if (productsFound.length > 0) {
-    const uniqueProducts = [];
     productsFound.forEach(p => {
       if (!uniqueProducts.find(u => u.sku === p.sku)) {
         uniqueProducts.push(p);
@@ -525,6 +536,7 @@ function parsePastedText(text) {
     sku,
     qtd: totalQtd || '',
     dataCompra,
+    items: uniqueProducts
   };
 }
 
@@ -580,7 +592,8 @@ function FormNovaCompra({ compras = [], meios, lancarCompra, saving, onSucesso }
     sku: '', 
     qtd: '', 
     avista: true,
-    dataCompra: hojeISO()
+    dataCompra: hojeISO(),
+    items: []
   };
   const [f, setF] = useState(EMPTY);
   const [erro, setErro] = useState('');
@@ -600,6 +613,23 @@ function FormNovaCompra({ compras = [], meios, lancarCompra, saving, onSucesso }
     () => total > 0 ? calcParcelas(total, n, taxa) : { totalComJuros: 0, valorBase: 0 },
     [total, n, taxa]
   );
+
+  // Rateio proporcional dos custos reais dos itens com base no total totalBruto
+  const itemsWithCosts = useMemo(() => {
+    if (!f.items || f.items.length === 0) return [];
+    
+    // Calcula o valor total base dos produtos somados (sem impostos)
+    const totalBaseProducts = f.items.reduce((sum, item) => sum + (item.qty * (item.price || 0)), 0);
+    if (totalBaseProducts === 0) return f.items.map(it => ({ ...it, custoUnitario: 0 }));
+    
+    // Proporção de imposto/frete/desconto
+    const ratio = total / totalBaseProducts;
+    
+    return f.items.map(item => ({
+      ...item,
+      custoUnitario: parseFloat(((item.price || 0) * ratio).toFixed(2))
+    }));
+  }, [f.items, total]);
 
   // Lógica de Detecção de Duplicados
   const isDuplicate = useMemo(() => {
@@ -653,6 +683,7 @@ function FormNovaCompra({ compras = [], meios, lancarCompra, saving, onSucesso }
         qtd: parsed.qtd || prev.qtd,
         meioId: bestCardId || prev.meioId,
         dataCompra: parsed.dataCompra || prev.dataCompra,
+        items: parsed.items || []
       }));
       
       setShowSmartPaste(false);
@@ -681,6 +712,12 @@ function FormNovaCompra({ compras = [], meios, lancarCompra, saving, onSucesso }
       meioId: meio.id, meioNome: meio.nome, meioBandeira: meio.bandeira,
       diaVencimento: meio.diaVencimento || 10, dataPrimeiraParcela: dataPrimeiraParcela(),
       sku: f.sku.trim(), qtd: parseInt(f.qtd) || 0, custoUnitario: parseFloat(custoUnit) || 0,
+      items: itemsWithCosts.map(it => ({
+        sku: it.sku,
+        name: it.name,
+        qty: it.qty,
+        custoUnitario: it.custoUnitario
+      }))
     });
     if (result.ok) { setOk(true); setF(EMPTY); setTimeout(() => { setOk(false); onSucesso?.(result.compraId); }, 1500); }
     else setErro(result.error || 'Erro ao lançar compra');
@@ -810,18 +847,52 @@ function FormNovaCompra({ compras = [], meios, lancarCompra, saving, onSucesso }
       </div>
       <div className="bg-slate-900 border border-white/[0.05] rounded-2xl p-4 space-y-3">
         <div className="flex items-center gap-2 text-[10px] text-blue-400">
-          <BarChart2 size={12} /> <span className="font-bold uppercase tracking-wider">Opcional: Integração com Margem</span>
+          <BarChart2 size={12} /> <span className="font-bold uppercase tracking-wider">Integração de Margem & Custos de Produtos</span>
         </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div><p className={lbl}>SKU do produto</p>
-            <input className={inp} placeholder="Ex: BUBA-01" value={f.sku} onChange={e => setF(p => ({...p, sku: e.target.value}))} /></div>
-          <div><p className={lbl}>Quantidade</p>
-            <input className={inp} type="number" min="1" placeholder="0" value={f.qtd} onChange={e => setF(p => ({...p, qtd: e.target.value}))} /></div>
-          <div><p className={lbl}>Custo unitário</p>
-            <div className={`${inp} flex items-center text-emerald-400 font-mono cursor-not-allowed`}>
-              {custoUnit ? `R$ ${custoUnit}` : <span className="text-slate-700">automático</span>}
-            </div></div>
-        </div>
+        
+        {itemsWithCosts.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-[10px] text-slate-500 mb-2 leading-relaxed">
+              Múltiplos produtos detectados. Os impostos e custos adicionais foram rateados proporcionalmente com base nos valores base:
+            </p>
+            <div className="border border-white/5 rounded-xl overflow-hidden bg-slate-950/40">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-white/5 bg-slate-900/60 text-slate-400 font-bold">
+                    <th className="p-2">Produto / SKU</th>
+                    <th className="p-2 text-center">Qtd</th>
+                    <th className="p-2 text-right">Preço Base</th>
+                    <th className="p-2 text-right text-emerald-400">Custo Real (c/ Impostos)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5 font-mono text-[11px] text-slate-300">
+                  {itemsWithCosts.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-white/[0.02]">
+                      <td className="p-2 max-w-[200px] truncate font-sans">
+                        <span className="font-bold text-white block">{item.sku}</span>
+                        <span className="text-slate-500 text-[10px] truncate block">{item.name}</span>
+                      </td>
+                      <td className="p-2 text-center">{item.qty} un</td>
+                      <td className="p-2 text-right">{brl(item.price)}</td>
+                      <td className="p-2 text-right font-bold text-emerald-400">{brl(item.custoUnitario)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-3">
+            <div><p className={lbl}>SKU do produto</p>
+              <input className={inp} placeholder="Ex: BUBA-01" value={f.sku} onChange={e => setF(p => ({...p, sku: e.target.value}))} /></div>
+            <div><p className={lbl}>Quantidade</p>
+              <input className={inp} type="number" min="1" placeholder="0" value={f.qtd} onChange={e => setF(p => ({...p, qtd: e.target.value}))} /></div>
+            <div><p className={lbl}>Custo unitário</p>
+              <div className={`${inp} flex items-center text-emerald-400 font-mono cursor-not-allowed`}>
+                {custoUnit ? `R$ ${custoUnit}` : <span className="text-slate-700">automático</span>}
+              </div></div>
+          </div>
+        )}
       </div>
       {isDuplicate && (
         <div className="flex items-center gap-2 text-yellow-400 text-xs bg-yellow-500/[0.05] border border-yellow-500/10 rounded-xl px-4 py-3 animate-pulse">
