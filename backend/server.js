@@ -61,6 +61,8 @@ setupTenantProvisioningRoutes(app, db);
 // ---------------- Static (public) ----------------
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SPA_DIR = path.join(PUBLIC_DIR, 'spa');
+const SPA_ASSETS_DIR = path.join(SPA_DIR, 'assets');
+
 // SPA React — serve os assets buildados
 app.use('/spa', express.static(SPA_DIR, {
   setHeaders: (res, filePath) => {
@@ -69,6 +71,8 @@ app.use('/spa', express.static(SPA_DIR, {
     }
   }
 }));
+
+app.use('/assets', express.static(SPA_ASSETS_DIR));
 
 app.get('/spa/*', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');

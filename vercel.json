@@ -9,6 +9,7 @@
     { "source": "/orders/(.*)", "destination": "/api/index.js" },
     { "source": "/admin/(.*)", "destination": "/api/index.js" },
     { "source": "/health", "destination": "/api/index.js" },
+    { "source": "/spa/assets/(.*)", "destination": "/assets/$1" },
     { "source": "/spa/(.*)", "destination": "/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
