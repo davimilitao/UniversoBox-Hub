@@ -1568,10 +1568,14 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: err.message || 'internal_error', status });
 });
 
-app.listen(PORT, () => {
-  console.log(`[expedicao-pro] backend listening on :${PORT}`);
-  console.log(`[expedicao-pro] CORS_ORIGIN=${CORS_ORIGIN}`);
-  console.log(`[expedicao-pro] LOCK_TTL_MS=${LOCK_TTL_MS}`);
-  console.log(`[expedicao-pro] serving public from: ${PUBLIC_DIR}`);
-  console.log(`[expedicao-pro] serving uploads from: ${UPLOADS_DIR}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`[expedicao-pro] backend listening on :${PORT}`);
+    console.log(`[expedicao-pro] CORS_ORIGIN=${CORS_ORIGIN}`);
+    console.log(`[expedicao-pro] LOCK_TTL_MS=${LOCK_TTL_MS}`);
+    console.log(`[expedicao-pro] serving public from: ${PUBLIC_DIR}`);
+    console.log(`[expedicao-pro] serving uploads from: ${UPLOADS_DIR}`);
+  });
+}
+
+module.exports = app;

@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 // prod → base '/spa/'  → Railway serve em /spa/
 export default defineConfig(({ command }) => ({
   plugins: [react()],
-  base: command === 'build' ? '/spa/' : '/',
+  base: process.env.VITE_BASE || '/',
   build: {
     outDir: '../backend/public/spa',
     emptyOutDir: true,

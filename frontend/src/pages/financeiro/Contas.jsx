@@ -18,7 +18,7 @@ import { useMeiosPagamento } from '../../hooks/useMeiosPagamento';
 import MeiosPagamento from './components/MeiosPagamento';
 import { isFirebaseClientReady } from '../../firebase';
 
-import { useFinDespesas, computarStatusEfetivo, extrairMesesFin, labelMesAnoTs } from '../../hooks/useFinDespesas';
+import { useFinDespesas, computarStatusEfetivo, extrairMesesFin, labelMesAnoTs, parseAnyDate } from '../../hooks/useFinDespesas';
 import { FiltrosBar } from './components/FiltrosBar';
 import { ResumoCards } from './components/ResumoCards';
 import { GraficoBarras } from './components/GraficoBarras';
@@ -47,8 +47,7 @@ const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' 
 function brl(v) { return BRL.format(v || 0); }
 
 function tsToDate(ts) {
-  if (!ts) return null;
-  return ts?.toDate?.() ?? new Date(ts);
+  return parseAnyDate(ts);
 }
 function fmtData(ts)      { const d = tsToDate(ts); return d ? d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
 function fmtDataCurta(ts) { const d = tsToDate(ts); return d ? d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '—'; }
