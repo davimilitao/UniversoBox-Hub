@@ -252,12 +252,10 @@ app.get('/health', (req, res) => {
 });
 
 // ================================================================
-// SEARCH LAYER — preparado para Typesense (sprint 2)
-// Hoje usa Firestore. Quando Typesense estiver pronto, basta
-// implementar searchViaTypesense() e trocar a flag USE_TYPESENSE.
-// A interface de entrada/saída desta rota não muda.
+// SEARCH LAYER — 100% Gratuito via Firestore Nativo
+// Busca integrada no Firestore para operar a custo zero na Vercel
 // ================================================================
-const USE_TYPESENSE = !!process.env.TYPESENSE_HOST;
+const USE_TYPESENSE = false;
 
 async function searchViaTypesense(q) {
   const { TypesenseClient } = require('./search/typesense-client');
